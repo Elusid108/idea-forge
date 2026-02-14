@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useLocation, Link } from "react-router-dom";
-import { Lightbulb, Brain, Wrench, ChevronRight, Plus, LogOut, User } from "lucide-react";
+import { Lightbulb, Brain, Wrench, ChevronRight, Plus, LogOut, User, Trash2 } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
 import { NavLink } from "@/components/NavLink";
 import {
@@ -102,6 +102,23 @@ export function AppSidebar() {
             </SidebarGroup>
           </Collapsible>
         ))}
+        <SidebarGroup>
+          <SidebarGroupContent>
+            <SidebarMenu>
+              <SidebarMenuItem>
+                <SidebarMenuButton asChild>
+                  <NavLink
+                    to="/trash"
+                    className="text-sm text-sidebar-foreground hover:bg-sidebar-accent"
+                    activeClassName="bg-sidebar-accent text-primary font-medium"
+                  >
+                    <Trash2 className="h-4 w-4 mr-2" /> Trash
+                  </NavLink>
+                </SidebarMenuButton>
+              </SidebarMenuItem>
+            </SidebarMenu>
+          </SidebarGroupContent>
+        </SidebarGroup>
       </SidebarContent>
 
       <SidebarFooter className="border-t border-sidebar-border p-3">

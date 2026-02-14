@@ -67,6 +67,7 @@ export type Database = {
           chat_history: Json | null
           compiled_description: string | null
           created_at: string
+          deleted_at: string | null
           id: string
           idea_id: string | null
           status: string
@@ -79,6 +80,7 @@ export type Database = {
           chat_history?: Json | null
           compiled_description?: string | null
           created_at?: string
+          deleted_at?: string | null
           id?: string
           idea_id?: string | null
           status?: string
@@ -91,6 +93,7 @@ export type Database = {
           chat_history?: Json | null
           compiled_description?: string | null
           created_at?: string
+          deleted_at?: string | null
           id?: string
           idea_id?: string | null
           status?: string
@@ -112,6 +115,7 @@ export type Database = {
         Row: {
           category: string | null
           created_at: string
+          deleted_at: string | null
           id: string
           key_features: string | null
           processed_summary: string | null
@@ -125,6 +129,7 @@ export type Database = {
         Insert: {
           category?: string | null
           created_at?: string
+          deleted_at?: string | null
           id?: string
           key_features?: string | null
           processed_summary?: string | null
@@ -138,6 +143,7 @@ export type Database = {
         Update: {
           category?: string | null
           created_at?: string
+          deleted_at?: string | null
           id?: string
           key_features?: string | null
           processed_summary?: string | null
@@ -219,6 +225,7 @@ export type Database = {
         Row: {
           brainstorm_id: string | null
           created_at: string
+          deleted_at: string | null
           general_notes: string | null
           github_repo_url: string | null
           id: string
@@ -230,6 +237,7 @@ export type Database = {
         Insert: {
           brainstorm_id?: string | null
           created_at?: string
+          deleted_at?: string | null
           general_notes?: string | null
           github_repo_url?: string | null
           id?: string
@@ -241,6 +249,7 @@ export type Database = {
         Update: {
           brainstorm_id?: string | null
           created_at?: string
+          deleted_at?: string | null
           general_notes?: string | null
           github_repo_url?: string | null
           id?: string

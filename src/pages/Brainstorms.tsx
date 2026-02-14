@@ -20,6 +20,7 @@ export default function BrainstormsPage() {
       const { data, error } = await supabase
         .from("brainstorms")
         .select("*, ideas(processed_summary, raw_dump), brainstorm_references(id)")
+        .is("deleted_at", null)
         .order("created_at", { ascending: false });
       if (error) throw error;
       return data;
