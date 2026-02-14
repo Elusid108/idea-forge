@@ -10,6 +10,7 @@ import LoginPage from "@/pages/Login";
 import SignupPage from "@/pages/Signup";
 import IdeasPage from "@/pages/Ideas";
 import BrainstormsPage from "@/pages/Brainstorms";
+import BrainstormWorkspace from "@/pages/BrainstormWorkspace";
 import ProjectsPage from "@/pages/Projects";
 import NotFound from "@/pages/NotFound";
 
@@ -51,6 +52,16 @@ const App = () => (
                 <ProtectedRoute>
                   <AppLayout>
                     <BrainstormsPage />
+                  </AppLayout>
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/brainstorms/:id"
+              element={
+                <ProtectedRoute>
+                  <AppLayout>
+                    <BrainstormWorkspace />
                   </AppLayout>
                 </ProtectedRoute>
               }

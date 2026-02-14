@@ -1,11 +1,12 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { Plus, Lightbulb, Grid3X3, List, Mic, MicOff, Loader2, ChevronDown, ChevronUp } from "lucide-react";
+import { Plus, Lightbulb, Grid3X3, List, Mic, MicOff, Loader2, Trash2, Brain } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from "@/components/ui/dialog";
 import { Textarea } from "@/components/ui/textarea";
+import { Separator } from "@/components/ui/separator";
 import { useAuth } from "@/contexts/AuthContext";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
@@ -22,14 +23,14 @@ const CATEGORY_COLORS: Record<string, string> = {
   "Environment/Space": "bg-teal-500/20 text-teal-400 border-teal-500/30",
 };
 
-function IdeaCard({ idea }: { idea: any }) {
-  const [featuresOpen, setFeaturesOpen] = useState(false);
+function IdeaCard({ idea, onClick }: { idea: any; onClick: () => void }) {
   const isProcessing = idea.status === "processing";
-  const isProcessed = idea.status === "processed";
+  const isProcessed = idea.status === "processed" || idea.status === "brainstorming";
   const categoryClass = CATEGORY_COLORS[idea.category] || "bg-secondary text-secondary-foreground";
 
   return (
     <Card
+      onClick={onClick}
       className={`cursor-pointer border-border/50 bg-card/50 transition-all hover:border-primary/30 hover:bg-card/80 ${
         isProcessing ? "animate-processing-glow border-primary/40" : ""
       }`}
@@ -38,42 +39,27 @@ function IdeaCard({ idea }: { idea: any }) {
         <div className="flex items-start justify-between gap-2">
           {isProcessed && idea.category ? (
             <Badge className={`text-xs border ${categoryClass}`}>{idea.category}</Badge>
-          ) : (
-            <Badge variant="secondary" className="text-xs">{idea.category || "Uncategorized"}</Badge>
-          )}
-          {isProcessing ? (
+          ) : isProcessing ? (
             <div className="flex items-center gap-1.5 text-xs text-primary">
               <Loader2 className="h-3 w-3 animate-spin" />
               Processing…
             </div>
           ) : (
-            <Badge variant="outline" className="text-xs capitalize">{idea.status}</Badge>
+            <Badge variant="secondary" className="text-xs">{idea.category || "New"}</Badge>
+          )}
+          {idea.status === "brainstorming" && (
+            <Badge variant="outline" className="text-xs text-primary border-primary/30">
+              <Brain className="h-3 w-3 mr-1" /> Brainstorming
+            </Badge>
           )}
         </div>
       </CardHeader>
       <CardContent className="space-y-2">
-        <p className="text-sm font-medium leading-relaxed">
+        <p className="text-sm font-medium leading-relaxed line-clamp-3">
           {isProcessed && idea.processed_summary
             ? idea.processed_summary
             : idea.raw_dump.slice(0, 140) + (idea.raw_dump.length > 140 ? "…" : "")}
         </p>
-
-        {isProcessed && idea.key_features && (
-          <div>
-            <button
-              onClick={(e) => { e.stopPropagation(); setFeaturesOpen(!featuresOpen); }}
-              className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors"
-            >
-              {featuresOpen ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
-              Key Features
-            </button>
-            {featuresOpen && (
-              <div className="mt-1.5 text-xs text-muted-foreground prose prose-invert prose-sm max-w-none [&_ul]:mt-0 [&_ul]:mb-0 [&_li]:my-0">
-                <div dangerouslySetInnerHTML={{ __html: idea.key_features.replace(/^- /gm, "• ").replace(/\n/g, "<br/>") }} />
-              </div>
-            )}
-          </div>
-        )}
 
         {isProcessed && idea.tags && idea.tags.length > 0 && (
           <div className="flex flex-wrap gap-1">
@@ -82,12 +68,108 @@ function IdeaCard({ idea }: { idea: any }) {
             ))}
           </div>
         )}
-
-        <p className="text-xs text-muted-foreground">
-          {new Date(idea.created_at).toLocaleDateString()}
-        </p>
       </CardContent>
     </Card>
+  );
+}
+
+function IdeaDetailModal({
+  idea,
+  open,
+  onOpenChange,
+  onDelete,
+  onStartBrainstorm,
+  isDeleting,
+  isStarting,
+}: {
+  idea: any;
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  onDelete: () => void;
+  onStartBrainstorm: () => void;
+  isDeleting: boolean;
+  isStarting: boolean;
+}) {
+  if (!idea) return null;
+  const categoryClass = CATEGORY_COLORS[idea.category] || "bg-secondary text-secondary-foreground";
+  const isBrainstorming = idea.status === "brainstorming";
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="sm:max-w-2xl max-h-[85vh] overflow-y-auto">
+        <DialogHeader>
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              {idea.category && (
+                <Badge className={`text-xs border ${categoryClass}`}>{idea.category}</Badge>
+              )}
+              <DialogTitle className="sr-only">Idea Details</DialogTitle>
+            </div>
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-8 w-8 text-muted-foreground hover:text-destructive"
+              onClick={onDelete}
+              disabled={isDeleting}
+            >
+              <Trash2 className="h-4 w-4" />
+            </Button>
+          </div>
+          <DialogDescription className="sr-only">View idea details, delete, or start a brainstorm</DialogDescription>
+        </DialogHeader>
+
+        <div className="space-y-4">
+          {/* Raw Dump */}
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-1">Raw Dump</p>
+            <div className="rounded-lg bg-muted/50 p-3 text-sm text-muted-foreground whitespace-pre-wrap">
+              {idea.raw_dump}
+            </div>
+          </div>
+
+          {/* Summary */}
+          {idea.processed_summary && (
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-1">Summary</p>
+              <p className="text-sm leading-relaxed">{idea.processed_summary}</p>
+            </div>
+          )}
+
+          {/* Key Features */}
+          {idea.key_features && (
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-1">Key Features</p>
+              <div className="text-sm text-muted-foreground prose prose-sm max-w-none [&_ul]:mt-0 [&_ul]:mb-0 [&_li]:my-0">
+                <div dangerouslySetInnerHTML={{ __html: idea.key_features.replace(/^- /gm, "• ").replace(/\n/g, "<br/>") }} />
+              </div>
+            </div>
+          )}
+
+          {/* Tags */}
+          {idea.tags && idea.tags.length > 0 && (
+            <div className="flex flex-wrap gap-1">
+              {idea.tags.map((tag: string) => (
+                <Badge key={tag} variant="secondary" className="text-xs">{tag}</Badge>
+              ))}
+            </div>
+          )}
+        </div>
+
+        <Separator />
+
+        <DialogFooter>
+          <Button variant="ghost" onClick={() => onOpenChange(false)}>Close</Button>
+          <Button
+            onClick={onStartBrainstorm}
+            disabled={isBrainstorming || isStarting || idea.status === "processing"}
+            className="gap-2"
+          >
+            <Brain className="h-4 w-4" />
+            {isBrainstorming ? "Brainstorming…" : isStarting ? "Starting…" : "Start Brainstorm"}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }
 
@@ -99,6 +181,7 @@ export default function IdeasPage() {
   const [rawDump, setRawDump] = useState("");
   const [viewMode, setViewMode] = useState<"grid" | "list">("grid");
   const [isListening, setIsListening] = useState(false);
+  const [selectedIdea, setSelectedIdea] = useState<any>(null);
 
   const { data: ideas = [], isLoading } = useQuery({
     queryKey: ["ideas"],
@@ -132,8 +215,6 @@ export default function IdeasPage() {
       setDumpOpen(false);
       setRawDump("");
       toast.success("Idea captured! AI is processing…");
-
-      // Fire-and-forget AI processing
       supabase.functions
         .invoke("process-idea", { body: { idea_id: data.id, raw_dump: data.raw_dump } })
         .then(({ error }) => {
@@ -147,6 +228,41 @@ export default function IdeasPage() {
     onError: (e: Error) => toast.error(e.message),
   });
 
+  const deleteIdea = useMutation({
+    mutationFn: async (id: string) => {
+      const { error } = await supabase.from("ideas").delete().eq("id", id);
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["ideas"] });
+      setSelectedIdea(null);
+      toast.success("Idea deleted");
+    },
+    onError: (e: Error) => toast.error(e.message),
+  });
+
+  const startBrainstorm = useMutation({
+    mutationFn: async (idea: any) => {
+      const title = idea.processed_summary
+        ? idea.processed_summary.slice(0, 50) + (idea.processed_summary.length > 50 ? "…" : "")
+        : "Brainstorm";
+      const { data, error } = await supabase
+        .from("brainstorms")
+        .insert({ idea_id: idea.id, title, user_id: user!.id })
+        .select()
+        .single();
+      if (error) throw error;
+      await supabase.from("ideas").update({ status: "brainstorming" }).eq("id", idea.id);
+      return data;
+    },
+    onSuccess: (data) => {
+      queryClient.invalidateQueries({ queryKey: ["ideas"] });
+      setSelectedIdea(null);
+      navigate(`/brainstorms/${data.id}`);
+    },
+    onError: (e: Error) => toast.error(e.message),
+  });
+
   const handleVoice = () => {
     if (!("webkitSpeechRecognition" in window || "SpeechRecognition" in window)) {
       toast.error("Speech recognition not supported in this browser");
@@ -156,13 +272,11 @@ export default function IdeasPage() {
     const recognition = new SpeechRecognition();
     recognition.continuous = true;
     recognition.interimResults = true;
-
     if (isListening) {
       recognition.stop();
       setIsListening(false);
       return;
     }
-
     recognition.onresult = (event: any) => {
       let transcript = "";
       for (let i = 0; i < event.results.length; i++) {
@@ -179,6 +293,9 @@ export default function IdeasPage() {
     if (!rawDump.trim()) return;
     createIdea.mutate(rawDump.trim());
   };
+
+  // Keep selectedIdea in sync with latest data
+  const currentIdea = selectedIdea ? ideas.find((i: any) => i.id === selectedIdea.id) || selectedIdea : null;
 
   return (
     <div className="space-y-6">
@@ -212,12 +329,13 @@ export default function IdeasPage() {
         </div>
       ) : (
         <div className={viewMode === "grid" ? "grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3" : "space-y-3"}>
-          {ideas.map((idea) => (
-            <IdeaCard key={idea.id} idea={idea} />
+          {ideas.map((idea: any) => (
+            <IdeaCard key={idea.id} idea={idea} onClick={() => setSelectedIdea(idea)} />
           ))}
         </div>
       )}
 
+      {/* Dump Idea Dialog */}
       <Dialog open={dumpOpen} onOpenChange={setDumpOpen}>
         <DialogContent className="sm:max-w-lg">
           <DialogHeader>
@@ -251,6 +369,17 @@ export default function IdeasPage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* Idea Detail Modal */}
+      <IdeaDetailModal
+        idea={currentIdea}
+        open={!!selectedIdea}
+        onOpenChange={(open) => { if (!open) setSelectedIdea(null); }}
+        onDelete={() => currentIdea && deleteIdea.mutate(currentIdea.id)}
+        onStartBrainstorm={() => currentIdea && startBrainstorm.mutate(currentIdea)}
+        isDeleting={deleteIdea.isPending}
+        isStarting={startBrainstorm.isPending}
+      />
     </div>
   );
 }
