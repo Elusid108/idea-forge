@@ -1,7 +1,10 @@
-import { useLocation } from "react-router-dom";
-import { Lightbulb, ChevronRight, LogOut, User, Trash2 } from "lucide-react";
+import { useState } from "react";
+import { useNavigate, useLocation } from "react-router-dom";
+import { Lightbulb, ChevronRight, ChevronDown, LogOut, User, Trash2 } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
 import { NavLink } from "@/components/NavLink";
+import { supabase } from "@/integrations/supabase/client";
+import { useQuery } from "@tanstack/react-query";
 import {
   Sidebar,
   SidebarContent,
@@ -15,13 +18,63 @@ import {
 import { Button } from "@/components/ui/button";
 
 const sections = [
-  { label: "Ideas", href: "/ideas", emoji: "💡" },
-  { label: "Brainstorms", href: "/brainstorms", emoji: "🧠" },
-  { label: "Projects", href: "/projects", emoji: "🔧" },
+  { label: "Ideas", href: "/ideas", emoji: "💡", table: "ideas" as const },
+  { label: "Brainstorms", href: "/brainstorms", emoji: "🧠", table: "brainstorms" as const },
+  { label: "Projects", href: "/projects", emoji: "🔧", table: "projects" as const },
 ];
+
+function useSectionItems(table: "ideas" | "brainstorms" | "projects", enabled: boolean) {
+  return useQuery({
+    queryKey: ["sidebar-items", table],
+    queryFn: async () => {
+      const nameCol = table === "projects" ? "name" : "title";
+      const { data, error } = await supabase
+        .from(table)
+        .select(`id, ${nameCol}`)
+        .is("deleted_at", null)
+        .order("created_at", { ascending: false })
+        .limit(20);
+      if (error) throw error;
+      return (data || []).map((item: any) => ({
+        id: item.id,
+        title: item[nameCol] || "Untitled",
+      }));
+    },
+    enabled,
+    staleTime: 30_000,
+  });
+}
 
 export function AppSidebar() {
   const { signOut, user } = useAuth();
+  const navigate = useNavigate();
+  const location = useLocation();
+  const [expanded, setExpanded] = useState<Set<string>>(new Set());
+
+  const toggleExpand = (label: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    e.preventDefault();
+    setExpanded(prev => {
+      const next = new Set(prev);
+      next.has(label) ? next.delete(label) : next.add(label);
+      return next;
+    });
+  };
+
+  const ideasItems = useSectionItems("ideas", expanded.has("Ideas"));
+  const brainstormsItems = useSectionItems("brainstorms", expanded.has("Brainstorms"));
+  const projectsItems = useSectionItems("projects", expanded.has("Projects"));
+  const itemsMap: Record<string, ReturnType<typeof useSectionItems>> = {
+    Ideas: ideasItems,
+    Brainstorms: brainstormsItems,
+    Projects: projectsItems,
+  };
+
+  const getDetailPath = (section: string, itemId: string) => {
+    if (section === "Brainstorms") return `/brainstorms/${itemId}`;
+    if (section === "Projects") return `/projects`;
+    return `/ideas`;
+  };
 
   return (
     <Sidebar className="border-r border-sidebar-border">
@@ -36,21 +89,62 @@ export function AppSidebar() {
         <SidebarGroup>
           <SidebarGroupContent>
             <SidebarMenu>
-              {sections.map((section) => (
-                <SidebarMenuItem key={section.label}>
-                  <SidebarMenuButton asChild>
-                    <NavLink
-                      to={section.href}
-                      className="text-sm text-sidebar-foreground hover:bg-sidebar-accent"
-                      activeClassName="bg-sidebar-accent text-primary font-medium"
-                    >
-                      <span className="mr-2">{section.emoji}</span>
-                      {section.label}
-                      <ChevronRight className="ml-auto h-3 w-3" />
-                    </NavLink>
-                  </SidebarMenuButton>
-                </SidebarMenuItem>
-              ))}
+              {sections.map((section) => {
+                const isExpanded = expanded.has(section.label);
+                const query = itemsMap[section.label];
+                const items = query?.data || [];
+
+                return (
+                  <div key={section.label}>
+                    <SidebarMenuItem>
+                      <SidebarMenuButton asChild>
+                        <div className="flex items-center w-full">
+                          <NavLink
+                            to={section.href}
+                            className="text-sm text-sidebar-foreground hover:bg-sidebar-accent flex-1 flex items-center"
+                            activeClassName="bg-sidebar-accent text-primary font-medium"
+                          >
+                            <span className="mr-2">{section.emoji}</span>
+                            {section.label}
+                          </NavLink>
+                          <button
+                            onClick={(e) => toggleExpand(section.label, e)}
+                            className="p-1 rounded hover:bg-sidebar-accent transition-colors"
+                          >
+                            {isExpanded ? (
+                              <ChevronDown className="h-3 w-3 text-muted-foreground" />
+                            ) : (
+                              <ChevronRight className="h-3 w-3 text-muted-foreground" />
+                            )}
+                          </button>
+                        </div>
+                      </SidebarMenuButton>
+                    </SidebarMenuItem>
+
+                    {isExpanded && (
+                      <div className="ml-6 border-l border-sidebar-border pl-2 space-y-0.5 py-1">
+                        {query?.isLoading ? (
+                          <p className="text-xs text-muted-foreground px-2 py-1">Loading…</p>
+                        ) : items.length === 0 ? (
+                          <p className="text-xs text-muted-foreground/60 px-2 py-1 italic">No items</p>
+                        ) : (
+                          items.map((item) => (
+                            <button
+                              key={item.id}
+                              onClick={() => navigate(getDetailPath(section.label, item.id))}
+                              className={`w-full text-left text-xs px-2 py-1 rounded truncate hover:bg-sidebar-accent transition-colors text-sidebar-foreground/80 ${
+                                location.pathname.includes(item.id) ? "bg-sidebar-accent text-primary font-medium" : ""
+                              }`}
+                            >
+                              {item.title}
+                            </button>
+                          ))
+                        )}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
             </SidebarMenu>
           </SidebarGroupContent>
         </SidebarGroup>
