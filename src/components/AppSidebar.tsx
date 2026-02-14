@@ -73,7 +73,7 @@ export function AppSidebar() {
               <CollapsibleTrigger asChild>
                 <SidebarGroupLabel className="flex cursor-pointer items-center justify-between rounded-md px-2 py-1.5 text-xs font-semibold uppercase tracking-wider text-muted-foreground hover:bg-sidebar-accent">
                   <span className="flex items-center gap-2">
-                    <section.icon className="h-4 w-4" />
+                    <span>{section.emoji}</span>
                     {section.label}
                   </span>
                   <ChevronRight className={`h-3 w-3 transition-transform ${openSections[section.label] ? "rotate-90" : ""}`} />

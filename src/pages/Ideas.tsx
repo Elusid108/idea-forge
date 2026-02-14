@@ -150,14 +150,16 @@ function IdeaDetailModal({
         <Separator />
 
         <DialogFooter>
-          <Button
-            variant="destructive"
-            onClick={onDelete}
-            disabled={isDeleting}
-            className="mr-auto"
-          >
-            {isDeleting ? "Deleting…" : "Delete"}
-          </Button>
+          {!isBrainstorming && (
+            <Button
+              variant="destructive"
+              onClick={onDelete}
+              disabled={isDeleting}
+              className="mr-auto"
+            >
+              {isDeleting ? "Deleting…" : "Delete"}
+            </Button>
+          )}
           <Button variant="ghost" onClick={() => onOpenChange(false)}>Close</Button>
           <Button
             onClick={onStartBrainstorm}
@@ -260,7 +262,9 @@ export default function IdeasPage() {
           user_id: user!.id,
           compiled_description: idea.processed_summary || "",
           bullet_breakdown: idea.key_features || "",
-        })
+          category: idea.category || null,
+          tags: idea.tags || null,
+        } as any)
         .select()
         .single();
       if (error) throw error;

@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import {
   ArrowLeft, Plus, Link as LinkIcon, Image, Film, StickyNote, X,
@@ -61,6 +61,7 @@ export default function BrainstormWorkspace() {
   const [answer, setAnswer] = useState("");
   const [isThinking, setIsThinking] = useState(false);
   const [questionLoaded, setQuestionLoaded] = useState(false);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   // --- Queries ---
   const { data: brainstorm, isLoading } = useQuery({
@@ -305,6 +306,7 @@ export default function BrainstormWorkspace() {
       toast.error("Failed: " + e.message);
     } finally {
       setIsThinking(false);
+      setTimeout(() => textareaRef.current?.focus(), 50);
     }
   };
 
@@ -333,7 +335,10 @@ export default function BrainstormWorkspace() {
   }
 
   const linkedIdea = (brainstorm as any)?.ideas;
+  const brainstormCategory = (brainstorm as any)?.category || linkedIdea?.category;
+  const brainstormTags: string[] = (brainstorm as any)?.tags || linkedIdea?.tags || [];
   const linkedCategoryClass = linkedIdea?.category ? CATEGORY_COLORS[linkedIdea.category] || "bg-secondary text-secondary-foreground" : "";
+  const categoryBadgeClass = brainstormCategory ? CATEGORY_COLORS[brainstormCategory] || "bg-secondary text-secondary-foreground" : "";
 
   return (
     <div className="space-y-6">
@@ -369,6 +374,10 @@ export default function BrainstormWorkspace() {
           >
             <Lightbulb className="h-3 w-3" /> Linked Idea
           </Badge>
+        )}
+
+        {brainstormCategory && (
+          <Badge className={`text-xs border ${categoryBadgeClass}`}>{brainstormCategory}</Badge>
         )}
 
         <div className="ml-auto flex items-center gap-2">
@@ -415,6 +424,7 @@ export default function BrainstormWorkspace() {
                       <p className="text-sm font-medium leading-relaxed">{currentQuestion}</p>
                     </div>
                     <Textarea
+                      ref={textareaRef}
                       value={answer}
                       onChange={(e) => setAnswer(e.target.value)}
                       onKeyDown={handleAnswerKeyDown}
@@ -521,8 +531,7 @@ export default function BrainstormWorkspace() {
           </div>
         </div>
 
-        {/* Right column: Compiled Description + Bullet Breakdown */}
-        <div className="lg:col-span-2 space-y-6">
+          {/* Compiled Description - in left column */}
           <div>
             <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-1">Compiled Description</p>
             <EditableMarkdown
@@ -533,7 +542,10 @@ export default function BrainstormWorkspace() {
               minHeight="100px"
             />
           </div>
+        </div>
 
+        {/* Right column: Bullet Breakdown + Tags */}
+        <div className="lg:col-span-2 space-y-6">
           <div>
             <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-1">Bullet Breakdown</p>
             <EditableMarkdown
@@ -543,6 +555,20 @@ export default function BrainstormWorkspace() {
               placeholder="- Key point 1&#10;- Key point 2&#10;- Key point 3"
               minHeight="80px"
             />
+          </div>
+
+          {/* Tags */}
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-2">Tags</p>
+            {brainstormTags.length > 0 ? (
+              <div className="flex flex-wrap gap-1.5">
+                {brainstormTags.map((tag: string) => (
+                  <Badge key={tag} variant="secondary" className="text-xs">{tag}</Badge>
+                ))}
+              </div>
+            ) : (
+              <p className="text-xs text-muted-foreground/60 italic">No tags yet</p>
+            )}
           </div>
         </div>
       </div>
