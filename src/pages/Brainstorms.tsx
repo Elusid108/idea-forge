@@ -9,6 +9,17 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { toast } from "sonner";
 
+const CATEGORY_COLORS: Record<string, string> = {
+  "Product": "bg-blue-500/20 text-blue-400 border-blue-500/30",
+  "Process": "bg-emerald-500/20 text-emerald-400 border-emerald-500/30",
+  "Fixture/Jig": "bg-amber-500/20 text-amber-400 border-amber-500/30",
+  "Tool": "bg-orange-500/20 text-orange-400 border-orange-500/30",
+  "Art": "bg-pink-500/20 text-pink-400 border-pink-500/30",
+  "Hardware/Electronics": "bg-red-500/20 text-red-400 border-red-500/30",
+  "Software/App": "bg-violet-500/20 text-violet-400 border-violet-500/30",
+  "Environment/Space": "bg-teal-500/20 text-teal-400 border-teal-500/30",
+};
+
 export default function BrainstormsPage() {
   const { user } = useAuth();
   const navigate = useNavigate();
@@ -84,35 +95,52 @@ export default function BrainstormsPage() {
         </div>
       ) : (
         <div className={viewMode === "grid" ? "grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3" : "space-y-3"}>
-          {brainstorms.map((b: any) => (
-            <Card
-              key={b.id}
-              onClick={() => navigate(`/brainstorms/${b.id}`)}
-              className="cursor-pointer border-border/50 bg-card/50 transition-colors hover:border-primary/30"
-            >
-              <CardHeader className="pb-2">
-                <div className="flex items-center justify-between">
-                  <span className="font-medium">{b.title}</span>
-                  <div className="flex items-center gap-2">
+          {brainstorms.map((b: any) => {
+            const categoryClass = CATEGORY_COLORS[b.category] || "bg-secondary text-secondary-foreground";
+            const tags: string[] = b.tags || [];
+            const descPreview = b.compiled_description || (b.ideas?.processed_summary) || (b.ideas?.raw_dump?.slice(0, 140));
+
+            return (
+              <Card
+                key={b.id}
+                onClick={() => navigate(`/brainstorms/${b.id}`)}
+                className="cursor-pointer border-border/50 bg-card/50 transition-all hover:border-primary/30 hover:bg-card/80"
+              >
+                <CardHeader className="pb-2">
+                  <div className="flex items-start justify-between gap-2">
+                    {b.category ? (
+                      <Badge className={`text-xs border ${categoryClass}`}>{b.category}</Badge>
+                    ) : (
+                      <Badge variant="secondary" className="text-xs">{b.status}</Badge>
+                    )}
                     {b.brainstorm_references?.length > 0 && (
-                      <Badge variant="secondary" className="text-xs">
+                      <Badge variant="outline" className="text-xs">
                         {b.brainstorm_references.length} refs
                       </Badge>
                     )}
-                    <Badge variant="outline" className="text-xs">{b.status}</Badge>
                   </div>
-                </div>
-              </CardHeader>
-              <CardContent>
-                {b.ideas && (
-                  <p className="mb-1 text-sm text-muted-foreground line-clamp-2">
-                    From: {b.ideas.processed_summary || b.ideas.raw_dump?.slice(0, 80)}
-                  </p>
-                )}
-                <p className="text-xs text-muted-foreground">{new Date(b.created_at).toLocaleDateString()}</p>
-              </CardContent>
-            </Card>
-          ))}
+                </CardHeader>
+                <CardContent className="space-y-2">
+                  <p className="text-sm font-bold leading-snug">{b.title}</p>
+                  {descPreview && (
+                    <p className="text-sm text-muted-foreground leading-relaxed line-clamp-3">
+                      {descPreview}
+                    </p>
+                  )}
+                  {tags.length > 0 && (
+                    <div className="flex flex-wrap gap-1">
+                      {tags.slice(0, 4).map((tag: string) => (
+                        <Badge key={tag} variant="secondary" className="text-[10px]">{tag}</Badge>
+                      ))}
+                      {tags.length > 4 && (
+                        <Badge variant="secondary" className="text-[10px]">+{tags.length - 4}</Badge>
+                      )}
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+            );
+          })}
         </div>
       )}
     </div>

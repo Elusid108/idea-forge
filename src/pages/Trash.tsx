@@ -1,4 +1,5 @@
 import { Trash2, RotateCcw, XCircle, Lightbulb, Brain, Wrench, ChevronRight } from "lucide-react";
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from "@/components/ui/alert-dialog";
 import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
@@ -54,9 +55,23 @@ function TrashSection({
                   <Button variant="ghost" size="sm" className="gap-1 text-xs" onClick={() => onRestore(item.id)}>
                     <RotateCcw className="h-3 w-3" /> Restore
                   </Button>
-                  <Button variant="ghost" size="sm" className="gap-1 text-xs text-destructive hover:text-destructive" onClick={() => onDelete(item.id)}>
-                    <XCircle className="h-3 w-3" /> Delete
-                  </Button>
+                  <AlertDialog>
+                    <AlertDialogTrigger asChild>
+                      <Button variant="ghost" size="sm" className="gap-1 text-xs text-destructive hover:text-destructive">
+                        <XCircle className="h-3 w-3" /> Delete
+                      </Button>
+                    </AlertDialogTrigger>
+                    <AlertDialogContent>
+                      <AlertDialogHeader>
+                        <AlertDialogTitle>Permanently delete?</AlertDialogTitle>
+                        <AlertDialogDescription>This cannot be undone. The item will be permanently removed.</AlertDialogDescription>
+                      </AlertDialogHeader>
+                      <AlertDialogFooter>
+                        <AlertDialogCancel>Cancel</AlertDialogCancel>
+                        <AlertDialogAction onClick={() => onDelete(item.id)}>Delete Forever</AlertDialogAction>
+                      </AlertDialogFooter>
+                    </AlertDialogContent>
+                  </AlertDialog>
                 </div>
               </CardContent>
             </Card>

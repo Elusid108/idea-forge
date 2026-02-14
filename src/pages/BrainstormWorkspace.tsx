@@ -10,6 +10,7 @@ import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from "@/components/ui/dialog";
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from "@/components/ui/alert-dialog";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Separator } from "@/components/ui/separator";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -176,6 +177,7 @@ export default function BrainstormWorkspace() {
     idea_summary: (brainstorm as any)?.ideas?.processed_summary || "",
     references: references.map((r: any) => `[${r.type}] ${r.title}: ${r.description || r.url}`).join("\n"),
     tags: (brainstorm as any)?.tags || [],
+    category: (brainstorm as any)?.category || "",
   });
 
   const generateFirstQuestion = async () => {
@@ -361,7 +363,8 @@ export default function BrainstormWorkspace() {
 
   const handleRefClick = (ref: any) => {
     if (ref.type === "link" && ref.url) {
-      window.open(ref.url, "_blank", "noopener,noreferrer");
+      const url = ref.url.match(/^https?:\/\//) ? ref.url : `https://${ref.url}`;
+      window.open(url, "_blank", "noopener,noreferrer");
     } else if (ref.type === "note" || ref.type === "image" || ref.type === "video") {
       setViewingRef(ref);
     }
@@ -408,6 +411,9 @@ export default function BrainstormWorkspace() {
       };
       if (updated_tags && Array.isArray(updated_tags)) {
         updateFields.tags = updated_tags;
+      }
+      if (data.updated_category) {
+        updateFields.category = data.updated_category;
       }
 
       await supabase.from("brainstorms").update(updateFields).eq("id", id!);
@@ -544,13 +550,23 @@ export default function BrainstormWorkspace() {
             </Badge>
           ) : (
             <>
-              <Button
-                variant="destructive"
-                onClick={() => deleteBrainstorm.mutate()}
-                disabled={deleteBrainstorm.isPending}
-              >
-                {deleteBrainstorm.isPending ? "Deleting…" : "Delete"}
-              </Button>
+              <AlertDialog>
+                <AlertDialogTrigger asChild>
+                  <Button variant="destructive" disabled={deleteBrainstorm.isPending}>
+                    {deleteBrainstorm.isPending ? "Deleting…" : "Delete"}
+                  </Button>
+                </AlertDialogTrigger>
+                <AlertDialogContent>
+                  <AlertDialogHeader>
+                    <AlertDialogTitle>Move to trash?</AlertDialogTitle>
+                    <AlertDialogDescription>This will move the brainstorm to trash. You can restore it later.</AlertDialogDescription>
+                  </AlertDialogHeader>
+                  <AlertDialogFooter>
+                    <AlertDialogCancel>Cancel</AlertDialogCancel>
+                    <AlertDialogAction onClick={() => deleteBrainstorm.mutate()}>Delete</AlertDialogAction>
+                  </AlertDialogFooter>
+                </AlertDialogContent>
+              </AlertDialog>
               <Button
                 onClick={() => promoteToProject.mutate()}
                 disabled={promoteToProject.isPending}
