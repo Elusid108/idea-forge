@@ -1,94 +1,97 @@
 
-# Titles, Data Transfer, and Flashcard Q&A
+
+# Global Trash, Layout Hierarchy, and Wiki-Style Editing
 
 ## 1. Database Migration
 
-Add a `title` column to the `ideas` table:
+Add `deleted_at` column to three tables:
 
 ```sql
-ALTER TABLE public.ideas ADD COLUMN IF NOT EXISTS title text DEFAULT '';
+ALTER TABLE public.ideas ADD COLUMN deleted_at timestamptz DEFAULT NULL;
+ALTER TABLE public.brainstorms ADD COLUMN deleted_at timestamptz DEFAULT NULL;
+ALTER TABLE public.projects ADD COLUMN deleted_at timestamptz DEFAULT NULL;
 ```
 
-The `brainstorms` table already has a `title` column, so no change needed there.
+No new RLS policies needed -- existing per-user policies already cover these tables.
 
 ---
 
-## 2. Update `process-idea` Edge Function
+## 2. Soft Delete and Filtered Queries
 
-Add `title` to the AI tool call schema:
+### Update all list queries to filter out soft-deleted items:
+- `Ideas.tsx`: Add `.is("deleted_at", null)` to the ideas query
+- `Brainstorms.tsx`: Add `.is("deleted_at", null)` to the brainstorms query
+- `Projects.tsx`: Add `.is("deleted_at", null)` to the projects query
 
-- New property: `title` (string, "A short punchy 3-5 word title for the idea")
-- Add to `required` array
-- Save `result.title` to `ideas.title` in the DB update
-
----
-
-## 3. Update `brainstorm-chat` Edge Function (Flashcard Mode)
-
-Completely rework this function to support the flashcard Q&A loop. Two modes:
-
-**Mode A -- "generate_question"**: Called with `{ brainstorm_id, compiled_description, bullet_breakdown, chat_history, context }`. The AI reviews the current state and returns a JSON object with:
-- `question`: The next critical question to ask
-- (No description/bullet updates on question generation)
-
-**Mode B -- "submit_answer"**: Called with `{ brainstorm_id, answer, question, compiled_description, bullet_breakdown, chat_history, context }`. The AI:
-1. Incorporates the answer into the compiled description and bullet breakdown
-2. Generates the next question
-3. Returns: `{ updated_description, updated_bullets, next_question }`
-
-Use tool calling to enforce structured output. The system prompt instructs the AI to act as a structured interviewer that builds up a project description one answer at a time.
-
-Chat history continues to be passed for context but is saved server-side only (not displayed to user).
+### Convert delete actions to soft deletes:
+- `Ideas.tsx` (`deleteIdea` mutation): Change `.delete()` to `.update({ deleted_at: new Date().toISOString() })`
+- `BrainstormWorkspace.tsx`: No delete action currently -- no change needed
+- `Projects.tsx`: No delete action currently -- no change needed
 
 ---
 
-## 4. Ideas Dashboard Updates (`src/pages/Ideas.tsx`)
+## 3. Trash Page (`src/pages/Trash.tsx`)
 
-### IdeaCard
-- Show `idea.title` as a bold header line above the truncated summary
-- Fall back to truncated summary if no title yet (processing/new state)
+New page at `/trash` route. Displays three collapsible sections:
 
-### IdeaDetailModal
-- Use `idea.title` as the `DialogTitle` instead of "Idea Details"
-- Keep category badge in the header
+- **Trashed Ideas**: Query ideas where `deleted_at IS NOT NULL`, show title/summary, with "Restore" and "Permanently Delete" buttons
+- **Trashed Brainstorms**: Same pattern for brainstorms
+- **Trashed Projects**: Same pattern for projects
 
-### "Start Brainstorm" Mutation
-Update the data transfer when promoting an idea:
-- `brainstorm.title` = `idea.title` (instead of truncated summary)
-- `brainstorm.compiled_description` = `idea.processed_summary`
-- `brainstorm.bullet_breakdown` = `idea.key_features`
+Actions:
+- **Restore**: `update({ deleted_at: null })` on the row
+- **Permanently Delete**: `.delete()` on the row
+
+### Sidebar Update
+Add a "Trash" link at the bottom of the sidebar sections (before the footer), using the `Trash2` icon.
+
+### Routing
+Add `/trash` route in `App.tsx` wrapped in `ProtectedRoute` and `AppLayout`.
 
 ---
 
-## 5. Brainstorm Workspace Overhaul (`src/pages/BrainstormWorkspace.tsx`)
+## 4. Brainstorm Workspace Layout Reorganization
 
-### Data Fetching
-- Update the brainstorm query to also select `ideas(raw_dump, processed_summary, title, key_features, tags, category)` for richer context
+Restructure the page from the current two-column layout to a single-column vertical flow:
 
-### Header
-- Already has an editable title -- no changes needed (already uses `brainstorm.title`)
+1. **Title** (editable header) + Linked Idea badge + Promote to Project button
+2. **AI Interview** (Flashcard Q&A card) -- moved up to be immediately after the title
+3. **Compiled Description** and **Bullet Breakdown** sections (wiki-style, see section 6)
+4. **References** section at the bottom
 
-### Synced Local State
-- On load, pre-fill `description` from `brainstorm.compiled_description` and `bullets` from `brainstorm.bullet_breakdown` (already happening)
+This replaces the current `grid grid-cols-1 lg:grid-cols-5` two-column layout with a simple vertical `space-y-6` stack.
 
-### Replace Chat with Flashcard Q&A
-Remove the entire scrolling chat panel (lines ~410-473). Replace with:
+---
 
-**FlashcardQA Component:**
-- State: `currentQuestion` (string), `answer` (string), `isThinking` (boolean)
-- On mount / when brainstorm loads: call the edge function in "generate_question" mode to get the first question
-- Display: A single card showing the current AI question in a styled block, a textarea below for the user's answer, and a "Submit Answer" button
-- On submit:
-  1. Set `isThinking = true`
-  2. Call edge function in "submit_answer" mode with the answer, current question, description, bullets, and chat_history
-  3. On response: update `description` and `bullets` state with the AI's rewritten versions, save all three fields to the DB (compiled_description, bullet_breakdown, chat_history), set `currentQuestion` to the `next_question`, clear the answer field
-  4. Set `isThinking = false`
-- While thinking: show a subtle loading animation on the card (spinner or skeleton pulse)
-- The compiled description and bullet breakdown textareas above update automatically as the AI rewrites them
+## 5. Enter-to-Send for Flashcard Q&A
 
-### Chat History (Hidden)
-- Continue appending `{role: "user", content: answer}` and `{role: "assistant", content: ...}` entries to `chat_history` in the database
-- Never display this history in the UI -- it's backend context only
+Add an `onKeyDown` handler to the answer `Textarea`:
+- If `Enter` is pressed without `Shift`, call `e.preventDefault()` and trigger `handleSubmitAnswer()`
+- `Shift+Enter` allows normal newline behavior
+- Keep the "Submit Answer" button visible for accessibility
+
+---
+
+## 6. Wiki-Style Inline Editing with Markdown
+
+### New dependency
+Install `react-markdown` for rendering markdown content.
+
+### Implementation
+Create a reusable `EditableMarkdown` component that toggles between two states:
+
+**Read mode** (default):
+- Render the content using `react-markdown` with clean styling
+- Entire block is clickable -- clicking swaps to edit mode
+- Show a subtle pencil icon on hover to indicate editability
+
+**Edit mode** (on click):
+- Swap to a `Textarea` pre-filled with the raw markdown text
+- Auto-focus the textarea
+- On `blur` or `Escape` keypress: save changes to the database and swap back to read mode
+
+### Usage
+Replace the plain `Textarea` components for Compiled Description and Bullet Breakdown with `EditableMarkdown` instances. Each saves to the respective `brainstorms` column on blur.
 
 ---
 
@@ -96,17 +99,24 @@ Remove the entire scrolling chat panel (lines ~410-473). Replace with:
 
 | File | Action |
 |---|---|
-| Migration SQL | Add `title` column to `ideas` |
-| `supabase/functions/process-idea/index.ts` | Add `title` to tool schema and DB update |
-| `supabase/functions/brainstorm-chat/index.ts` | Rewrite for flashcard Q&A (two modes: generate_question, submit_answer) |
-| `src/pages/Ideas.tsx` | Show title on cards/modal, update startBrainstorm data transfer |
-| `src/pages/BrainstormWorkspace.tsx` | Replace chat with flashcard Q&A component, update query |
+| Migration SQL | Add `deleted_at` to ideas, brainstorms, projects |
+| `src/pages/Ideas.tsx` | Filter `deleted_at IS NULL`, soft delete mutation |
+| `src/pages/Brainstorms.tsx` | Filter `deleted_at IS NULL` |
+| `src/pages/Projects.tsx` | Filter `deleted_at IS NULL` |
+| `src/pages/Trash.tsx` | **New** -- trash page with restore/permanent delete |
+| `src/components/EditableMarkdown.tsx` | **New** -- wiki-style click-to-edit markdown component |
+| `src/components/AppSidebar.tsx` | Add Trash link |
+| `src/pages/BrainstormWorkspace.tsx` | Layout reorder, enter-to-send, use EditableMarkdown |
+| `src/App.tsx` | Add `/trash` route |
+| `package.json` | Add `react-markdown` dependency |
 
 ---
 
 ## Technical Notes
 
-- The `brainstorms.chat_history` JSONB column stores the full Q&A history for AI context but is never rendered in the UI
-- The edge function uses tool calling to return structured JSON (updated_description, updated_bullets, next_question) ensuring reliable parsing
-- The flashcard loop is self-sustaining: each answer triggers a rewrite of the synthesis fields and generates the next question automatically
-- Existing brainstorms with old chat_history format will still work since the new function accepts the same array structure
+- `deleted_at` is nullable -- `NULL` means active, a timestamp means soft-deleted
+- The `react-markdown` package renders standard markdown (bold, lists, headers, links) without needing `dangerouslySetInnerHTML`
+- The `EditableMarkdown` component uses local state to toggle between read/edit modes, with `onBlur` triggering the save callback
+- The layout change is purely CSS/JSX restructuring -- no data model changes needed for the reorder
+- Enter-to-send checks `e.key === "Enter" && !e.shiftKey` to preserve multiline input capability
+
