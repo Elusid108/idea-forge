@@ -1,103 +1,95 @@
 
 
-# Brainstormer Funnel — Final Implementation Plan
+# AI-Powered Idea Processing
 
-## Design & Theme
-- Dark mode by default, sleek minimalist interface
-- High-contrast accent colors (electric blue/violet) for primary actions
-- Clean typography, generous whitespace, subtle glass/card effects
+## Overview
+When a user saves a raw idea dump, the system will immediately save it to the database, then fire off an AI processing call in the background. While processing, the idea card shows a glowing/pulsing animation. Once the AI returns, the card updates in place with the structured results.
 
 ---
 
-## 1. Authentication & User Profiles
-- Email/password signup and login pages
-- `profiles` table (display name, avatar URL) auto-created on signup via trigger
-- All tables protected with Row Level Security — users only see their own data
+## 1. Database Migration: Add `key_features` Column
 
-## 2. Database Schema
-- **ideas** — raw dumps, AI-processed summaries, categories, tags, status
-- **brainstorms** — linked to an idea (optional), contains compiled description, bullet breakdown, chat history (JSONB), reference links, status
-- **brainstorm_references** — individual reference items linked to a brainstorm: type (image, website, video, document, note), title, URL, description, thumbnail URL, sort order
-- **projects** — promoted from brainstorms (optional), name, status, GitHub repo URL, general notes
-- **project_assets** — file metadata (name, category, storage path) linked to projects
-- **profiles** — display name, avatar
+The `ideas` table currently has `processed_summary`, `category`, and `tags`, but is missing the `key_features` field requested. We need to add:
 
-## 3. File Storage
-- Supabase Storage bucket for project assets and brainstorm reference images
-- Supports any file type: 3MF, STL, CAD, firmware binaries, code archives, images
-- Only the storage path/URL saved in the database
+- `key_features` (text, nullable, default `''`) to the `ideas` table
 
----
+We will also add a `processing` status value so we can track when AI is actively working on an idea (status will go: `'processing'` -> `'processed'` or back to `'new'` on error).
 
-## 4. Sidebar Navigation (Independent Stages)
-- Three collapsible sections: 💡 Ideas, 🧠 Brainstorms, 🔧 Projects
-- Each section expands to show ~10 recent items with status badges and a "View all →" link
-- Section headers link to full-page views; item counts shown as badges
-- Collapsible mini mode showing only icons
-- Items can be promoted forward (Idea → Brainstorm → Project) but don't have to be
-- Users can also create brainstorms or projects directly without a parent
+## 2. Backend: `process-idea` Edge Function
 
----
+Create `supabase/functions/process-idea/index.ts` that:
 
-## 5. Page 1: Ideas Dashboard
-- Prominent **"Dump Idea"** button
-- Modal with large text area + microphone button (Web Speech API for voice-to-text)
-- On save: AI edge function (Lovable AI) generates a processed summary, assigns a category (Hardware, Software, Fixture/Jig, 3D Print, etc.), and extracts tags
-- Grid/list view of all ideas with filters by status, category, tags
-- Each idea card shows an indicator if it has an associated brainstorm
-- "Start Brainstorm" action available on any idea
+- Accepts `{ idea_id, raw_dump }` in the POST body
+- Authenticates the request via the Authorization header
+- Calls the Lovable AI Gateway (`https://ai.gateway.lovable.dev/v1/chat/completions`) using `LOVABLE_API_KEY`
+- Uses **tool calling** (not raw JSON) to get structured output with a function called `process_idea` that returns:
+  - `processed_summary` (string)
+  - `key_features` (string -- formatted as a bulleted markdown list)
+  - `category` (string, one of: Product, Process, Fixture/Jig, Tool, Art, Hardware/Electronics, Software/App, Environment/Space)
+  - `tags` (array of 3-6 strings)
+- Updates the `ideas` row with the AI results and sets `status = 'processed'`
+- On error, sets `status = 'new'` so the user can retry
+- Handles 429/402 rate limit errors gracefully
+- Uses `google/gemini-3-flash-preview` as the model
+- Includes full CORS headers
 
-## 6. Page 2: Brainstorms List
-- List of all brainstorm sessions showing linked idea summary, date, reference count, and project indicator
-- Click to open the full brainstorm workspace
+The system prompt will instruct the AI to act as an analytical engineering assistant that transforms messy stream-of-consciousness input into structured, professional output.
 
-## 7. Page 3: Brainstorm Workspace (Revised)
+Add the function to `supabase/config.toml` with `verify_jwt = false` (auth validated in code).
 
-This is a **research & reference gathering workspace**, not just a chat. It has multiple panels/sections:
+## 3. Frontend: Updated Idea Flow
 
-### Main Area — Reference Board
-- A collection/board where the user gathers all their research materials:
-  - **Websites/Links** — paste a URL, it saves with a title and optional description
-  - **Images** — upload reference images (mood boards, sketches, screenshots) stored in Supabase Storage
-  - **Videos** — paste YouTube/Vimeo links, displayed as embedded previews
-  - **Documents** — upload PDFs, datasheets, etc.
-  - **Notes** — freeform text snippets for quick thoughts
-- Each reference item shows as a card with type icon, title, thumbnail (if image/video), and description
-- References are sortable and can be reordered
+### Save + Process Pipeline (`Ideas.tsx`)
 
-### Side Panel — AI Q&A Chat
-- A collapsible chat panel on the side of the workspace
-- Streaming AI chat (Lovable AI) where the AI acts as an engineering/design partner
-- The AI has context of the original idea dump and all gathered references
-- Chat history is persisted in the brainstorm record
+1. **On save**: Insert the idea with `status = 'processing'`, close the modal, show toast "Idea captured! AI is processing..."
+2. **Fire-and-forget**: After insert succeeds, call `supabase.functions.invoke('process-idea', { body: { idea_id, raw_dump } })` in the background
+3. **On AI completion**: Invalidate the `ideas` query so the card updates automatically
+4. **On AI error**: Show an error toast; the card will show with `status = 'new'` as fallback
 
-### Top Section — Compiled Description & Bullet Breakdown
-- An **expanded project description** that evolves as the brainstorm progresses
-- A structured **bullet breakdown** of key points, requirements, components, or steps
-- The AI chat feeds into this: after Q&A, the user (or AI) can compile insights into the description and bullet list
-- Both are editable by the user at any time
+### Processing Animation on Idea Cards
 
-### Actions
-- Shows which idea it originated from (clickable link back), if any
-- **"Promote to Project"** button to graduate to the Project Hub
+- When `idea.status === 'processing'`, the card gets a pulsing glow effect:
+  - A CSS animation with a glowing border (`animate-pulse` combined with a primary-colored shadow/border)
+  - A small "Processing..." label with a spinner replaces the status badge
+  - The card shows the raw dump text (truncated) since processed data isn't available yet
+- Once status changes to `'processed'`, the card displays the full AI results: summary, category badge, tags, and a "Key Features" expandable section
 
-## 8. Page 4: Project Hub
-- Dual-view toggle: **Kanban board** (columns: Planning, In Progress, Testing, Done) and **list view**
-- Each project card shows linked brainstorm/idea if any
-- Click to open project detail
+### Idea Card Layout Updates
 
-## 9. Page 5: Project Detail
-- Editable GitHub repo URL field
-- Rich text area for general notes (wiring notes, slice profiles, firmware patches)
-- **Drag-and-drop file upload zone** wired to Supabase Storage
-- File category auto-detection or manual selection (CAD, STL, 3MF, Firmware, Code, Docs, Other)
-- Uploaded files displayed in a list with file name, category, and download link
+- **Category badge** with color coding per category type
+- **Processed summary** as the main text
+- **Tags** as small badges below
+- **Key features** shown as a compact bulleted list (or expandable on click)
+- **Status indicator**: "New" (no AI yet), pulsing glow (processing), or checkmark (processed)
 
----
+## 4. Technical Details
 
-## AI Integration (Lovable AI Gateway)
-All AI features use the built-in Lovable AI — no API key configuration needed:
-1. **Idea Processing** — edge function that takes raw dump → returns summary, category, tags
-2. **Brainstorm Chat** — streaming chat edge function with engineering/design partner system prompt, aware of the idea context and gathered references
-3. **Description Compilation** — AI can synthesize chat Q&A and references into the structured description and bullet breakdown
+### Edge Function: `supabase/functions/process-idea/index.ts`
+
+```text
+POST /process-idea
+Body: { idea_id: string, raw_dump: string }
+Headers: Authorization (Bearer token), Content-Type
+
+Flow:
+1. Validate input (idea_id, raw_dump present)
+2. Create Supabase client with service role key
+3. Call Lovable AI with tool_choice forcing "process_idea" function
+4. Parse tool call response
+5. UPDATE ideas SET processed_summary, key_features, category, tags, status='processed' WHERE id=idea_id
+6. Return success
+```
+
+### Config Update: `supabase/config.toml`
+
+```toml
+[functions.process-idea]
+verify_jwt = false
+```
+
+### CSS Animation
+
+A custom `@keyframes` animation for the processing glow effect added to `src/index.css`:
+- Pulsing border-color cycling through primary accent shades
+- Subtle box-shadow glow that fades in and out
 
