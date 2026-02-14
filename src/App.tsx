@@ -12,6 +12,7 @@ import IdeasPage from "@/pages/Ideas";
 import BrainstormsPage from "@/pages/Brainstorms";
 import BrainstormWorkspace from "@/pages/BrainstormWorkspace";
 import ProjectsPage from "@/pages/Projects";
+import ProjectWorkspace from "@/pages/ProjectWorkspace";
 import TrashPage from "@/pages/Trash";
 import NotFound from "@/pages/NotFound";
 
@@ -73,6 +74,16 @@ const App = () => (
                 <ProtectedRoute>
                   <AppLayout>
                     <ProjectsPage />
+                  </AppLayout>
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/projects/:id"
+              element={
+                <ProtectedRoute>
+                  <AppLayout>
+                    <ProjectWorkspace />
                   </AppLayout>
                 </ProtectedRoute>
               }

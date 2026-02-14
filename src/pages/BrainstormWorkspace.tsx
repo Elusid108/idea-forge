@@ -1,8 +1,9 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import {
-  ArrowLeft, Plus, Link as LinkIcon, Image, Film, StickyNote, X,
+  ArrowLeft, Plus, Link as LinkIcon, Image, Film, StickyNote, X, Pencil,
   Loader2, Rocket, Lightbulb, Bot, Send, CheckCircle2,
+  Grid3X3, List, ChevronDown, ChevronRight, ArrowUpDown,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -12,9 +13,11 @@ import { Textarea } from "@/components/ui/textarea";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from "@/components/ui/dialog";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from "@/components/ui/alert-dialog";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Separator } from "@/components/ui/separator";
 import { Skeleton } from "@/components/ui/skeleton";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { useAuth } from "@/contexts/AuthContext";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
@@ -25,12 +28,21 @@ import { useUndoRedo } from "@/hooks/useUndoRedo";
 
 type RefType = "link" | "image" | "video" | "note";
 type ChatMsg = { role: "user" | "assistant"; content: string };
+type SortMode = "az" | "za" | "newest" | "oldest";
 
 const REF_ICONS: Record<string, any> = {
   link: LinkIcon,
   image: Image,
   video: Film,
   note: StickyNote,
+};
+
+const REF_TYPE_ORDER: RefType[] = ["note", "link", "image", "video"];
+const REF_TYPE_LABELS: Record<string, string> = {
+  note: "Notes",
+  link: "Links",
+  image: "Images",
+  video: "Videos",
 };
 
 const CATEGORY_COLORS: Record<string, string> = {
@@ -54,11 +66,26 @@ export default function BrainstormWorkspace() {
   const [editingTitle, setEditingTitle] = useState(false);
   const [titleDraft, setTitleDraft] = useState("");
   const [addRefType, setAddRefType] = useState<RefType | null>(null);
+  const [editingRef, setEditingRef] = useState<any>(null);
   const [refForm, setRefForm] = useState({ title: "", url: "", description: "" });
   const [refFile, setRefFile] = useState<File | null>(null);
   const [description, setDescription] = useState("");
   const [bullets, setBullets] = useState("");
   const [showLinkedIdea, setShowLinkedIdea] = useState(false);
+
+  // Reference view/sort/collapse state
+  const [refViewMode, setRefViewMode] = useState<"grid" | "list">(
+    () => (localStorage.getItem("ref-view-mode") as "grid" | "list") || "grid"
+  );
+  const [refSortMode, setRefSortMode] = useState<SortMode>(
+    () => (localStorage.getItem("ref-sort-mode") as SortMode) || "newest"
+  );
+  const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(() => {
+    try {
+      const saved = localStorage.getItem(`ref-collapse-${id}`);
+      return saved ? new Set(JSON.parse(saved)) : new Set();
+    } catch { return new Set(); }
+  });
 
   // Flashcard Q&A state
   const [currentQuestion, setCurrentQuestion] = useState("");
@@ -207,7 +234,10 @@ export default function BrainstormWorkspace() {
       const { error } = await supabase.from("brainstorms").update(fields).eq("id", id!);
       if (error) throw error;
     },
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["brainstorm", id] }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["brainstorm", id] });
+      queryClient.invalidateQueries({ queryKey: ["sidebar-items"] });
+    },
   });
 
   const deleteBrainstorm = useMutation({
@@ -242,8 +272,22 @@ export default function BrainstormWorkspace() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["brainstorm-refs", id] });
       setAddRefType(null);
+      setEditingRef(null);
       setRefForm({ title: "", url: "", description: "" });
       setRefFile(null);
+    },
+    onError: (e: Error) => toast.error(e.message),
+  });
+
+  const updateReference = useMutation({
+    mutationFn: async ({ refId, fields }: { refId: string; fields: Record<string, any> }) => {
+      const { error } = await supabase.from("brainstorm_references").update(fields).eq("id", refId);
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["brainstorm-refs", id] });
+      setEditingRef(null);
+      setRefForm({ title: "", url: "", description: "" });
     },
     onError: (e: Error) => toast.error(e.message),
   });
@@ -260,6 +304,8 @@ export default function BrainstormWorkspace() {
 
   const promoteToProject = useMutation({
     mutationFn: async () => {
+      const bTags = (brainstorm as any)?.tags || [];
+      const bCategory = (brainstorm as any)?.category || null;
       const { data, error } = await supabase
         .from("projects")
         .insert({
@@ -267,16 +313,37 @@ export default function BrainstormWorkspace() {
           user_id: user!.id,
           name: brainstorm?.title || "Untitled Project",
           general_notes: description,
-        })
+          category: bCategory,
+          tags: bTags,
+          bullet_breakdown: bullets,
+          compiled_description: description,
+        } as any)
         .select()
         .single();
       if (error) throw error;
+
+      // Copy references to project_references
+      if (references.length > 0) {
+        const refCopies = references.map((r: any) => ({
+          project_id: data.id,
+          user_id: user!.id,
+          type: r.type,
+          title: r.title,
+          url: r.url || "",
+          description: r.description || "",
+          thumbnail_url: r.thumbnail_url || "",
+          sort_order: r.sort_order,
+        }));
+        await supabase.from("project_references").insert(refCopies);
+      }
+
       await supabase.from("brainstorms").update({ status: "completed" }).eq("id", id!);
       return data;
     },
-    onSuccess: () => {
+    onSuccess: (data) => {
       toast.success("Promoted to project!");
-      navigate("/projects");
+      queryClient.invalidateQueries({ queryKey: ["sidebar-items"] });
+      navigate(`/projects/${data.id}`);
     },
     onError: (e: Error) => toast.error(e.message),
   });
@@ -369,6 +436,59 @@ export default function BrainstormWorkspace() {
       setViewingRef(ref);
     }
   };
+
+  const handleEditRef = (ref: any) => {
+    setEditingRef(ref);
+    setRefForm({ title: ref.title, url: ref.url || "", description: ref.description || "" });
+  };
+
+  const handleSaveEditRef = async () => {
+    if (!editingRef) return;
+    updateReference.mutate({
+      refId: editingRef.id,
+      fields: {
+        title: refForm.title,
+        url: refForm.url,
+        description: refForm.description,
+      },
+    });
+  };
+
+  const toggleRefViewMode = (mode: "grid" | "list") => {
+    setRefViewMode(mode);
+    localStorage.setItem("ref-view-mode", mode);
+  };
+
+  const handleRefSortChange = (val: string) => {
+    setRefSortMode(val as SortMode);
+    localStorage.setItem("ref-sort-mode", val);
+  };
+
+  const toggleGroupCollapse = (type: string) => {
+    setCollapsedGroups(prev => {
+      const next = new Set(prev);
+      next.has(type) ? next.delete(type) : next.add(type);
+      localStorage.setItem(`ref-collapse-${id}`, JSON.stringify([...next]));
+      return next;
+    });
+  };
+
+  const sortRefs = (refs: any[]) => {
+    const sorted = [...refs];
+    switch (refSortMode) {
+      case "az": return sorted.sort((a, b) => a.title.localeCompare(b.title));
+      case "za": return sorted.sort((a, b) => b.title.localeCompare(a.title));
+      case "newest": return sorted.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+      case "oldest": return sorted.sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime());
+      default: return sorted;
+    }
+  };
+
+  const groupedRefs = REF_TYPE_ORDER.map(type => ({
+    type,
+    label: REF_TYPE_LABELS[type],
+    items: sortRefs(references.filter((r: any) => r.type === type)),
+  })).filter(g => g.items.length > 0);
 
   const handleSubmitAnswer = async () => {
     if (!answer.trim() || isThinking) return;
@@ -705,31 +825,51 @@ export default function BrainstormWorkspace() {
 
           {/* References */}
           <div className="space-y-4">
-            <div className="flex items-center justify-between">
+            <div className="flex items-center justify-between flex-wrap gap-2">
               <h2 className="text-lg font-semibold">References</h2>
-              {!isCompleted && (
-                <Popover>
-                  <PopoverTrigger asChild>
-                    <Button variant="outline" size="sm" className="gap-1">
-                      <Plus className="h-3 w-3" /> Add
-                    </Button>
-                  </PopoverTrigger>
-                  <PopoverContent className="w-44 p-1" align="end">
-                    {(["link", "image", "video", "note"] as RefType[]).map((type) => {
-                      const Icon = REF_ICONS[type];
-                      return (
-                        <button
-                          key={type}
-                          onClick={() => setAddRefType(type)}
-                          className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-sm hover:bg-accent capitalize"
-                        >
-                          <Icon className="h-4 w-4" /> {type}
-                        </button>
-                      );
-                    })}
-                  </PopoverContent>
-                </Popover>
-              )}
+              <div className="flex items-center gap-1">
+                <Select value={refSortMode} onValueChange={handleRefSortChange}>
+                  <SelectTrigger className="h-8 w-[130px] text-xs">
+                    <ArrowUpDown className="h-3 w-3 mr-1" />
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="newest">Newest</SelectItem>
+                    <SelectItem value="oldest">Oldest</SelectItem>
+                    <SelectItem value="az">A → Z</SelectItem>
+                    <SelectItem value="za">Z → A</SelectItem>
+                  </SelectContent>
+                </Select>
+                <Button variant="ghost" size="icon" className={`h-8 w-8 ${refViewMode === "grid" ? "text-primary" : ""}`} onClick={() => toggleRefViewMode("grid")}>
+                  <Grid3X3 className="h-3.5 w-3.5" />
+                </Button>
+                <Button variant="ghost" size="icon" className={`h-8 w-8 ${refViewMode === "list" ? "text-primary" : ""}`} onClick={() => toggleRefViewMode("list")}>
+                  <List className="h-3.5 w-3.5" />
+                </Button>
+                {!isCompleted && (
+                  <Popover>
+                    <PopoverTrigger asChild>
+                      <Button variant="outline" size="sm" className="gap-1 h-8">
+                        <Plus className="h-3 w-3" /> Add
+                      </Button>
+                    </PopoverTrigger>
+                    <PopoverContent className="w-44 p-1" align="end">
+                      {(["link", "image", "video", "note"] as RefType[]).map((type) => {
+                        const Icon = REF_ICONS[type];
+                        return (
+                          <button
+                            key={type}
+                            onClick={() => setAddRefType(type)}
+                            className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-sm hover:bg-accent capitalize"
+                          >
+                            <Icon className="h-4 w-4" /> {type}
+                          </button>
+                        );
+                      })}
+                    </PopoverContent>
+                  </Popover>
+                )}
+              </div>
             </div>
 
             {references.length === 0 ? (
@@ -738,50 +878,91 @@ export default function BrainstormWorkspace() {
                 <p className="text-sm text-muted-foreground">No references yet</p>
               </div>
             ) : (
-              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                {references.map((ref: any) => {
-                  const Icon = REF_ICONS[ref.type] || StickyNote;
-                  const thumbnail = getRefThumbnail(ref);
+              <div className="space-y-3">
+                {groupedRefs.map((group) => {
+                  const GroupIcon = REF_ICONS[group.type] || StickyNote;
+                  const isGroupCollapsed = collapsedGroups.has(group.type);
                   return (
-                    <Card
-                      key={ref.id}
-                      className="border-border/50 bg-card/50 cursor-pointer hover:border-primary/30 transition-colors"
-                      onClick={() => handleRefClick(ref)}
-                    >
-                      <CardContent className="p-3">
-                        <div className="flex items-start gap-3">
-                          {/* Thumbnail */}
-                          {thumbnail ? (
-                            <div className="h-12 w-16 rounded overflow-hidden shrink-0 bg-muted">
-                              <img src={thumbnail} alt="" className="h-full w-full object-cover" />
-                            </div>
-                          ) : (
-                            <div className="h-12 w-16 rounded bg-muted/50 flex items-center justify-center shrink-0">
-                              <Icon className="h-5 w-5 text-muted-foreground/50" />
-                            </div>
-                          )}
-                          <div className="flex-1 min-w-0">
-                            <p className="text-sm font-medium truncate">{ref.title}</p>
-                            {ref.description && (
-                              <p className="text-xs text-muted-foreground line-clamp-2">{ref.description}</p>
-                            )}
-                          </div>
-                          {!isCompleted && (
-                            <Button
-                              variant="ghost"
-                              size="icon"
-                              className="h-6 w-6 shrink-0 text-muted-foreground hover:text-destructive"
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                deleteReference.mutate(ref);
-                              }}
-                            >
-                              <X className="h-3 w-3" />
-                            </Button>
-                          )}
+                    <Collapsible key={group.type} open={!isGroupCollapsed} onOpenChange={() => toggleGroupCollapse(group.type)}>
+                      <CollapsibleTrigger className="flex items-center gap-2 w-full text-left py-1 hover:text-primary transition-colors">
+                        {isGroupCollapsed ? <ChevronRight className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
+                        <GroupIcon className="h-3.5 w-3.5 text-muted-foreground" />
+                        <span className="text-sm font-medium">{group.label}</span>
+                        <Badge variant="secondary" className="text-[10px] ml-1">{group.items.length}</Badge>
+                      </CollapsibleTrigger>
+                      <CollapsibleContent className="mt-2">
+                        <div className={refViewMode === "grid" ? "grid grid-cols-1 gap-3 sm:grid-cols-2" : "space-y-2"}>
+                          {group.items.map((ref: any) => {
+                            const Icon = REF_ICONS[ref.type] || StickyNote;
+                            const thumbnail = getRefThumbnail(ref);
+
+                            if (refViewMode === "list") {
+                              return (
+                                <div
+                                  key={ref.id}
+                                  className="flex items-center gap-3 p-2 rounded-lg border border-border/50 bg-card/50 cursor-pointer hover:border-primary/30 transition-colors"
+                                  onClick={() => handleRefClick(ref)}
+                                >
+                                  <Icon className="h-4 w-4 text-muted-foreground shrink-0" />
+                                  <span className="text-sm font-medium truncate flex-1">{ref.title}</span>
+                                  {ref.description && (
+                                    <span className="text-xs text-muted-foreground truncate max-w-[200px] hidden sm:inline">{ref.description}</span>
+                                  )}
+                                  {!isCompleted && (
+                                    <div className="flex items-center gap-0.5 shrink-0">
+                                      <Button variant="ghost" size="icon" className="h-6 w-6 text-muted-foreground hover:text-primary" onClick={(e) => { e.stopPropagation(); handleEditRef(ref); }}>
+                                        <Pencil className="h-3 w-3" />
+                                      </Button>
+                                      <Button variant="ghost" size="icon" className="h-6 w-6 text-muted-foreground hover:text-destructive" onClick={(e) => { e.stopPropagation(); deleteReference.mutate(ref); }}>
+                                        <X className="h-3 w-3" />
+                                      </Button>
+                                    </div>
+                                  )}
+                                </div>
+                              );
+                            }
+
+                            return (
+                              <Card
+                                key={ref.id}
+                                className="border-border/50 bg-card/50 cursor-pointer hover:border-primary/30 transition-colors"
+                                onClick={() => handleRefClick(ref)}
+                              >
+                                <CardContent className="p-3">
+                                  <div className="flex items-start gap-3">
+                                    {thumbnail ? (
+                                      <div className="h-12 w-16 rounded overflow-hidden shrink-0 bg-muted">
+                                        <img src={thumbnail} alt="" className="h-full w-full object-cover" />
+                                      </div>
+                                    ) : (
+                                      <div className="h-12 w-16 rounded bg-muted/50 flex items-center justify-center shrink-0">
+                                        <Icon className="h-5 w-5 text-muted-foreground/50" />
+                                      </div>
+                                    )}
+                                    <div className="flex-1 min-w-0">
+                                      <p className="text-sm font-medium truncate">{ref.title}</p>
+                                      {ref.description && (
+                                        <p className="text-xs text-muted-foreground line-clamp-2">{ref.description}</p>
+                                      )}
+                                    </div>
+                                    {!isCompleted && (
+                                      <div className="flex flex-col gap-0.5 shrink-0">
+                                        <Button variant="ghost" size="icon" className="h-6 w-6 text-muted-foreground hover:text-primary" onClick={(e) => { e.stopPropagation(); handleEditRef(ref); }}>
+                                          <Pencil className="h-3 w-3" />
+                                        </Button>
+                                        <Button variant="ghost" size="icon" className="h-6 w-6 text-muted-foreground hover:text-destructive" onClick={(e) => { e.stopPropagation(); deleteReference.mutate(ref); }}>
+                                          <X className="h-3 w-3" />
+                                        </Button>
+                                      </div>
+                                    )}
+                                  </div>
+                                </CardContent>
+                              </Card>
+                            );
+                          })}
                         </div>
-                      </CardContent>
-                    </Card>
+                      </CollapsibleContent>
+                    </Collapsible>
                   );
                 })}
               </div>
@@ -882,10 +1063,11 @@ export default function BrainstormWorkspace() {
       )}
 
       {/* Add Reference Dialog */}
-      <Dialog open={!!addRefType} onOpenChange={(open) => { if (!open) setAddRefType(null); }}>
+      <Dialog open={!!addRefType} onOpenChange={(open) => { if (!open) { setAddRefType(null); setRefForm({ title: "", url: "", description: "" }); setRefFile(null); } }}>
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
             <DialogTitle className="capitalize">Add {addRefType}</DialogTitle>
+            <DialogDescription className="sr-only">Add a new reference</DialogDescription>
           </DialogHeader>
           <div className="space-y-3">
             <Input
@@ -920,6 +1102,45 @@ export default function BrainstormWorkspace() {
               disabled={!refForm.title.trim() || addReference.isPending}
             >
               {addReference.isPending ? "Adding…" : "Add Reference"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Edit Reference Dialog */}
+      <Dialog open={!!editingRef} onOpenChange={(open) => { if (!open) { setEditingRef(null); setRefForm({ title: "", url: "", description: "" }); } }}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Edit Reference</DialogTitle>
+            <DialogDescription className="sr-only">Edit an existing reference</DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3">
+            <Input
+              placeholder="Title"
+              value={refForm.title}
+              onChange={(e) => setRefForm(p => ({ ...p, title: e.target.value }))}
+            />
+            {editingRef?.type !== "note" && editingRef?.type !== "image" && (
+              <Input
+                placeholder="URL"
+                value={refForm.url}
+                onChange={(e) => setRefForm(p => ({ ...p, url: e.target.value }))}
+              />
+            )}
+            <Textarea
+              placeholder="Description (optional)"
+              value={refForm.description}
+              onChange={(e) => setRefForm(p => ({ ...p, description: e.target.value }))}
+              className="resize-none"
+            />
+          </div>
+          <DialogFooter>
+            <Button variant="ghost" onClick={() => setEditingRef(null)}>Cancel</Button>
+            <Button
+              onClick={handleSaveEditRef}
+              disabled={!refForm.title.trim() || updateReference.isPending}
+            >
+              {updateReference.isPending ? "Saving…" : "Save Changes"}
             </Button>
           </DialogFooter>
         </DialogContent>

@@ -41,7 +41,7 @@ function useSectionItems(table: "ideas" | "brainstorms" | "projects", enabled: b
       }));
     },
     enabled,
-    staleTime: 30_000,
+    staleTime: 5_000,
   });
 }
 
@@ -72,7 +72,7 @@ export function AppSidebar() {
 
   const getDetailPath = (section: string, itemId: string) => {
     if (section === "Brainstorms") return `/brainstorms/${itemId}`;
-    if (section === "Projects") return `/projects`;
+    if (section === "Projects") return `/projects/${itemId}`;
     return `/ideas`;
   };
 

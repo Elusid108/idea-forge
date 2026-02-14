@@ -235,6 +235,7 @@ export default function IdeasPage() {
     },
     onSuccess: (data) => {
       queryClient.invalidateQueries({ queryKey: ["ideas"] });
+      queryClient.invalidateQueries({ queryKey: ["sidebar-items"] });
       setDumpOpen(false);
       setRawDump("");
       toast.success("Idea captured! AI is processing…");
@@ -286,6 +287,7 @@ export default function IdeasPage() {
     },
     onSuccess: (data) => {
       queryClient.invalidateQueries({ queryKey: ["ideas"] });
+      queryClient.invalidateQueries({ queryKey: ["sidebar-items"] });
       setSelectedIdea(null);
       navigate(`/brainstorms/${data.id}`);
     },

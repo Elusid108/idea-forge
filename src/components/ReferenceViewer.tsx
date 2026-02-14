@@ -49,20 +49,12 @@ export default function ReferenceViewer({ reference, open, onOpenChange }: Refer
   if (reference.type === "image") {
     return (
       <Dialog open={open} onOpenChange={onOpenChange}>
-        <DialogContent className="sm:max-w-4xl p-0 bg-black/95 border-none">
+        <DialogContent className="sm:max-w-4xl p-0 bg-black/95 border-none [&>button]:text-white [&>button]:hover:opacity-100">
           <DialogHeader className="sr-only">
             <DialogTitle>{reference.title}</DialogTitle>
             <DialogDescription>Image viewer</DialogDescription>
           </DialogHeader>
-          <div className="relative flex items-center justify-center min-h-[60vh]">
-            <Button
-              variant="ghost"
-              size="icon"
-              className="absolute top-2 right-2 z-10 text-white hover:bg-white/10"
-              onClick={() => onOpenChange(false)}
-            >
-              <X className="h-5 w-5" />
-            </Button>
+          <div className="flex items-center justify-center min-h-[60vh] p-4">
             <img
               src={reference.url || ""}
               alt={reference.title}
@@ -81,39 +73,29 @@ export default function ReferenceViewer({ reference, open, onOpenChange }: Refer
 
     return (
       <Dialog open={open} onOpenChange={onOpenChange}>
-        <DialogContent className="sm:max-w-4xl p-0 bg-black/95 border-none">
+        <DialogContent className="sm:max-w-4xl p-0 bg-black/95 border-none [&>button]:text-white [&>button]:hover:opacity-100">
           <DialogHeader className="sr-only">
             <DialogTitle>{reference.title}</DialogTitle>
             <DialogDescription>Video viewer</DialogDescription>
           </DialogHeader>
-          <div className="relative">
-            <Button
-              variant="ghost"
-              size="icon"
-              className="absolute top-2 right-2 z-10 text-white hover:bg-white/10"
-              onClick={() => onOpenChange(false)}
-            >
-              <X className="h-5 w-5" />
-            </Button>
-            <div className="aspect-video">
-              {ytId ? (
-                <iframe
-                  src={`https://www.youtube.com/embed/${ytId}?autoplay=1`}
-                  className="w-full h-full"
-                  allow="autoplay; fullscreen"
-                  allowFullScreen
-                />
-              ) : vimeoId ? (
-                <iframe
-                  src={`https://player.vimeo.com/video/${vimeoId}?autoplay=1`}
-                  className="w-full h-full"
-                  allow="autoplay; fullscreen"
-                  allowFullScreen
-                />
-              ) : (
-                <video src={url} controls autoPlay className="w-full h-full" />
-              )}
-            </div>
+          <div className="aspect-video">
+            {ytId ? (
+              <iframe
+                src={`https://www.youtube.com/embed/${ytId}?autoplay=1`}
+                className="w-full h-full"
+                allow="autoplay; fullscreen"
+                allowFullScreen
+              />
+            ) : vimeoId ? (
+              <iframe
+                src={`https://player.vimeo.com/video/${vimeoId}?autoplay=1`}
+                className="w-full h-full"
+                allow="autoplay; fullscreen"
+                allowFullScreen
+              />
+            ) : (
+              <video src={url} controls autoPlay className="w-full h-full" />
+            )}
           </div>
         </DialogContent>
       </Dialog>
