@@ -56,6 +56,10 @@ serve(async (req) => {
               parameters: {
                 type: "object",
                 properties: {
+                  title: {
+                    type: "string",
+                    description: "A short punchy 3-5 word title for the idea.",
+                  },
                   processed_summary: {
                     type: "string",
                     description: "A clear, professional paragraph explaining the core concept.",
@@ -84,7 +88,7 @@ serve(async (req) => {
                     description: "3-6 highly specific, searchable keywords.",
                   },
                 },
-                required: ["processed_summary", "key_features", "category", "tags"],
+                required: ["title", "processed_summary", "key_features", "category", "tags"],
                 additionalProperties: false,
               },
             },
@@ -129,6 +133,7 @@ serve(async (req) => {
     const { error: updateError } = await supabase
       .from("ideas")
       .update({
+        title: result.title || "",
         processed_summary: result.processed_summary,
         key_features: result.key_features,
         category: result.category,

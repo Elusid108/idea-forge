@@ -55,7 +55,10 @@ function IdeaCard({ idea, onClick }: { idea: any; onClick: () => void }) {
         </div>
       </CardHeader>
       <CardContent className="space-y-2">
-        <p className="text-sm font-medium leading-relaxed line-clamp-3">
+        {isProcessed && idea.title ? (
+          <p className="text-sm font-bold leading-snug">{idea.title}</p>
+        ) : null}
+        <p className="text-sm text-muted-foreground leading-relaxed line-clamp-3">
           {isProcessed && idea.processed_summary
             ? idea.processed_summary
             : idea.raw_dump.slice(0, 140) + (idea.raw_dump.length > 140 ? "…" : "")}
@@ -103,7 +106,7 @@ function IdeaDetailModal({
               {idea.category && (
                 <Badge className={`text-xs border ${categoryClass}`}>{idea.category}</Badge>
               )}
-              <DialogTitle className="sr-only">Idea Details</DialogTitle>
+              <DialogTitle>{idea.title || "Idea Details"}</DialogTitle>
             </div>
             <Button
               variant="ghost"
@@ -243,12 +246,16 @@ export default function IdeasPage() {
 
   const startBrainstorm = useMutation({
     mutationFn: async (idea: any) => {
-      const title = idea.processed_summary
-        ? idea.processed_summary.slice(0, 50) + (idea.processed_summary.length > 50 ? "…" : "")
-        : "Brainstorm";
+      const title = idea.title || "Brainstorm";
       const { data, error } = await supabase
         .from("brainstorms")
-        .insert({ idea_id: idea.id, title, user_id: user!.id })
+        .insert({
+          idea_id: idea.id,
+          title,
+          user_id: user!.id,
+          compiled_description: idea.processed_summary || "",
+          bullet_breakdown: idea.key_features || "",
+        })
         .select()
         .single();
       if (error) throw error;

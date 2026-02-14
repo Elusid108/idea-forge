@@ -118,6 +118,7 @@ export type Database = {
           raw_dump: string
           status: string
           tags: string[] | null
+          title: string | null
           updated_at: string
           user_id: string
         }
@@ -130,6 +131,7 @@ export type Database = {
           raw_dump?: string
           status?: string
           tags?: string[] | null
+          title?: string | null
           updated_at?: string
           user_id: string
         }
@@ -142,6 +144,7 @@ export type Database = {
           raw_dump?: string
           status?: string
           tags?: string[] | null
+          title?: string | null
           updated_at?: string
           user_id?: string
         }

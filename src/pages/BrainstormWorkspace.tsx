@@ -1,8 +1,8 @@
-import { useState, useRef, useEffect } from "react";
-import { useParams, useNavigate, Link } from "react-router-dom";
+import { useState, useEffect } from "react";
+import { useParams, useNavigate } from "react-router-dom";
 import {
-  ArrowLeft, Plus, Link as LinkIcon, Image, Film, StickyNote, X, Send,
-  Loader2, Rocket, Lightbulb, Bot, User as UserIcon,
+  ArrowLeft, Plus, Link as LinkIcon, Image, Film, StickyNote, X,
+  Loader2, Rocket, Lightbulb, Bot, Send,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -12,7 +12,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Separator } from "@/components/ui/separator";
-import { ScrollArea } from "@/components/ui/scroll-area";
+import { Skeleton } from "@/components/ui/skeleton";
 import { useAuth } from "@/contexts/AuthContext";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
@@ -33,7 +33,6 @@ export default function BrainstormWorkspace() {
   const { user } = useAuth();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
-  const chatEndRef = useRef<HTMLDivElement>(null);
 
   // --- State ---
   const [editingTitle, setEditingTitle] = useState(false);
@@ -41,10 +40,14 @@ export default function BrainstormWorkspace() {
   const [addRefType, setAddRefType] = useState<RefType | null>(null);
   const [refForm, setRefForm] = useState({ title: "", url: "", description: "" });
   const [refFile, setRefFile] = useState<File | null>(null);
-  const [chatInput, setChatInput] = useState("");
-  const [isSending, setIsSending] = useState(false);
   const [description, setDescription] = useState("");
   const [bullets, setBullets] = useState("");
+
+  // Flashcard Q&A state
+  const [currentQuestion, setCurrentQuestion] = useState("");
+  const [answer, setAnswer] = useState("");
+  const [isThinking, setIsThinking] = useState(false);
+  const [questionLoaded, setQuestionLoaded] = useState(false);
 
   // --- Queries ---
   const { data: brainstorm, isLoading } = useQuery({
@@ -52,7 +55,7 @@ export default function BrainstormWorkspace() {
     queryFn: async () => {
       const { data, error } = await supabase
         .from("brainstorms")
-        .select("*, ideas(raw_dump, processed_summary)")
+        .select("*, ideas(raw_dump, processed_summary, title, key_features, tags, category)")
         .eq("id", id!)
         .single();
       if (error) throw error;
@@ -84,11 +87,43 @@ export default function BrainstormWorkspace() {
     }
   }, [brainstorm]);
 
+  // Generate first question on load
   useEffect(() => {
-    chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [brainstorm?.chat_history]);
+    if (brainstorm && !questionLoaded && !isThinking) {
+      setQuestionLoaded(true);
+      generateFirstQuestion();
+    }
+  }, [brainstorm, questionLoaded]);
 
   const chatHistory: ChatMsg[] = (brainstorm?.chat_history as ChatMsg[]) || [];
+
+  const getContext = () => ({
+    title: brainstorm?.title || "",
+    idea_raw: (brainstorm as any)?.ideas?.raw_dump || "",
+    idea_summary: (brainstorm as any)?.ideas?.processed_summary || "",
+    references: references.map((r: any) => `[${r.type}] ${r.title}: ${r.description || r.url}`).join("\n"),
+  });
+
+  const generateFirstQuestion = async () => {
+    setIsThinking(true);
+    try {
+      const { data, error } = await supabase.functions.invoke("brainstorm-chat", {
+        body: {
+          mode: "generate_question",
+          compiled_description: brainstorm?.compiled_description || "",
+          bullet_breakdown: brainstorm?.bullet_breakdown || "",
+          chat_history: chatHistory,
+          context: getContext(),
+        },
+      });
+      if (error) throw error;
+      setCurrentQuestion(data.question);
+    } catch (e: any) {
+      toast.error("Failed to generate question: " + e.message);
+    } finally {
+      setIsThinking(false);
+    }
+  };
 
   // --- Mutations ---
   const updateBrainstorm = useMutation({
@@ -199,42 +234,54 @@ export default function BrainstormWorkspace() {
     }
   };
 
-  const handleSendChat = async () => {
-    if (!chatInput.trim() || isSending) return;
-    const userMsg: ChatMsg = { role: "user", content: chatInput.trim() };
+  const handleSubmitAnswer = async () => {
+    if (!answer.trim() || isThinking) return;
+    setIsThinking(true);
+
+    const userMsg: ChatMsg = { role: "user", content: `Q: ${currentQuestion}\nA: ${answer.trim()}` };
     const newHistory = [...chatHistory, userMsg];
 
-    // Optimistically update chat
-    queryClient.setQueryData(["brainstorm", id], (old: any) => ({
-      ...old,
-      chat_history: newHistory,
-    }));
-    setChatInput("");
-    setIsSending(true);
-
     try {
-      const context = {
-        idea_raw: brainstorm?.ideas?.raw_dump || "",
-        idea_summary: brainstorm?.ideas?.processed_summary || "",
-        compiled_description: description,
-        references: references.map((r: any) => `[${r.type}] ${r.title}: ${r.description || r.url}`).join("\n"),
-      };
-
       const { data, error } = await supabase.functions.invoke("brainstorm-chat", {
-        body: { brainstorm_id: id, message: userMsg.content, chat_history: newHistory, context },
+        body: {
+          mode: "submit_answer",
+          answer: answer.trim(),
+          question: currentQuestion,
+          compiled_description: description,
+          bullet_breakdown: bullets,
+          chat_history: newHistory,
+          context: getContext(),
+        },
       });
-
       if (error) throw error;
 
-      const assistantMsg: ChatMsg = { role: "assistant", content: data.reply };
+      const { updated_description, updated_bullets, next_question } = data;
+
+      // Update local state
+      setDescription(updated_description);
+      setBullets(updated_bullets);
+      setCurrentQuestion(next_question);
+      setAnswer("");
+
+      // Build final chat history with AI response
+      const assistantMsg: ChatMsg = {
+        role: "assistant",
+        content: `Updated description and bullets. Next question: ${next_question}`,
+      };
       const finalHistory = [...newHistory, assistantMsg];
 
-      await supabase.from("brainstorms").update({ chat_history: finalHistory }).eq("id", id!);
+      // Save to DB
+      await supabase.from("brainstorms").update({
+        compiled_description: updated_description,
+        bullet_breakdown: updated_bullets,
+        chat_history: finalHistory,
+      }).eq("id", id!);
+
       queryClient.invalidateQueries({ queryKey: ["brainstorm", id] });
     } catch (e: any) {
-      toast.error("Chat failed: " + e.message);
+      toast.error("Failed: " + e.message);
     } finally {
-      setIsSending(false);
+      setIsThinking(false);
     }
   };
 
@@ -379,7 +426,7 @@ export default function BrainstormWorkspace() {
           )}
         </div>
 
-        {/* Right: AI Chat + Synthesis */}
+        {/* Right: Synthesis + Flashcard Q&A */}
         <div className="lg:col-span-2 space-y-4">
           {/* Compiled Description */}
           <div>
@@ -407,69 +454,51 @@ export default function BrainstormWorkspace() {
 
           <Separator />
 
-          {/* AI Chat */}
+          {/* Flashcard Q&A */}
           <div>
-            <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-2">AI Research Partner</p>
-            <div className="rounded-lg border border-border bg-muted/30">
-              <ScrollArea className="h-[300px] p-3">
-                {chatHistory.length === 0 && (
-                  <div className="flex flex-col items-center justify-center h-full text-center">
-                    <Bot className="h-8 w-8 text-muted-foreground/50 mb-2" />
-                    <p className="text-xs text-muted-foreground">Ask me anything about your idea</p>
+            <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-2">AI Interview</p>
+            <Card className="border-border bg-muted/30">
+              <CardContent className="p-4 space-y-3">
+                {isThinking && !currentQuestion ? (
+                  <div className="space-y-2">
+                    <Skeleton className="h-4 w-3/4" />
+                    <Skeleton className="h-4 w-1/2" />
                   </div>
-                )}
-                <div className="space-y-3">
-                  {chatHistory.map((msg, i) => (
-                    <div key={i} className={`flex gap-2 ${msg.role === "user" ? "justify-end" : "justify-start"}`}>
-                      {msg.role === "assistant" && (
-                        <div className="h-6 w-6 rounded-full bg-primary/10 flex items-center justify-center shrink-0">
-                          <Bot className="h-3 w-3 text-primary" />
-                        </div>
-                      )}
-                      <div
-                        className={`rounded-lg px-3 py-2 text-sm max-w-[80%] ${
-                          msg.role === "user"
-                            ? "bg-primary text-primary-foreground"
-                            : "bg-card border border-border"
-                        }`}
-                      >
-                        <p className="whitespace-pre-wrap">{msg.content}</p>
-                      </div>
-                      {msg.role === "user" && (
-                        <div className="h-6 w-6 rounded-full bg-secondary flex items-center justify-center shrink-0">
-                          <UserIcon className="h-3 w-3" />
-                        </div>
-                      )}
-                    </div>
-                  ))}
-                  {isSending && (
-                    <div className="flex gap-2">
-                      <div className="h-6 w-6 rounded-full bg-primary/10 flex items-center justify-center shrink-0">
+                ) : currentQuestion ? (
+                  <>
+                    <div className="flex items-start gap-2">
+                      <div className="h-6 w-6 rounded-full bg-primary/10 flex items-center justify-center shrink-0 mt-0.5">
                         <Bot className="h-3 w-3 text-primary" />
                       </div>
-                      <div className="rounded-lg px-3 py-2 bg-card border border-border">
-                        <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
-                      </div>
+                      <p className="text-sm font-medium leading-relaxed">{currentQuestion}</p>
                     </div>
-                  )}
-                  <div ref={chatEndRef} />
-                </div>
-              </ScrollArea>
-
-              <div className="flex items-center gap-2 border-t border-border p-2">
-                <Input
-                  value={chatInput}
-                  onChange={(e) => setChatInput(e.target.value)}
-                  onKeyDown={(e) => e.key === "Enter" && !e.shiftKey && handleSendChat()}
-                  placeholder="Ask about your idea…"
-                  className="text-sm"
-                  disabled={isSending}
-                />
-                <Button size="icon" onClick={handleSendChat} disabled={!chatInput.trim() || isSending}>
-                  <Send className="h-4 w-4" />
-                </Button>
-              </div>
-            </div>
+                    <Textarea
+                      value={answer}
+                      onChange={(e) => setAnswer(e.target.value)}
+                      placeholder="Type your answer…"
+                      className="min-h-[80px] resize-none text-sm"
+                      disabled={isThinking}
+                    />
+                    <Button
+                      onClick={handleSubmitAnswer}
+                      disabled={!answer.trim() || isThinking}
+                      className="w-full gap-2"
+                    >
+                      {isThinking ? (
+                        <><Loader2 className="h-4 w-4 animate-spin" /> Thinking…</>
+                      ) : (
+                        <><Send className="h-4 w-4" /> Submit Answer</>
+                      )}
+                    </Button>
+                  </>
+                ) : (
+                  <div className="flex flex-col items-center justify-center py-4 text-center">
+                    <Bot className="h-8 w-8 text-muted-foreground/50 mb-2" />
+                    <p className="text-xs text-muted-foreground">Loading interview questions…</p>
+                  </div>
+                )}
+              </CardContent>
+            </Card>
           </div>
         </div>
       </div>
