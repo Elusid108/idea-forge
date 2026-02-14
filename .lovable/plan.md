@@ -1,143 +1,102 @@
 
 
-# Undo/Redo, Tag Updates, Reference Interactions, and Sidebar Nested Lists
+# Delete Confirmations, Category Updates, Link Fix, Brainstorm Tiles, and Storage Setup
 
-This plan covers four features: persistent undo/redo for brainstorm edits, AI-driven tag updates during interviews, clickable reference tiles with viewers/thumbnails, and an expandable sidebar with item titles.
+## 1. Delete Confirmation Dialogs
 
----
+Add an AlertDialog confirmation step before any soft-delete action across the app.
 
-## 1. Persistent Undo/Redo (Ctrl+Z / Ctrl+Y)
+**Files to modify:**
+- `src/pages/Ideas.tsx` -- Wrap the delete button in `IdeaDetailModal` with an AlertDialog ("Are you sure? This will move the idea to trash.")
+- `src/pages/BrainstormWorkspace.tsx` -- Wrap the Delete button with an AlertDialog before calling `deleteBrainstorm.mutate()`
+- `src/pages/Projects.tsx` -- When project deletion is added, include an AlertDialog there too
+- `src/pages/Trash.tsx` -- Wrap the permanent "Delete" button with an AlertDialog ("This cannot be undone. Permanently delete?")
 
-### New database table: `brainstorm_history`
-
-Create a table to store snapshots of brainstorm field changes:
-
-```text
-brainstorm_history
-- id (uuid, PK)
-- brainstorm_id (uuid, FK -> brainstorms.id)
-- user_id (uuid)
-- field_name (text) -- e.g. "compiled_description", "bullet_breakdown", "deleted_reference"
-- old_value (text)
-- new_value (text)
-- metadata (jsonb) -- for reference deletions, store the full reference row
-- created_at (timestamptz)
-- position (integer) -- cursor position in the history stack
-```
-
-RLS: users can only CRUD their own history rows.
-
-### How it works
-
-- Every time the user saves a description edit, bullet edit, or deletes a reference, a history entry is pushed to the DB with the old and new values.
-- A `useUndoRedo` custom hook maintains a pointer into the history stack. Ctrl+Z pops the latest entry and reverts the field (restoring old_value, or re-inserting a deleted reference from metadata). Ctrl+Y re-applies (restoring new_value, or re-deleting the reference).
-- The hook registers a `keydown` listener for `ctrl+z` and `ctrl+y` on the workspace page.
-- History entries are scoped per brainstorm. On page load, the most recent N entries are fetched to populate the stack.
-
-### Files to modify/create
-
-| File | Changes |
-|---|---|
-| Migration SQL | Create `brainstorm_history` table with RLS |
-| `src/hooks/useUndoRedo.ts` (new) | Custom hook: manages history stack, keyboard listeners, undo/redo logic |
-| `src/pages/BrainstormWorkspace.tsx` | Integrate the hook; wrap save handlers to record history entries |
+Each uses the existing `AlertDialog` component from `@/components/ui/alert-dialog`.
 
 ---
 
-## 2. Update Tags During AI Interview
+## 2. AI Category Updates During Interview
 
-Currently the `submit_answer` mode in the edge function only returns `updated_description`, `updated_bullets`, and `next_question`. Tags are never updated after creation.
-
-### Edge function changes
+The `brainstorm-chat` edge function already updates tags and description during `submit_answer`. Category needs the same treatment.
 
 **File: `supabase/functions/brainstorm-chat/index.ts`**
-
-- Add `tags` to the context passed in the system prompt for `submit_answer` mode.
-- Add `updated_tags` to the `process_answer` tool schema -- an array of strings representing the updated tag list based on the evolving brainstorm content.
-- Update the user prompt to instruct the AI to also update the tags.
-
-### Frontend changes
+- Add `- Current category: ${context?.category || "None"}` to the system prompt
+- Add `updated_category` (string) to the `process_answer` tool schema alongside `updated_tags`
+- Update the user prompt to instruct: "5) If the direction has shifted, update the category. Use one of: Product, Process, Fixture/Jig, Tool, Art, Hardware/Electronics, Software/App, Environment/Space, or suggest a new one."
 
 **File: `src/pages/BrainstormWorkspace.tsx`**
-
-- After receiving the `submit_answer` response, read `data.updated_tags` and save it to the brainstorms table alongside the description and bullets.
-- Update the local `brainstormTags` display.
+- Pass `category` in `getContext()`
+- After receiving `submit_answer` response, read `data.updated_category` and include it in the brainstorms table update
+- The UI already reads `brainstorm.category` so it will update automatically on query invalidation
 
 ---
 
-## 3. Clickable Reference Tiles with Thumbnails and Viewers
+## 3. Fix Link Opening Bug
 
-### Reference tile click behavior
+The issue: when a user enters a URL like `google.com` (without `https://`), `window.open("google.com", "_blank")` treats it as a relative path, so the browser navigates to `currentdomain.com/brainstorms/google.com`.
 
-Each reference card becomes clickable with different behavior per type:
+**File: `src/pages/BrainstormWorkspace.tsx`**
+- In `handleRefClick`, before calling `window.open`, prepend `https://` if the URL doesn't start with `http://` or `https://`:
 
-- **Link**: Opens the URL in a new browser tab (`window.open`).
-- **Note**: Opens a Dialog/popup showing the note title and full description.
-- **Image**: Opens a fullscreen lightbox viewer showing the image.
-- **Video**: Opens a fullscreen viewer with a video player (for direct video URLs) or an iframe embed (for YouTube/Vimeo).
+```
+const url = ref.url.match(/^https?:\/\//) ? ref.url : `https://${ref.url}`;
+window.open(url, "_blank", "noopener,noreferrer");
+```
 
-### Thumbnails on reference tiles
+---
 
-- **Images**: Show the stored `url` as a small thumbnail `<img>` on the card.
-- **Videos**: Extract a thumbnail from YouTube/Vimeo URLs using their known thumbnail URL patterns (e.g., `https://img.youtube.com/vi/{id}/mqdefault.jpg`). For other video URLs, show a film icon placeholder.
-- **Links**: Create a new edge function `fetch-link-preview` that fetches the Open Graph `og:image` from a URL's HTML meta tags. When a link reference is created, call this function and store the result in the existing `thumbnail_url` column on `brainstorm_references`. Display the thumbnail on the card if available.
+## 4. Brainstorm Tiles to Match Idea Tiles
 
-### New components/files
+Currently brainstorm cards show: title, ref count badge, status badge, linked idea summary, and date. They should match the idea card layout with category badge, description, and max 4 visible tags.
 
-| File | Purpose |
-|---|---|
-| `src/components/ReferenceViewer.tsx` (new) | Dialog/lightbox component that renders note popup, image viewer, or video player based on type |
-| `supabase/functions/fetch-link-preview/index.ts` (new) | Edge function that fetches a URL, parses `og:image` from HTML, returns thumbnail URL |
+**File: `src/pages/Brainstorms.tsx`**
+- Update the query to also select `category, tags, compiled_description` from brainstorms
+- Redesign the card to match the Ideas tile layout:
+  - Top row: Category badge (colored, left) + Status badge (right)
+  - Title (bold)
+  - Description preview (compiled_description, 3-line clamp) 
+  - Tags row: show max 4 tags, with a "+N more" indicator if there are more than 4
+- Apply the same `CATEGORY_COLORS` map used in Ideas and BrainstormWorkspace
 
-### Modified files
+---
+
+## 5. Storage Setup Guidance
+
+Your uploaded images and videos aren't loading because the storage bucket needs to be created and made public. This requires a one-time database migration.
+
+**Migration SQL** -- Create the `brainstorm-references` storage bucket and set it to public, plus add an RLS policy so authenticated users can upload:
+
+```sql
+INSERT INTO storage.buckets (id, name, public)
+VALUES ('brainstorm-references', 'brainstorm-references', true)
+ON CONFLICT (id) DO UPDATE SET public = true;
+
+CREATE POLICY "Users can upload reference files"
+ON storage.objects FOR INSERT TO authenticated
+WITH CHECK (bucket_id = 'brainstorm-references');
+
+CREATE POLICY "Users can view reference files"
+ON storage.objects FOR SELECT TO authenticated
+USING (bucket_id = 'brainstorm-references');
+
+CREATE POLICY "Users can delete own reference files"
+ON storage.objects FOR DELETE TO authenticated
+USING (bucket_id = 'brainstorm-references');
+```
+
+No code changes needed -- the upload logic in BrainstormWorkspace already uses `supabase.storage.from("brainstorm-references")`. Once the bucket exists and is public, images/videos will load.
+
+---
+
+## Summary of All Changes
 
 | File | Changes |
 |---|---|
-| `src/pages/BrainstormWorkspace.tsx` | Add click handlers per reference type, show thumbnails on cards, integrate ReferenceViewer |
-| `src/pages/BrainstormWorkspace.tsx` | On link/video reference creation, call `fetch-link-preview` to get and store thumbnail |
-
----
-
-## 4. Sidebar with Expandable Nested Lists
-
-### Behavior
-
-- Clicking "Ideas", "Brainstorms", or "Projects" navigates to the list page (current behavior).
-- Clicking the chevron (>) next to each section expands it inline to show the titles of items in that section, fetched from the database.
-- The chevron rotates 90 degrees when expanded (pointing down).
-- Each sub-item is a clickable link that navigates to the detail page (e.g., `/brainstorms/{id}`).
-
-### Implementation
-
-**File: `src/components/AppSidebar.tsx`**
-
-- Add state to track which sections are expanded: `expandedSections: Set<string>`.
-- For each section, split the row into two click zones: the label (navigates) and the chevron button (toggles expand).
-- When expanded, use a React Query hook to fetch items for that section (e.g., `SELECT id, title FROM brainstorms WHERE deleted_at IS NULL ORDER BY created_at DESC LIMIT 20`).
-- Render sub-items as indented `SidebarMenuItem` links below the section label.
-- For brainstorms, link to `/brainstorms/{id}`. For ideas, show `idea.title` and open the idea page. For projects, link to `/projects/{id}` (or the projects page if no detail route exists yet).
-
----
-
-## Summary of All Files
-
-| File | Changes |
-|---|---|
-| Migration SQL | Create `brainstorm_history` table with RLS policies |
-| `src/hooks/useUndoRedo.ts` (new) | Persistent undo/redo hook with keyboard shortcuts |
-| `src/components/ReferenceViewer.tsx` (new) | Lightbox/popup for viewing references by type |
-| `supabase/functions/fetch-link-preview/index.ts` (new) | Edge function to fetch OG image from URLs |
-| `supabase/functions/brainstorm-chat/index.ts` | Add `updated_tags` to `process_answer` tool schema |
-| `src/pages/BrainstormWorkspace.tsx` | Undo/redo integration, tag updates from AI, clickable reference tiles with thumbnails, reference viewer |
-| `src/components/AppSidebar.tsx` | Expandable sections with item sub-lists fetched from DB |
-
----
-
-## Technical Notes
-
-- The `brainstorm_history` table stores atomic changes, not full snapshots, keeping storage efficient. Each undo/redo operation is a single DB read + write.
-- The `fetch-link-preview` edge function fetches only the first ~50KB of HTML to find the og:image meta tag, avoiding downloading full pages.
-- Video thumbnail extraction is client-side using URL pattern matching (YouTube, Vimeo) -- no extra API calls needed.
-- The sidebar item queries are lightweight (just id + title) and cached via React Query with a short stale time so they stay fresh.
-- The `brainstorm-references` storage bucket should be made public so image thumbnails can be displayed. A migration will handle this.
+| Migration SQL | Create `brainstorm-references` storage bucket (public) with RLS policies |
+| `src/pages/Ideas.tsx` | Add AlertDialog confirmation before delete |
+| `src/pages/BrainstormWorkspace.tsx` | Add AlertDialog for delete, fix link URL handling, pass category to AI context, save updated_category |
+| `src/pages/Brainstorms.tsx` | Redesign tiles to match Ideas layout (category badge, description, max 4 tags) |
+| `src/pages/Trash.tsx` | Add AlertDialog for permanent delete |
+| `supabase/functions/brainstorm-chat/index.ts` | Add `updated_category` to process_answer tool schema and system prompt |
 
