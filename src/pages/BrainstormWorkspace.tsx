@@ -529,7 +529,6 @@ export default function BrainstormWorkspace() {
               </div>
             )}
           </div>
-        </div>
 
           {/* Compiled Description - in left column */}
           <div>
