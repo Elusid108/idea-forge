@@ -192,6 +192,7 @@ export default function IdeasPage() {
       const { data, error } = await supabase
         .from("ideas")
         .select("*")
+        .is("deleted_at", null)
         .order("created_at", { ascending: false });
       if (error) throw error;
       return data;
@@ -233,13 +234,13 @@ export default function IdeasPage() {
 
   const deleteIdea = useMutation({
     mutationFn: async (id: string) => {
-      const { error } = await supabase.from("ideas").delete().eq("id", id);
+      const { error } = await supabase.from("ideas").update({ deleted_at: new Date().toISOString() } as any).eq("id", id);
       if (error) throw error;
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["ideas"] });
       setSelectedIdea(null);
-      toast.success("Idea deleted");
+      toast.success("Idea moved to trash");
     },
     onError: (e: Error) => toast.error(e.message),
   });

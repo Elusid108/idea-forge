@@ -12,6 +12,7 @@ import IdeasPage from "@/pages/Ideas";
 import BrainstormsPage from "@/pages/Brainstorms";
 import BrainstormWorkspace from "@/pages/BrainstormWorkspace";
 import ProjectsPage from "@/pages/Projects";
+import TrashPage from "@/pages/Trash";
 import NotFound from "@/pages/NotFound";
 
 const queryClient = new QueryClient();
@@ -72,6 +73,16 @@ const App = () => (
                 <ProtectedRoute>
                   <AppLayout>
                     <ProjectsPage />
+                  </AppLayout>
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/trash"
+              element={
+                <ProtectedRoute>
+                  <AppLayout>
+                    <TrashPage />
                   </AppLayout>
                 </ProtectedRoute>
               }

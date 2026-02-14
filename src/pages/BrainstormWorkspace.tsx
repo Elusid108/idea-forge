@@ -17,6 +17,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import EditableMarkdown from "@/components/EditableMarkdown";
 
 type RefType = "link" | "image" | "video" | "note";
 type ChatMsg = { role: "user" | "assistant"; content: string };
@@ -285,6 +286,13 @@ export default function BrainstormWorkspace() {
     }
   };
 
+  const handleAnswerKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (e.key === "Enter" && !e.shiftKey) {
+      e.preventDefault();
+      handleSubmitAnswer();
+    }
+  };
+
   if (isLoading) {
     return (
       <div className="flex items-center justify-center py-20">
@@ -303,8 +311,8 @@ export default function BrainstormWorkspace() {
   }
 
   return (
-    <div className="space-y-4">
-      {/* Top Bar */}
+    <div className="mx-auto max-w-3xl space-y-6">
+      {/* 1. Title Bar */}
       <div className="flex items-center gap-3 flex-wrap">
         <Button variant="ghost" size="icon" onClick={() => navigate("/brainstorms")}>
           <ArrowLeft className="h-4 w-4" />
@@ -348,159 +356,153 @@ export default function BrainstormWorkspace() {
 
       <Separator />
 
-      {/* Two-column layout */}
-      <div className="grid grid-cols-1 gap-6 lg:grid-cols-5">
-        {/* Left: Reference Board */}
-        <div className="lg:col-span-3 space-y-4">
-          <div className="flex items-center justify-between">
-            <h2 className="text-lg font-semibold">References</h2>
-            <Popover>
-              <PopoverTrigger asChild>
-                <Button variant="outline" size="sm" className="gap-1">
-                  <Plus className="h-3 w-3" /> Add
+      {/* 2. AI Interview (Flashcard Q&A) */}
+      <div>
+        <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-2">AI Interview</p>
+        <Card className="border-border bg-muted/30">
+          <CardContent className="p-4 space-y-3">
+            {isThinking && !currentQuestion ? (
+              <div className="space-y-2">
+                <Skeleton className="h-4 w-3/4" />
+                <Skeleton className="h-4 w-1/2" />
+              </div>
+            ) : currentQuestion ? (
+              <>
+                <div className="flex items-start gap-2">
+                  <div className="h-6 w-6 rounded-full bg-primary/10 flex items-center justify-center shrink-0 mt-0.5">
+                    <Bot className="h-3 w-3 text-primary" />
+                  </div>
+                  <p className="text-sm font-medium leading-relaxed">{currentQuestion}</p>
+                </div>
+                <Textarea
+                  value={answer}
+                  onChange={(e) => setAnswer(e.target.value)}
+                  onKeyDown={handleAnswerKeyDown}
+                  placeholder="Type your answer… (Enter to send, Shift+Enter for newline)"
+                  className="min-h-[80px] resize-none text-sm"
+                  disabled={isThinking}
+                />
+                <Button
+                  onClick={handleSubmitAnswer}
+                  disabled={!answer.trim() || isThinking}
+                  className="w-full gap-2"
+                >
+                  {isThinking ? (
+                    <><Loader2 className="h-4 w-4 animate-spin" /> Thinking…</>
+                  ) : (
+                    <><Send className="h-4 w-4" /> Submit Answer</>
+                  )}
                 </Button>
-              </PopoverTrigger>
-              <PopoverContent className="w-44 p-1" align="end">
-                {(["link", "image", "video", "note"] as RefType[]).map((type) => {
-                  const Icon = REF_ICONS[type];
-                  return (
-                    <button
-                      key={type}
-                      onClick={() => setAddRefType(type)}
-                      className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-sm hover:bg-accent capitalize"
-                    >
-                      <Icon className="h-4 w-4" /> {type}
-                    </button>
-                  );
-                })}
-              </PopoverContent>
-            </Popover>
-          </div>
+              </>
+            ) : (
+              <div className="flex flex-col items-center justify-center py-4 text-center">
+                <Bot className="h-8 w-8 text-muted-foreground/50 mb-2" />
+                <p className="text-xs text-muted-foreground">Loading interview questions…</p>
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      </div>
 
-          {references.length === 0 ? (
-            <div className="flex flex-col items-center justify-center rounded-xl border border-dashed border-border py-12">
-              <StickyNote className="mb-3 h-8 w-8 text-muted-foreground/50" />
-              <p className="text-sm text-muted-foreground">No references yet</p>
-            </div>
-          ) : (
-            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-              {references.map((ref: any) => {
-                const Icon = REF_ICONS[ref.type] || StickyNote;
+      {/* 3. Compiled Description & Bullet Breakdown (wiki-style) */}
+      <div>
+        <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-1">Compiled Description</p>
+        <EditableMarkdown
+          value={description}
+          onChange={setDescription}
+          onSave={handleSaveDescription}
+          placeholder="Synthesize your idea description here…"
+          minHeight="100px"
+        />
+      </div>
+
+      <div>
+        <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-1">Bullet Breakdown</p>
+        <EditableMarkdown
+          value={bullets}
+          onChange={setBullets}
+          onSave={handleSaveBullets}
+          placeholder="- Key point 1&#10;- Key point 2&#10;- Key point 3"
+          minHeight="80px"
+        />
+      </div>
+
+      <Separator />
+
+      {/* 4. References */}
+      <div className="space-y-4">
+        <div className="flex items-center justify-between">
+          <h2 className="text-lg font-semibold">References</h2>
+          <Popover>
+            <PopoverTrigger asChild>
+              <Button variant="outline" size="sm" className="gap-1">
+                <Plus className="h-3 w-3" /> Add
+              </Button>
+            </PopoverTrigger>
+            <PopoverContent className="w-44 p-1" align="end">
+              {(["link", "image", "video", "note"] as RefType[]).map((type) => {
+                const Icon = REF_ICONS[type];
                 return (
-                  <Card key={ref.id} className="border-border/50 bg-card/50">
-                    <CardContent className="p-3">
-                      <div className="flex items-start justify-between gap-2">
-                        <div className="flex items-start gap-2 min-w-0">
-                          <Icon className="h-4 w-4 mt-0.5 shrink-0 text-muted-foreground" />
-                          <div className="min-w-0">
-                            <p className="text-sm font-medium truncate">{ref.title}</p>
-                            {ref.description && (
-                              <p className="text-xs text-muted-foreground line-clamp-2">{ref.description}</p>
-                            )}
-                            {ref.url && ref.type !== "note" && (
-                              <a
-                                href={ref.url}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                className="text-xs text-primary hover:underline truncate block"
-                              >
-                                {ref.url}
-                              </a>
-                            )}
-                          </div>
-                        </div>
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          className="h-6 w-6 shrink-0 text-muted-foreground hover:text-destructive"
-                          onClick={() => deleteReference.mutate(ref.id)}
-                        >
-                          <X className="h-3 w-3" />
-                        </Button>
-                      </div>
-                    </CardContent>
-                  </Card>
+                  <button
+                    key={type}
+                    onClick={() => setAddRefType(type)}
+                    className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-sm hover:bg-accent capitalize"
+                  >
+                    <Icon className="h-4 w-4" /> {type}
+                  </button>
                 );
               })}
-            </div>
-          )}
+            </PopoverContent>
+          </Popover>
         </div>
 
-        {/* Right: Synthesis + Flashcard Q&A */}
-        <div className="lg:col-span-2 space-y-4">
-          {/* Compiled Description */}
-          <div>
-            <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-1">Compiled Description</p>
-            <Textarea
-              value={description}
-              onChange={(e) => setDescription(e.target.value)}
-              onBlur={handleSaveDescription}
-              placeholder="Synthesize your idea description here…"
-              className="min-h-[100px] resize-none text-sm"
-            />
+        {references.length === 0 ? (
+          <div className="flex flex-col items-center justify-center rounded-xl border border-dashed border-border py-12">
+            <StickyNote className="mb-3 h-8 w-8 text-muted-foreground/50" />
+            <p className="text-sm text-muted-foreground">No references yet</p>
           </div>
-
-          {/* Bullet Breakdown */}
-          <div>
-            <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-1">Bullet Breakdown</p>
-            <Textarea
-              value={bullets}
-              onChange={(e) => setBullets(e.target.value)}
-              onBlur={handleSaveBullets}
-              placeholder="- Key point 1&#10;- Key point 2&#10;- Key point 3"
-              className="min-h-[80px] resize-none text-sm"
-            />
-          </div>
-
-          <Separator />
-
-          {/* Flashcard Q&A */}
-          <div>
-            <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-2">AI Interview</p>
-            <Card className="border-border bg-muted/30">
-              <CardContent className="p-4 space-y-3">
-                {isThinking && !currentQuestion ? (
-                  <div className="space-y-2">
-                    <Skeleton className="h-4 w-3/4" />
-                    <Skeleton className="h-4 w-1/2" />
-                  </div>
-                ) : currentQuestion ? (
-                  <>
-                    <div className="flex items-start gap-2">
-                      <div className="h-6 w-6 rounded-full bg-primary/10 flex items-center justify-center shrink-0 mt-0.5">
-                        <Bot className="h-3 w-3 text-primary" />
+        ) : (
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+            {references.map((ref: any) => {
+              const Icon = REF_ICONS[ref.type] || StickyNote;
+              return (
+                <Card key={ref.id} className="border-border/50 bg-card/50">
+                  <CardContent className="p-3">
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="flex items-start gap-2 min-w-0">
+                        <Icon className="h-4 w-4 mt-0.5 shrink-0 text-muted-foreground" />
+                        <div className="min-w-0">
+                          <p className="text-sm font-medium truncate">{ref.title}</p>
+                          {ref.description && (
+                            <p className="text-xs text-muted-foreground line-clamp-2">{ref.description}</p>
+                          )}
+                          {ref.url && ref.type !== "note" && (
+                            <a
+                              href={ref.url}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="text-xs text-primary hover:underline truncate block"
+                            >
+                              {ref.url}
+                            </a>
+                          )}
+                        </div>
                       </div>
-                      <p className="text-sm font-medium leading-relaxed">{currentQuestion}</p>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-6 w-6 shrink-0 text-muted-foreground hover:text-destructive"
+                        onClick={() => deleteReference.mutate(ref.id)}
+                      >
+                        <X className="h-3 w-3" />
+                      </Button>
                     </div>
-                    <Textarea
-                      value={answer}
-                      onChange={(e) => setAnswer(e.target.value)}
-                      placeholder="Type your answer…"
-                      className="min-h-[80px] resize-none text-sm"
-                      disabled={isThinking}
-                    />
-                    <Button
-                      onClick={handleSubmitAnswer}
-                      disabled={!answer.trim() || isThinking}
-                      className="w-full gap-2"
-                    >
-                      {isThinking ? (
-                        <><Loader2 className="h-4 w-4 animate-spin" /> Thinking…</>
-                      ) : (
-                        <><Send className="h-4 w-4" /> Submit Answer</>
-                      )}
-                    </Button>
-                  </>
-                ) : (
-                  <div className="flex flex-col items-center justify-center py-4 text-center">
-                    <Bot className="h-8 w-8 text-muted-foreground/50 mb-2" />
-                    <p className="text-xs text-muted-foreground">Loading interview questions…</p>
-                  </div>
-                )}
-              </CardContent>
-            </Card>
+                  </CardContent>
+                </Card>
+              );
+            })}
           </div>
-        </div>
+        )}
       </div>
 
       {/* Add Reference Dialog */}
