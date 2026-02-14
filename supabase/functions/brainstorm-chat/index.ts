@@ -13,8 +13,8 @@ serve(async (req) => {
     const body = await req.json();
     const { mode, compiled_description, bullet_breakdown, chat_history, context, answer, question } = body;
 
-    if (!mode || !["generate_question", "submit_answer"].includes(mode)) {
-      return new Response(JSON.stringify({ error: "mode must be 'generate_question' or 'submit_answer'" }), {
+    if (!mode || !["generate_question", "submit_answer", "chat_query"].includes(mode)) {
+      return new Response(JSON.stringify({ error: "mode must be 'generate_question', 'submit_answer', or 'chat_query'" }), {
         status: 400,
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
@@ -23,6 +23,54 @@ serve(async (req) => {
     const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY");
     if (!LOVABLE_API_KEY) throw new Error("LOVABLE_API_KEY not configured");
 
+    // --- chat_query mode (post-promotion read-only Q&A) ---
+    if (mode === "chat_query") {
+      const ctx = context || {};
+      const systemPrompt = `You are a helpful read-only assistant for a brainstorm project. You answer questions about the brainstorm content below. You do NOT modify anything — just answer clearly and concisely.
+
+Brainstorm content:
+- Title: ${ctx.title || "Untitled"}
+- Compiled Description: ${ctx.compiled_description || "N/A"}
+- Bullet Breakdown: ${ctx.bullet_breakdown || "N/A"}
+- Tags: ${Array.isArray(ctx.tags) ? ctx.tags.join(", ") : "None"}
+- References: ${ctx.references || "None"}
+- Raw idea dump: ${ctx.idea_raw || "N/A"}
+- AI-processed summary: ${ctx.idea_summary || "N/A"}`;
+
+      const messages: any[] = [
+        { role: "system", content: systemPrompt },
+        ...(chat_history || []).map((m: any) => ({ role: m.role, content: m.content })),
+      ];
+
+      const response = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${LOVABLE_API_KEY}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          model: "google/gemini-3-flash-preview",
+          messages,
+        }),
+      });
+
+      if (!response.ok) {
+        const status = response.status;
+        const text = await response.text();
+        console.error("AI gateway error:", status, text);
+        if (status === 429) throw new Error("Rate limit exceeded. Try again shortly.");
+        if (status === 402) throw new Error("AI credits exhausted.");
+        throw new Error(`AI gateway returned ${status}`);
+      }
+
+      const data = await response.json();
+      const answerText = data.choices?.[0]?.message?.content || "I couldn't generate an answer.";
+      return new Response(JSON.stringify({ answer: answerText }), {
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
+    // --- generate_question and submit_answer modes ---
     const systemPrompt = `You are a structured project interviewer. You help makers refine their ideas by asking one critical question at a time. You build up a comprehensive project description incrementally.
 
 Current project context:

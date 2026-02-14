@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import {
   ArrowLeft, Plus, Link as LinkIcon, Image, Film, StickyNote, X,
-  Loader2, Rocket, Lightbulb, Bot, Send,
+  Loader2, Rocket, Lightbulb, Bot, Send, CheckCircle2,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -13,6 +13,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogD
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Separator } from "@/components/ui/separator";
 import { Skeleton } from "@/components/ui/skeleton";
+import { ScrollArea } from "@/components/ui/scroll-area";
 import { useAuth } from "@/contexts/AuthContext";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
@@ -63,6 +64,12 @@ export default function BrainstormWorkspace() {
   const [questionLoaded, setQuestionLoaded] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
+  // Chatbot state (post-promotion)
+  const [queryChatHistory, setQueryChatHistory] = useState<ChatMsg[]>([]);
+  const [chatInput, setChatInput] = useState("");
+  const [isChatThinking, setIsChatThinking] = useState(false);
+  const chatScrollRef = useRef<HTMLDivElement>(null);
+
   // --- Queries ---
   const { data: brainstorm, isLoading } = useQuery({
     queryKey: ["brainstorm", id],
@@ -100,12 +107,14 @@ export default function BrainstormWorkspace() {
     }
   }, [brainstorm]);
 
+  const isCompleted = brainstorm?.status === "completed";
+
   useEffect(() => {
-    if (brainstorm && !questionLoaded && !isThinking) {
+    if (brainstorm && !questionLoaded && !isThinking && !isCompleted) {
       setQuestionLoaded(true);
       generateFirstQuestion();
     }
-  }, [brainstorm, questionLoaded]);
+  }, [brainstorm, questionLoaded, isCompleted]);
 
   const chatHistory: ChatMsg[] = (brainstorm?.chat_history as ChatMsg[]) || [];
 
@@ -317,6 +326,46 @@ export default function BrainstormWorkspace() {
     }
   };
 
+  // Chatbot handler (post-promotion)
+  const handleChatSubmit = async () => {
+    if (!chatInput.trim() || isChatThinking) return;
+    const userMsg: ChatMsg = { role: "user", content: chatInput.trim() };
+    const newHistory = [...queryChatHistory, userMsg];
+    setQueryChatHistory(newHistory);
+    setChatInput("");
+    setIsChatThinking(true);
+
+    try {
+      const { data, error } = await supabase.functions.invoke("brainstorm-chat", {
+        body: {
+          mode: "chat_query",
+          chat_history: newHistory,
+          context: {
+            ...getContext(),
+            compiled_description: description,
+            bullet_breakdown: bullets,
+            tags: (brainstorm as any)?.tags || [],
+          },
+        },
+      });
+      if (error) throw error;
+      const assistantMsg: ChatMsg = { role: "assistant", content: data.answer };
+      setQueryChatHistory([...newHistory, assistantMsg]);
+    } catch (e: any) {
+      toast.error("Chat failed: " + e.message);
+    } finally {
+      setIsChatThinking(false);
+      setTimeout(() => chatScrollRef.current?.scrollTo({ top: chatScrollRef.current.scrollHeight, behavior: "smooth" }), 100);
+    }
+  };
+
+  const handleChatKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (e.key === "Enter" && !e.shiftKey) {
+      e.preventDefault();
+      handleChatSubmit();
+    }
+  };
+
   if (isLoading) {
     return (
       <div className="flex items-center justify-center py-20">
@@ -342,13 +391,13 @@ export default function BrainstormWorkspace() {
 
   return (
     <div className="space-y-6">
-      {/* 1. Title Bar */}
+      {/* 1. Title Bar: Back, Title, Category, Linked Idea, then ml-auto actions */}
       <div className="flex items-center gap-3 flex-wrap">
         <Button variant="ghost" size="icon" onClick={() => navigate("/brainstorms")}>
           <ArrowLeft className="h-4 w-4" />
         </Button>
 
-        {editingTitle ? (
+        {editingTitle && !isCompleted ? (
           <Input
             value={titleDraft}
             onChange={(e) => setTitleDraft(e.target.value)}
@@ -359,11 +408,15 @@ export default function BrainstormWorkspace() {
           />
         ) : (
           <h1
-            className="text-2xl font-bold cursor-pointer hover:text-primary transition-colors"
-            onClick={() => setEditingTitle(true)}
+            className={`text-2xl font-bold ${!isCompleted ? "cursor-pointer hover:text-primary transition-colors" : ""}`}
+            onClick={() => !isCompleted && setEditingTitle(true)}
           >
             {brainstorm.title}
           </h1>
+        )}
+
+        {brainstormCategory && (
+          <Badge className={`text-xs border ${categoryBadgeClass}`}>{brainstormCategory}</Badge>
         )}
 
         {brainstorm.idea_id && (
@@ -376,26 +429,30 @@ export default function BrainstormWorkspace() {
           </Badge>
         )}
 
-        {brainstormCategory && (
-          <Badge className={`text-xs border ${categoryBadgeClass}`}>{brainstormCategory}</Badge>
-        )}
-
         <div className="ml-auto flex items-center gap-2">
-          <Button
-            variant="destructive"
-            onClick={() => deleteBrainstorm.mutate()}
-            disabled={deleteBrainstorm.isPending}
-          >
-            {deleteBrainstorm.isPending ? "Deleting…" : "Delete"}
-          </Button>
-          <Button
-            onClick={() => promoteToProject.mutate()}
-            disabled={promoteToProject.isPending}
-            className="gap-2"
-          >
-            <Rocket className="h-4 w-4" />
-            {promoteToProject.isPending ? "Promoting…" : "Promote to Project"}
-          </Button>
+          {isCompleted ? (
+            <Badge className="bg-emerald-500/20 text-emerald-400 border-emerald-500/30 border gap-1">
+              <CheckCircle2 className="h-3 w-3" /> Completed
+            </Badge>
+          ) : (
+            <>
+              <Button
+                variant="destructive"
+                onClick={() => deleteBrainstorm.mutate()}
+                disabled={deleteBrainstorm.isPending}
+              >
+                {deleteBrainstorm.isPending ? "Deleting…" : "Delete"}
+              </Button>
+              <Button
+                onClick={() => promoteToProject.mutate()}
+                disabled={promoteToProject.isPending}
+                className="gap-2"
+              >
+                <Rocket className="h-4 w-4" />
+                {promoteToProject.isPending ? "Promoting…" : "Promote to Project"}
+              </Button>
+            </>
+          )}
         </div>
       </div>
 
@@ -403,82 +460,154 @@ export default function BrainstormWorkspace() {
 
       {/* 2. Two-column layout */}
       <div className="grid grid-cols-1 lg:grid-cols-5 gap-6">
-        {/* Left column: AI Interview + References */}
+        {/* Left column: AI Interview / Chatbot, Compiled Description, References */}
         <div className="lg:col-span-3 space-y-6">
-          {/* AI Interview (Flashcard Q&A) */}
+          {/* AI Interview or Chatbot */}
           <div>
-            <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-2">AI Interview</p>
+            <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-2">
+              {isCompleted ? "AI Assistant" : "AI Interview"}
+            </p>
             <Card className="border-border bg-muted/30">
               <CardContent className="p-4 space-y-3">
-                {isThinking && !currentQuestion ? (
-                  <div className="space-y-2">
-                    <Skeleton className="h-4 w-3/4" />
-                    <Skeleton className="h-4 w-1/2" />
-                  </div>
-                ) : currentQuestion ? (
+                {isCompleted ? (
+                  /* Post-promotion chatbot */
                   <>
-                    <div className="flex items-start gap-2">
-                      <div className="h-6 w-6 rounded-full bg-primary/10 flex items-center justify-center shrink-0 mt-0.5">
-                        <Bot className="h-3 w-3 text-primary" />
-                      </div>
-                      <p className="text-sm font-medium leading-relaxed">{currentQuestion}</p>
-                    </div>
-                    <Textarea
-                      ref={textareaRef}
-                      value={answer}
-                      onChange={(e) => setAnswer(e.target.value)}
-                      onKeyDown={handleAnswerKeyDown}
-                      placeholder="Type your answer… (Enter to send, Shift+Enter for newline)"
-                      className="min-h-[80px] resize-none text-sm"
-                      disabled={isThinking}
-                    />
-                    <Button
-                      onClick={handleSubmitAnswer}
-                      disabled={!answer.trim() || isThinking}
-                      className="w-full gap-2"
-                    >
-                      {isThinking ? (
-                        <><Loader2 className="h-4 w-4 animate-spin" /> Thinking…</>
-                      ) : (
-                        <><Send className="h-4 w-4" /> Submit Answer</>
+                    <div ref={chatScrollRef} className="max-h-64 overflow-y-auto space-y-3">
+                      {queryChatHistory.length === 0 && (
+                        <div className="flex flex-col items-center justify-center py-4 text-center">
+                          <Bot className="h-8 w-8 text-muted-foreground/50 mb-2" />
+                          <p className="text-xs text-muted-foreground">Ask questions about this brainstorm's content…</p>
+                        </div>
                       )}
-                    </Button>
+                      {queryChatHistory.map((msg, i) => (
+                        <div key={i} className={`flex items-start gap-2 ${msg.role === "user" ? "justify-end" : ""}`}>
+                          {msg.role === "assistant" && (
+                            <div className="h-6 w-6 rounded-full bg-primary/10 flex items-center justify-center shrink-0 mt-0.5">
+                              <Bot className="h-3 w-3 text-primary" />
+                            </div>
+                          )}
+                          <div className={`rounded-lg px-3 py-2 text-sm max-w-[80%] ${msg.role === "user" ? "bg-primary text-primary-foreground" : "bg-muted"}`}>
+                            {msg.content}
+                          </div>
+                        </div>
+                      ))}
+                      {isChatThinking && (
+                        <div className="flex items-start gap-2">
+                          <div className="h-6 w-6 rounded-full bg-primary/10 flex items-center justify-center shrink-0">
+                            <Bot className="h-3 w-3 text-primary" />
+                          </div>
+                          <Skeleton className="h-8 w-40 rounded-lg" />
+                        </div>
+                      )}
+                    </div>
+                    <div className="flex gap-2">
+                      <Textarea
+                        value={chatInput}
+                        onChange={(e) => setChatInput(e.target.value)}
+                        onKeyDown={handleChatKeyDown}
+                        placeholder="Ask about this brainstorm… (Enter to send)"
+                        className="min-h-[60px] resize-none text-sm flex-1"
+                        disabled={isChatThinking}
+                      />
+                      <Button
+                        onClick={handleChatSubmit}
+                        disabled={!chatInput.trim() || isChatThinking}
+                        size="icon"
+                        className="shrink-0 self-end"
+                      >
+                        {isChatThinking ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
+                      </Button>
+                    </div>
                   </>
                 ) : (
-                  <div className="flex flex-col items-center justify-center py-4 text-center">
-                    <Bot className="h-8 w-8 text-muted-foreground/50 mb-2" />
-                    <p className="text-xs text-muted-foreground">Loading interview questions…</p>
-                  </div>
+                  /* Active interview Q&A */
+                  <>
+                    {isThinking && !currentQuestion ? (
+                      <div className="space-y-2">
+                        <Skeleton className="h-4 w-3/4" />
+                        <Skeleton className="h-4 w-1/2" />
+                      </div>
+                    ) : currentQuestion ? (
+                      <>
+                        <div className="flex items-start gap-2">
+                          <div className="h-6 w-6 rounded-full bg-primary/10 flex items-center justify-center shrink-0 mt-0.5">
+                            <Bot className="h-3 w-3 text-primary" />
+                          </div>
+                          <p className="text-sm font-medium leading-relaxed">{currentQuestion}</p>
+                        </div>
+                        <Textarea
+                          ref={textareaRef}
+                          value={answer}
+                          onChange={(e) => setAnswer(e.target.value)}
+                          onKeyDown={handleAnswerKeyDown}
+                          placeholder="Type your answer… (Enter to send, Shift+Enter for newline)"
+                          className="min-h-[80px] resize-none text-sm"
+                          disabled={isThinking}
+                        />
+                        <Button
+                          onClick={handleSubmitAnswer}
+                          disabled={!answer.trim() || isThinking}
+                          className="w-full gap-2"
+                        >
+                          {isThinking ? (
+                            <><Loader2 className="h-4 w-4 animate-spin" /> Thinking…</>
+                          ) : (
+                            <><Send className="h-4 w-4" /> Submit Answer</>
+                          )}
+                        </Button>
+                      </>
+                    ) : (
+                      <div className="flex flex-col items-center justify-center py-4 text-center">
+                        <Bot className="h-8 w-8 text-muted-foreground/50 mb-2" />
+                        <p className="text-xs text-muted-foreground">Loading interview questions…</p>
+                      </div>
+                    )}
+                  </>
                 )}
               </CardContent>
             </Card>
+          </div>
+
+          {/* Compiled Description */}
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-1">Compiled Description</p>
+            <EditableMarkdown
+              value={description}
+              onChange={setDescription}
+              onSave={handleSaveDescription}
+              placeholder="Synthesize your idea description here…"
+              minHeight="100px"
+              readOnly={isCompleted}
+            />
           </div>
 
           {/* References */}
           <div className="space-y-4">
             <div className="flex items-center justify-between">
               <h2 className="text-lg font-semibold">References</h2>
-              <Popover>
-                <PopoverTrigger asChild>
-                  <Button variant="outline" size="sm" className="gap-1">
-                    <Plus className="h-3 w-3" /> Add
-                  </Button>
-                </PopoverTrigger>
-                <PopoverContent className="w-44 p-1" align="end">
-                  {(["link", "image", "video", "note"] as RefType[]).map((type) => {
-                    const Icon = REF_ICONS[type];
-                    return (
-                      <button
-                        key={type}
-                        onClick={() => setAddRefType(type)}
-                        className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-sm hover:bg-accent capitalize"
-                      >
-                        <Icon className="h-4 w-4" /> {type}
-                      </button>
-                    );
-                  })}
-                </PopoverContent>
-              </Popover>
+              {!isCompleted && (
+                <Popover>
+                  <PopoverTrigger asChild>
+                    <Button variant="outline" size="sm" className="gap-1">
+                      <Plus className="h-3 w-3" /> Add
+                    </Button>
+                  </PopoverTrigger>
+                  <PopoverContent className="w-44 p-1" align="end">
+                    {(["link", "image", "video", "note"] as RefType[]).map((type) => {
+                      const Icon = REF_ICONS[type];
+                      return (
+                        <button
+                          key={type}
+                          onClick={() => setAddRefType(type)}
+                          className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-sm hover:bg-accent capitalize"
+                        >
+                          <Icon className="h-4 w-4" /> {type}
+                        </button>
+                      );
+                    })}
+                  </PopoverContent>
+                </Popover>
+              )}
             </div>
 
             {references.length === 0 ? (
@@ -513,14 +642,16 @@ export default function BrainstormWorkspace() {
                               )}
                             </div>
                           </div>
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            className="h-6 w-6 shrink-0 text-muted-foreground hover:text-destructive"
-                            onClick={() => deleteReference.mutate(ref.id)}
-                          >
-                            <X className="h-3 w-3" />
-                          </Button>
+                          {!isCompleted && (
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="h-6 w-6 shrink-0 text-muted-foreground hover:text-destructive"
+                              onClick={() => deleteReference.mutate(ref.id)}
+                            >
+                              <X className="h-3 w-3" />
+                            </Button>
+                          )}
                         </div>
                       </CardContent>
                     </Card>
@@ -529,33 +660,10 @@ export default function BrainstormWorkspace() {
               </div>
             )}
           </div>
-
-          {/* Compiled Description - in left column */}
-          <div>
-            <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-1">Compiled Description</p>
-            <EditableMarkdown
-              value={description}
-              onChange={setDescription}
-              onSave={handleSaveDescription}
-              placeholder="Synthesize your idea description here…"
-              minHeight="100px"
-            />
-          </div>
         </div>
 
-        {/* Right column: Bullet Breakdown + Tags */}
+        {/* Right column: Tags, then Bullet Breakdown */}
         <div className="lg:col-span-2 space-y-6">
-          <div>
-            <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-1">Bullet Breakdown</p>
-            <EditableMarkdown
-              value={bullets}
-              onChange={setBullets}
-              onSave={handleSaveBullets}
-              placeholder="- Key point 1&#10;- Key point 2&#10;- Key point 3"
-              minHeight="80px"
-            />
-          </div>
-
           {/* Tags */}
           <div>
             <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-2">Tags</p>
@@ -568,6 +676,19 @@ export default function BrainstormWorkspace() {
             ) : (
               <p className="text-xs text-muted-foreground/60 italic">No tags yet</p>
             )}
+          </div>
+
+          {/* Bullet Breakdown */}
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-1">Bullet Breakdown</p>
+            <EditableMarkdown
+              value={bullets}
+              onChange={setBullets}
+              onSave={handleSaveBullets}
+              placeholder="- Key point 1&#10;- Key point 2&#10;- Key point 3"
+              minHeight="80px"
+              readOnly={isCompleted}
+            />
           </div>
         </div>
       </div>
