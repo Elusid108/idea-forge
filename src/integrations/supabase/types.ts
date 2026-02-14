@@ -14,6 +14,50 @@ export type Database = {
   }
   public: {
     Tables: {
+      brainstorm_history: {
+        Row: {
+          brainstorm_id: string
+          created_at: string
+          field_name: string
+          id: string
+          metadata: Json | null
+          new_value: string | null
+          old_value: string | null
+          position: number
+          user_id: string
+        }
+        Insert: {
+          brainstorm_id: string
+          created_at?: string
+          field_name: string
+          id?: string
+          metadata?: Json | null
+          new_value?: string | null
+          old_value?: string | null
+          position?: number
+          user_id: string
+        }
+        Update: {
+          brainstorm_id?: string
+          created_at?: string
+          field_name?: string
+          id?: string
+          metadata?: Json | null
+          new_value?: string | null
+          old_value?: string | null
+          position?: number
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "brainstorm_history_brainstorm_id_fkey"
+            columns: ["brainstorm_id"]
+            isOneToOne: false
+            referencedRelation: "brainstorms"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       brainstorm_references: {
         Row: {
           brainstorm_id: string

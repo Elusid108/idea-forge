@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import {
   ArrowLeft, Plus, Link as LinkIcon, Image, Film, StickyNote, X,
@@ -19,6 +19,8 @@ import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import EditableMarkdown from "@/components/EditableMarkdown";
+import ReferenceViewer, { getVideoThumbnail } from "@/components/ReferenceViewer";
+import { useUndoRedo } from "@/hooks/useUndoRedo";
 
 type RefType = "link" | "image" | "video" | "note";
 type ChatMsg = { role: "user" | "assistant"; content: string };
@@ -70,6 +72,9 @@ export default function BrainstormWorkspace() {
   const [isChatThinking, setIsChatThinking] = useState(false);
   const chatScrollRef = useRef<HTMLDivElement>(null);
 
+  // Reference viewer state
+  const [viewingRef, setViewingRef] = useState<any>(null);
+
   // --- Queries ---
   const { data: brainstorm, isLoading } = useQuery({
     queryKey: ["brainstorm", id],
@@ -109,6 +114,53 @@ export default function BrainstormWorkspace() {
 
   const isCompleted = brainstorm?.status === "completed";
 
+  // --- Undo/Redo ---
+  const handleRevert = useCallback(async (fieldName: string, value: string | null, metadata: any) => {
+    if (fieldName === "compiled_description") {
+      setDescription(value || "");
+      await supabase.from("brainstorms").update({ compiled_description: value || "" }).eq("id", id!);
+      queryClient.invalidateQueries({ queryKey: ["brainstorm", id] });
+      toast.info("Undo: description reverted");
+    } else if (fieldName === "bullet_breakdown") {
+      setBullets(value || "");
+      await supabase.from("brainstorms").update({ bullet_breakdown: value || "" }).eq("id", id!);
+      queryClient.invalidateQueries({ queryKey: ["brainstorm", id] });
+      toast.info("Undo: bullets reverted");
+    } else if (fieldName === "deleted_reference" && metadata) {
+      // Re-insert the deleted reference
+      const { id: _id, ...rest } = metadata;
+      await supabase.from("brainstorm_references").insert({ ...rest, id: metadata.id });
+      queryClient.invalidateQueries({ queryKey: ["brainstorm-refs", id] });
+      toast.info("Undo: reference restored");
+    }
+  }, [id, queryClient]);
+
+  const handleReapply = useCallback(async (fieldName: string, value: string | null, metadata: any) => {
+    if (fieldName === "compiled_description") {
+      setDescription(value || "");
+      await supabase.from("brainstorms").update({ compiled_description: value || "" }).eq("id", id!);
+      queryClient.invalidateQueries({ queryKey: ["brainstorm", id] });
+      toast.info("Redo: description updated");
+    } else if (fieldName === "bullet_breakdown") {
+      setBullets(value || "");
+      await supabase.from("brainstorms").update({ bullet_breakdown: value || "" }).eq("id", id!);
+      queryClient.invalidateQueries({ queryKey: ["brainstorm", id] });
+      toast.info("Redo: bullets updated");
+    } else if (fieldName === "deleted_reference" && metadata) {
+      await supabase.from("brainstorm_references").delete().eq("id", metadata.id);
+      queryClient.invalidateQueries({ queryKey: ["brainstorm-refs", id] });
+      toast.info("Redo: reference deleted");
+    }
+  }, [id, queryClient]);
+
+  const { pushEntry } = useUndoRedo({
+    brainstormId: id,
+    userId: user?.id,
+    onRevert: handleRevert,
+    onReapply: handleReapply,
+    enabled: !isCompleted,
+  });
+
   useEffect(() => {
     if (brainstorm && !questionLoaded && !isThinking && !isCompleted) {
       setQuestionLoaded(true);
@@ -123,6 +175,7 @@ export default function BrainstormWorkspace() {
     idea_raw: (brainstorm as any)?.ideas?.raw_dump || "",
     idea_summary: (brainstorm as any)?.ideas?.processed_summary || "",
     references: references.map((r: any) => `[${r.type}] ${r.title}: ${r.description || r.url}`).join("\n"),
+    tags: (brainstorm as any)?.tags || [],
   });
 
   const generateFirstQuestion = async () => {
@@ -171,7 +224,7 @@ export default function BrainstormWorkspace() {
   });
 
   const addReference = useMutation({
-    mutationFn: async ({ type, title, url, description }: { type: string; title: string; url?: string; description?: string }) => {
+    mutationFn: async ({ type, title, url, description, thumbnail_url }: { type: string; title: string; url?: string; description?: string; thumbnail_url?: string }) => {
       const { error } = await supabase.from("brainstorm_references").insert({
         brainstorm_id: id!,
         user_id: user!.id,
@@ -180,6 +233,7 @@ export default function BrainstormWorkspace() {
         url: url || "",
         description: description || "",
         sort_order: references.length,
+        thumbnail_url: thumbnail_url || "",
       });
       if (error) throw error;
     },
@@ -193,8 +247,10 @@ export default function BrainstormWorkspace() {
   });
 
   const deleteReference = useMutation({
-    mutationFn: async (refId: string) => {
-      const { error } = await supabase.from("brainstorm_references").delete().eq("id", refId);
+    mutationFn: async (ref: any) => {
+      // Record history before deleting
+      await pushEntry("deleted_reference", null, null, ref);
+      const { error } = await supabase.from("brainstorm_references").delete().eq("id", ref.id);
       if (error) throw error;
     },
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["brainstorm-refs", id] }),
@@ -232,14 +288,30 @@ export default function BrainstormWorkspace() {
   };
 
   const handleSaveDescription = () => {
-    if (description !== (brainstorm?.compiled_description || "")) {
+    const oldVal = brainstorm?.compiled_description || "";
+    if (description !== oldVal) {
+      pushEntry("compiled_description", oldVal, description);
       updateBrainstorm.mutate({ compiled_description: description });
     }
   };
 
   const handleSaveBullets = () => {
-    if (bullets !== (brainstorm?.bullet_breakdown || "")) {
+    const oldVal = brainstorm?.bullet_breakdown || "";
+    if (bullets !== oldVal) {
+      pushEntry("bullet_breakdown", oldVal, bullets);
       updateBrainstorm.mutate({ bullet_breakdown: bullets });
+    }
+  };
+
+  const fetchLinkPreview = async (url: string): Promise<string | null> => {
+    try {
+      const { data, error } = await supabase.functions.invoke("fetch-link-preview", {
+        body: { url },
+      });
+      if (error) return null;
+      return data?.thumbnail_url || null;
+    } catch {
+      return null;
     }
   };
 
@@ -259,6 +331,23 @@ export default function BrainstormWorkspace() {
         title: refForm.title || refFile.name,
         url: urlData.publicUrl,
         description: refForm.description,
+        thumbnail_url: urlData.publicUrl,
+      });
+    } else if (addRefType === "link" || addRefType === "video") {
+      // Fetch thumbnail for links and videos
+      let thumbnail_url: string | null = null;
+      if (addRefType === "video" && refForm.url) {
+        thumbnail_url = getVideoThumbnail(refForm.url);
+      }
+      if (!thumbnail_url && refForm.url) {
+        thumbnail_url = await fetchLinkPreview(refForm.url);
+      }
+      addReference.mutate({
+        type: addRefType,
+        title: refForm.title,
+        url: refForm.url,
+        description: refForm.description,
+        thumbnail_url: thumbnail_url || undefined,
       });
     } else {
       addReference.mutate({
@@ -267,6 +356,14 @@ export default function BrainstormWorkspace() {
         url: refForm.url,
         description: refForm.description,
       });
+    }
+  };
+
+  const handleRefClick = (ref: any) => {
+    if (ref.type === "link" && ref.url) {
+      window.open(ref.url, "_blank", "noopener,noreferrer");
+    } else if (ref.type === "note" || ref.type === "image" || ref.type === "video") {
+      setViewingRef(ref);
     }
   };
 
@@ -291,7 +388,7 @@ export default function BrainstormWorkspace() {
       });
       if (error) throw error;
 
-      const { updated_description, updated_bullets, next_question } = data;
+      const { updated_description, updated_bullets, updated_tags, next_question } = data;
 
       setDescription(updated_description);
       setBullets(updated_bullets);
@@ -304,12 +401,16 @@ export default function BrainstormWorkspace() {
       };
       const finalHistory = [...newHistory, assistantMsg];
 
-      await supabase.from("brainstorms").update({
+      const updateFields: Record<string, any> = {
         compiled_description: updated_description,
         bullet_breakdown: updated_bullets,
         chat_history: finalHistory,
-      }).eq("id", id!);
+      };
+      if (updated_tags && Array.isArray(updated_tags)) {
+        updateFields.tags = updated_tags;
+      }
 
+      await supabase.from("brainstorms").update(updateFields).eq("id", id!);
       queryClient.invalidateQueries({ queryKey: ["brainstorm", id] });
     } catch (e: any) {
       toast.error("Failed: " + e.message);
@@ -389,9 +490,16 @@ export default function BrainstormWorkspace() {
   const linkedCategoryClass = linkedIdea?.category ? CATEGORY_COLORS[linkedIdea.category] || "bg-secondary text-secondary-foreground" : "";
   const categoryBadgeClass = brainstormCategory ? CATEGORY_COLORS[brainstormCategory] || "bg-secondary text-secondary-foreground" : "";
 
+  const getRefThumbnail = (ref: any): string | null => {
+    if (ref.thumbnail_url) return ref.thumbnail_url;
+    if (ref.type === "image" && ref.url) return ref.url;
+    if (ref.type === "video" && ref.url) return getVideoThumbnail(ref.url);
+    return null;
+  };
+
   return (
     <div className="space-y-6">
-      {/* 1. Title Bar: Back, Title, Category, Linked Idea, then ml-auto actions */}
+      {/* 1. Title Bar */}
       <div className="flex items-center gap-3 flex-wrap">
         <Button variant="ghost" size="icon" onClick={() => navigate("/brainstorms")}>
           <ArrowLeft className="h-4 w-4" />
@@ -460,7 +568,7 @@ export default function BrainstormWorkspace() {
 
       {/* 2. Two-column layout */}
       <div className="grid grid-cols-1 lg:grid-cols-5 gap-6">
-        {/* Left column: AI Interview / Chatbot, Compiled Description, References */}
+        {/* Left column */}
         <div className="lg:col-span-3 space-y-6">
           {/* AI Interview or Chatbot */}
           <div>
@@ -470,7 +578,6 @@ export default function BrainstormWorkspace() {
             <Card className="border-border bg-muted/30">
               <CardContent className="p-4 space-y-3">
                 {isCompleted ? (
-                  /* Post-promotion chatbot */
                   <>
                     <div ref={chatScrollRef} className="max-h-64 overflow-y-auto space-y-3">
                       {queryChatHistory.length === 0 && (
@@ -520,7 +627,6 @@ export default function BrainstormWorkspace() {
                     </div>
                   </>
                 ) : (
-                  /* Active interview Q&A */
                   <>
                     {isThinking && !currentQuestion ? (
                       <div className="space-y-2">
@@ -619,35 +725,40 @@ export default function BrainstormWorkspace() {
               <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                 {references.map((ref: any) => {
                   const Icon = REF_ICONS[ref.type] || StickyNote;
+                  const thumbnail = getRefThumbnail(ref);
                   return (
-                    <Card key={ref.id} className="border-border/50 bg-card/50">
+                    <Card
+                      key={ref.id}
+                      className="border-border/50 bg-card/50 cursor-pointer hover:border-primary/30 transition-colors"
+                      onClick={() => handleRefClick(ref)}
+                    >
                       <CardContent className="p-3">
-                        <div className="flex items-start justify-between gap-2">
-                          <div className="flex items-start gap-2 min-w-0">
-                            <Icon className="h-4 w-4 mt-0.5 shrink-0 text-muted-foreground" />
-                            <div className="min-w-0">
-                              <p className="text-sm font-medium truncate">{ref.title}</p>
-                              {ref.description && (
-                                <p className="text-xs text-muted-foreground line-clamp-2">{ref.description}</p>
-                              )}
-                              {ref.url && ref.type !== "note" && (
-                                <a
-                                  href={ref.url}
-                                  target="_blank"
-                                  rel="noopener noreferrer"
-                                  className="text-xs text-primary hover:underline truncate block"
-                                >
-                                  {ref.url}
-                                </a>
-                              )}
+                        <div className="flex items-start gap-3">
+                          {/* Thumbnail */}
+                          {thumbnail ? (
+                            <div className="h-12 w-16 rounded overflow-hidden shrink-0 bg-muted">
+                              <img src={thumbnail} alt="" className="h-full w-full object-cover" />
                             </div>
+                          ) : (
+                            <div className="h-12 w-16 rounded bg-muted/50 flex items-center justify-center shrink-0">
+                              <Icon className="h-5 w-5 text-muted-foreground/50" />
+                            </div>
+                          )}
+                          <div className="flex-1 min-w-0">
+                            <p className="text-sm font-medium truncate">{ref.title}</p>
+                            {ref.description && (
+                              <p className="text-xs text-muted-foreground line-clamp-2">{ref.description}</p>
+                            )}
                           </div>
                           {!isCompleted && (
                             <Button
                               variant="ghost"
                               size="icon"
                               className="h-6 w-6 shrink-0 text-muted-foreground hover:text-destructive"
-                              onClick={() => deleteReference.mutate(ref.id)}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                deleteReference.mutate(ref);
+                              }}
                             >
                               <X className="h-3 w-3" />
                             </Button>
@@ -662,7 +773,7 @@ export default function BrainstormWorkspace() {
           </div>
         </div>
 
-        {/* Right column: Tags, then Bullet Breakdown */}
+        {/* Right column */}
         <div className="lg:col-span-2 space-y-6">
           {/* Tags */}
           <div>
@@ -692,6 +803,13 @@ export default function BrainstormWorkspace() {
           </div>
         </div>
       </div>
+
+      {/* Reference Viewer */}
+      <ReferenceViewer
+        reference={viewingRef}
+        open={!!viewingRef}
+        onOpenChange={(open) => { if (!open) setViewingRef(null); }}
+      />
 
       {/* Linked Idea Dialog */}
       {linkedIdea && (
