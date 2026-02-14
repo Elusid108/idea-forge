@@ -1,15 +1,95 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { Plus, Lightbulb, Grid3X3, List, Mic, MicOff } from "lucide-react";
+import { Plus, Lightbulb, Grid3X3, List, Mic, MicOff, Loader2, ChevronDown, ChevronUp } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Textarea } from "@/components/ui/textarea";
 import { useAuth } from "@/contexts/AuthContext";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+
+const CATEGORY_COLORS: Record<string, string> = {
+  "Product": "bg-blue-500/20 text-blue-400 border-blue-500/30",
+  "Process": "bg-emerald-500/20 text-emerald-400 border-emerald-500/30",
+  "Fixture/Jig": "bg-amber-500/20 text-amber-400 border-amber-500/30",
+  "Tool": "bg-orange-500/20 text-orange-400 border-orange-500/30",
+  "Art": "bg-pink-500/20 text-pink-400 border-pink-500/30",
+  "Hardware/Electronics": "bg-red-500/20 text-red-400 border-red-500/30",
+  "Software/App": "bg-violet-500/20 text-violet-400 border-violet-500/30",
+  "Environment/Space": "bg-teal-500/20 text-teal-400 border-teal-500/30",
+};
+
+function IdeaCard({ idea }: { idea: any }) {
+  const [featuresOpen, setFeaturesOpen] = useState(false);
+  const isProcessing = idea.status === "processing";
+  const isProcessed = idea.status === "processed";
+  const categoryClass = CATEGORY_COLORS[idea.category] || "bg-secondary text-secondary-foreground";
+
+  return (
+    <Card
+      className={`cursor-pointer border-border/50 bg-card/50 transition-all hover:border-primary/30 hover:bg-card/80 ${
+        isProcessing ? "animate-processing-glow border-primary/40" : ""
+      }`}
+    >
+      <CardHeader className="pb-2">
+        <div className="flex items-start justify-between gap-2">
+          {isProcessed && idea.category ? (
+            <Badge className={`text-xs border ${categoryClass}`}>{idea.category}</Badge>
+          ) : (
+            <Badge variant="secondary" className="text-xs">{idea.category || "Uncategorized"}</Badge>
+          )}
+          {isProcessing ? (
+            <div className="flex items-center gap-1.5 text-xs text-primary">
+              <Loader2 className="h-3 w-3 animate-spin" />
+              Processing…
+            </div>
+          ) : (
+            <Badge variant="outline" className="text-xs capitalize">{idea.status}</Badge>
+          )}
+        </div>
+      </CardHeader>
+      <CardContent className="space-y-2">
+        <p className="text-sm font-medium leading-relaxed">
+          {isProcessed && idea.processed_summary
+            ? idea.processed_summary
+            : idea.raw_dump.slice(0, 140) + (idea.raw_dump.length > 140 ? "…" : "")}
+        </p>
+
+        {isProcessed && idea.key_features && (
+          <div>
+            <button
+              onClick={(e) => { e.stopPropagation(); setFeaturesOpen(!featuresOpen); }}
+              className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors"
+            >
+              {featuresOpen ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
+              Key Features
+            </button>
+            {featuresOpen && (
+              <div className="mt-1.5 text-xs text-muted-foreground prose prose-invert prose-sm max-w-none [&_ul]:mt-0 [&_ul]:mb-0 [&_li]:my-0">
+                <div dangerouslySetInnerHTML={{ __html: idea.key_features.replace(/^- /gm, "• ").replace(/\n/g, "<br/>") }} />
+              </div>
+            )}
+          </div>
+        )}
+
+        {isProcessed && idea.tags && idea.tags.length > 0 && (
+          <div className="flex flex-wrap gap-1">
+            {idea.tags.map((tag: string) => (
+              <Badge key={tag} variant="secondary" className="text-[10px]">{tag}</Badge>
+            ))}
+          </div>
+        )}
+
+        <p className="text-xs text-muted-foreground">
+          {new Date(idea.created_at).toLocaleDateString()}
+        </p>
+      </CardContent>
+    </Card>
+  );
+}
 
 export default function IdeasPage() {
   const { user } = useAuth();
@@ -30,23 +110,39 @@ export default function IdeasPage() {
       if (error) throw error;
       return data;
     },
+    refetchInterval: (query) => {
+      const data = query.state.data as any[] | undefined;
+      if (data?.some((i: any) => i.status === "processing")) return 3000;
+      return false;
+    },
   });
 
   const createIdea = useMutation({
     mutationFn: async (raw: string) => {
       const { data, error } = await supabase
         .from("ideas")
-        .insert({ raw_dump: raw, user_id: user!.id })
+        .insert({ raw_dump: raw, user_id: user!.id, status: "processing" })
         .select()
         .single();
       if (error) throw error;
       return data;
     },
-    onSuccess: () => {
+    onSuccess: (data) => {
       queryClient.invalidateQueries({ queryKey: ["ideas"] });
       setDumpOpen(false);
       setRawDump("");
-      toast.success("Idea captured!");
+      toast.success("Idea captured! AI is processing…");
+
+      // Fire-and-forget AI processing
+      supabase.functions
+        .invoke("process-idea", { body: { idea_id: data.id, raw_dump: data.raw_dump } })
+        .then(({ error }) => {
+          if (error) {
+            console.error("AI processing error:", error);
+            toast.error("AI processing failed — you can retry later.");
+          }
+          queryClient.invalidateQueries({ queryKey: ["ideas"] });
+        });
     },
     onError: (e: Error) => toast.error(e.message),
   });
@@ -117,27 +213,7 @@ export default function IdeasPage() {
       ) : (
         <div className={viewMode === "grid" ? "grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3" : "space-y-3"}>
           {ideas.map((idea) => (
-            <Card key={idea.id} className="cursor-pointer border-border/50 bg-card/50 transition-colors hover:border-primary/30 hover:bg-card/80">
-              <CardHeader className="pb-2">
-                <div className="flex items-start justify-between">
-                  <Badge variant="secondary" className="text-xs">{idea.category}</Badge>
-                  <Badge variant="outline" className="text-xs">{idea.status}</Badge>
-                </div>
-              </CardHeader>
-              <CardContent>
-                <p className="mb-2 text-sm font-medium">{idea.processed_summary || idea.raw_dump.slice(0, 120)}</p>
-                {idea.tags && idea.tags.length > 0 && (
-                  <div className="flex flex-wrap gap-1">
-                    {idea.tags.map((tag: string) => (
-                      <Badge key={tag} variant="secondary" className="text-[10px]">{tag}</Badge>
-                    ))}
-                  </div>
-                )}
-                <p className="mt-2 text-xs text-muted-foreground">
-                  {new Date(idea.created_at).toLocaleDateString()}
-                </p>
-              </CardContent>
-            </Card>
+            <IdeaCard key={idea.id} idea={idea} />
           ))}
         </div>
       )}

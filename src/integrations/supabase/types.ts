@@ -113,6 +113,7 @@ export type Database = {
           category: string | null
           created_at: string
           id: string
+          key_features: string | null
           processed_summary: string | null
           raw_dump: string
           status: string
@@ -124,6 +125,7 @@ export type Database = {
           category?: string | null
           created_at?: string
           id?: string
+          key_features?: string | null
           processed_summary?: string | null
           raw_dump?: string
           status?: string
@@ -135,6 +137,7 @@ export type Database = {
           category?: string | null
           created_at?: string
           id?: string
+          key_features?: string | null
           processed_summary?: string | null
           raw_dump?: string
           status?: string
