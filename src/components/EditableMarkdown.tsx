@@ -9,9 +9,10 @@ interface EditableMarkdownProps {
   onSave: () => void;
   placeholder?: string;
   minHeight?: string;
+  readOnly?: boolean;
 }
 
-export default function EditableMarkdown({ value, onChange, onSave, placeholder, minHeight = "80px" }: EditableMarkdownProps) {
+export default function EditableMarkdown({ value, onChange, onSave, placeholder, minHeight = "80px", readOnly }: EditableMarkdownProps) {
   const [editing, setEditing] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
@@ -34,7 +35,7 @@ export default function EditableMarkdown({ value, onChange, onSave, placeholder,
     }
   };
 
-  if (editing) {
+  if (editing && !readOnly) {
     return (
       <div className="rounded-lg bg-zinc-900/50 border border-white/5 p-4">
         <Textarea
@@ -53,11 +54,13 @@ export default function EditableMarkdown({ value, onChange, onSave, placeholder,
 
   return (
     <div
-      onClick={() => setEditing(true)}
-      className="group relative cursor-pointer rounded-lg bg-zinc-900/50 border border-white/5 p-4 transition-colors hover:border-white/10"
+      onClick={() => !readOnly && setEditing(true)}
+      className={`group relative rounded-lg bg-zinc-900/50 border border-white/5 p-4 transition-colors ${!readOnly ? "cursor-pointer hover:border-white/10" : ""}`}
       style={{ minHeight }}
     >
-      <Pencil className="absolute right-3 top-3 h-3.5 w-3.5 text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100" />
+      {!readOnly && (
+        <Pencil className="absolute right-3 top-3 h-3.5 w-3.5 text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100" />
+      )}
       {value ? (
         <div className="prose prose-invert prose-sm max-w-none leading-relaxed text-gray-300 [&_ul]:list-disc [&_ol]:list-decimal [&_ul]:pl-5 [&_ol]:pl-5 [&_li]:my-0.5 [&_p]:my-1.5 [&_h1]:text-lg [&_h2]:text-base [&_h3]:text-sm [&_h1]:font-bold [&_h2]:font-semibold [&_h3]:font-medium">
           <ReactMarkdown>{value}</ReactMarkdown>
