@@ -271,9 +271,59 @@ export type Database = {
           },
         ]
       }
+      project_references: {
+        Row: {
+          created_at: string
+          description: string | null
+          id: string
+          project_id: string
+          sort_order: number
+          thumbnail_url: string | null
+          title: string
+          type: string
+          url: string | null
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          description?: string | null
+          id?: string
+          project_id: string
+          sort_order?: number
+          thumbnail_url?: string | null
+          title?: string
+          type?: string
+          url?: string | null
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          description?: string | null
+          id?: string
+          project_id?: string
+          sort_order?: number
+          thumbnail_url?: string | null
+          title?: string
+          type?: string
+          url?: string | null
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "project_references_project_id_fkey"
+            columns: ["project_id"]
+            isOneToOne: false
+            referencedRelation: "projects"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       projects: {
         Row: {
           brainstorm_id: string | null
+          bullet_breakdown: string | null
+          category: string | null
+          compiled_description: string | null
           created_at: string
           deleted_at: string | null
           general_notes: string | null
@@ -281,11 +331,15 @@ export type Database = {
           id: string
           name: string
           status: string
+          tags: string[] | null
           updated_at: string
           user_id: string
         }
         Insert: {
           brainstorm_id?: string | null
+          bullet_breakdown?: string | null
+          category?: string | null
+          compiled_description?: string | null
           created_at?: string
           deleted_at?: string | null
           general_notes?: string | null
@@ -293,11 +347,15 @@ export type Database = {
           id?: string
           name?: string
           status?: string
+          tags?: string[] | null
           updated_at?: string
           user_id: string
         }
         Update: {
           brainstorm_id?: string | null
+          bullet_breakdown?: string | null
+          category?: string | null
+          compiled_description?: string | null
           created_at?: string
           deleted_at?: string | null
           general_notes?: string | null
@@ -305,6 +363,7 @@ export type Database = {
           id?: string
           name?: string
           status?: string
+          tags?: string[] | null
           updated_at?: string
           user_id?: string
         }

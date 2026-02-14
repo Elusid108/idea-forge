@@ -38,7 +38,7 @@ export default function BrainstormsPage() {
     queryFn: async () => {
       const { data, error } = await supabase
         .from("brainstorms")
-        .select("*, ideas(processed_summary, raw_dump), brainstorm_references(id)")
+        .select("*, ideas(processed_summary, raw_dump)")
         .is("deleted_at", null)
         .order("created_at", { ascending: false });
       if (error) throw error;
@@ -58,6 +58,7 @@ export default function BrainstormsPage() {
     },
     onSuccess: (data) => {
       queryClient.invalidateQueries({ queryKey: ["brainstorms"] });
+      queryClient.invalidateQueries({ queryKey: ["sidebar-items"] });
       navigate(`/brainstorms/${data.id}`);
     },
     onError: (e: Error) => toast.error(e.message),
@@ -111,12 +112,12 @@ export default function BrainstormsPage() {
                     {b.category ? (
                       <Badge className={`text-xs border ${categoryClass}`}>{b.category}</Badge>
                     ) : (
-                      <Badge variant="secondary" className="text-xs">{b.status}</Badge>
+                      <Badge variant="secondary" className="text-xs">Uncategorized</Badge>
                     )}
-                    {b.brainstorm_references?.length > 0 && (
-                      <Badge variant="outline" className="text-xs">
-                        {b.brainstorm_references.length} refs
-                      </Badge>
+                    {b.status === "completed" ? (
+                      <Badge className="text-xs border bg-emerald-500/20 text-emerald-400 border-emerald-500/30">Complete</Badge>
+                    ) : (
+                      <Badge className="text-xs border bg-sky-500/20 text-sky-400 border-sky-500/30">Active</Badge>
                     )}
                   </div>
                 </CardHeader>

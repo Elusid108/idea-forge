@@ -1,10 +1,22 @@
 import { Wrench, LayoutGrid, List } from "lucide-react";
 import { useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+
+const CATEGORY_COLORS: Record<string, string> = {
+  "Product": "bg-blue-500/20 text-blue-400 border-blue-500/30",
+  "Process": "bg-emerald-500/20 text-emerald-400 border-emerald-500/30",
+  "Fixture/Jig": "bg-amber-500/20 text-amber-400 border-amber-500/30",
+  "Tool": "bg-orange-500/20 text-orange-400 border-orange-500/30",
+  "Art": "bg-pink-500/20 text-pink-400 border-pink-500/30",
+  "Hardware/Electronics": "bg-red-500/20 text-red-400 border-red-500/30",
+  "Software/App": "bg-violet-500/20 text-violet-400 border-violet-500/30",
+  "Environment/Space": "bg-teal-500/20 text-teal-400 border-teal-500/30",
+};
 
 const statusColumns = ["planning", "in_progress", "testing", "done"];
 const statusLabels: Record<string, string> = {
@@ -16,6 +28,7 @@ const statusLabels: Record<string, string> = {
 
 export default function ProjectsPage() {
   const [viewMode, setViewMode] = useState<"kanban" | "list">("kanban");
+  const navigate = useNavigate();
 
   const { data: projects = [], isLoading } = useQuery({
     queryKey: ["projects"],
@@ -29,6 +42,48 @@ export default function ProjectsPage() {
       return data;
     },
   });
+
+  const renderProjectCard = (p: any) => {
+    const category = p.category;
+    const categoryClass = category ? CATEGORY_COLORS[category] || "bg-secondary text-secondary-foreground" : "";
+    const tags: string[] = p.tags || [];
+    const descPreview = p.compiled_description || p.general_notes;
+
+    return (
+      <Card
+        key={p.id}
+        onClick={() => navigate(`/projects/${p.id}`)}
+        className="cursor-pointer border-border/50 bg-card/50 transition-all hover:border-primary/30 hover:bg-card/80"
+      >
+        <CardHeader className="pb-2">
+          <div className="flex items-start justify-between gap-2">
+            {category ? (
+              <Badge className={`text-xs border ${categoryClass}`}>{category}</Badge>
+            ) : (
+              <Badge variant="secondary" className="text-xs">Uncategorized</Badge>
+            )}
+            <Badge variant="outline" className="text-xs">{statusLabels[p.status] || p.status}</Badge>
+          </div>
+        </CardHeader>
+        <CardContent className="space-y-2">
+          <p className="text-sm font-bold leading-snug">{p.name}</p>
+          {descPreview && (
+            <p className="text-sm text-muted-foreground leading-relaxed line-clamp-3">{descPreview}</p>
+          )}
+          {tags.length > 0 && (
+            <div className="flex flex-wrap gap-1">
+              {tags.slice(0, 4).map((tag: string) => (
+                <Badge key={tag} variant="secondary" className="text-[10px]">{tag}</Badge>
+              ))}
+              {tags.length > 4 && (
+                <Badge variant="secondary" className="text-[10px]">+{tags.length - 4}</Badge>
+              )}
+            </div>
+          )}
+        </CardContent>
+      </Card>
+    );
+  };
 
   return (
     <div className="space-y-6">
@@ -67,36 +122,13 @@ export default function ProjectsPage() {
                   {projects.filter((p) => p.status === status).length}
                 </Badge>
               </h3>
-              {projects
-                .filter((p) => p.status === status)
-                .map((p) => (
-                  <Card key={p.id} className="cursor-pointer border-border/50 bg-card/50 transition-colors hover:border-primary/30">
-                    <CardContent className="p-4">
-                      <p className="font-medium">{p.name}</p>
-                      <p className="text-xs text-muted-foreground mt-1">
-                        {new Date(p.created_at).toLocaleDateString()}
-                      </p>
-                    </CardContent>
-                  </Card>
-                ))}
+              {projects.filter((p) => p.status === status).map(renderProjectCard)}
             </div>
           ))}
         </div>
       ) : (
         <div className="space-y-3">
-          {projects.map((p) => (
-            <Card key={p.id} className="cursor-pointer border-border/50 bg-card/50 transition-colors hover:border-primary/30">
-              <CardHeader className="pb-2">
-                <div className="flex items-center justify-between">
-                  <span className="font-medium">{p.name}</span>
-                  <Badge variant="outline" className="text-xs">{statusLabels[p.status] || p.status}</Badge>
-                </div>
-              </CardHeader>
-              <CardContent>
-                <p className="text-xs text-muted-foreground">{new Date(p.created_at).toLocaleDateString()}</p>
-              </CardContent>
-            </Card>
-          ))}
+          {projects.map(renderProjectCard)}
         </div>
       )}
     </div>
