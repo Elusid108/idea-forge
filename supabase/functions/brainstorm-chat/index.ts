@@ -80,6 +80,7 @@ Current project context:
 - Current compiled description: ${compiled_description || "Empty - needs to be built up"}
 - Current bullet breakdown: ${bullet_breakdown || "Empty - needs to be built up"}
 - Current tags: ${context?.tags ? (Array.isArray(context.tags) ? context.tags.join(", ") : context.tags) : "None"}
+- Current category: ${context?.category || "None"}
 - References: ${context?.references || "None"}
 
 Previous Q&A history is provided for context. Your job is to ask focused, specific questions that fill gaps in the project description. Focus on: target audience, core features, technical requirements, constraints, success metrics, timeline, and unique differentiators.`;
@@ -129,7 +130,7 @@ Previous Q&A history is provided for context. Your job is to ask focused, specif
 
     messages.push({
       role: "user",
-      content: `Question that was asked: "${question}"\nMy answer: "${answer}"\n\nNow: 1) Rewrite the compiled description to incorporate this new information. 2) Update the bullet breakdown. 3) Update the tags to reflect the current brainstorm content. 4) Generate the next critical question. Return all four via the tool call.`,
+      content: `Question that was asked: "${question}"\nMy answer: "${answer}"\n\nNow: 1) Rewrite the compiled description to incorporate this new information. 2) Update the bullet breakdown. 3) Update the tags to reflect the current brainstorm content. 4) Generate the next critical question. 5) If the direction has shifted, update the category. Use one of: Product, Process, Fixture/Jig, Tool, Art, Hardware/Electronics, Software/App, Environment/Space, or suggest a new one. Return all five via the tool call.`,
     });
 
     const response = await callAI(LOVABLE_API_KEY, messages, [
@@ -144,9 +145,10 @@ Previous Q&A history is provided for context. Your job is to ask focused, specif
               updated_description: { type: "string", description: "The rewritten compiled description incorporating the new answer." },
               updated_bullets: { type: "string", description: "The updated bullet breakdown in markdown list format." },
               updated_tags: { type: "array", items: { type: "string" }, description: "Updated list of tags reflecting the current brainstorm content." },
+              updated_category: { type: "string", description: "The updated category for the brainstorm. Use one of: Product, Process, Fixture/Jig, Tool, Art, Hardware/Electronics, Software/App, Environment/Space, or suggest a new one." },
               next_question: { type: "string", description: "The next critical question to ask." },
             },
-            required: ["updated_description", "updated_bullets", "updated_tags", "next_question"],
+            required: ["updated_description", "updated_bullets", "updated_tags", "updated_category", "next_question"],
             additionalProperties: false,
           },
         },

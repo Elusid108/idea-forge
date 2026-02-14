@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from "@/components/ui/dialog";
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from "@/components/ui/alert-dialog";
 import { Textarea } from "@/components/ui/textarea";
 import { Separator } from "@/components/ui/separator";
 import { useAuth } from "@/contexts/AuthContext";
@@ -66,9 +67,12 @@ function IdeaCard({ idea, onClick }: { idea: any; onClick: () => void }) {
 
         {isProcessed && idea.tags && idea.tags.length > 0 && (
           <div className="flex flex-wrap gap-1">
-            {idea.tags.map((tag: string) => (
+            {idea.tags.slice(0, 4).map((tag: string) => (
               <Badge key={tag} variant="secondary" className="text-[10px]">{tag}</Badge>
             ))}
+            {idea.tags.length > 4 && (
+              <Badge variant="secondary" className="text-[10px]">+{idea.tags.length - 4}</Badge>
+            )}
           </div>
         )}
       </CardContent>
@@ -151,14 +155,23 @@ function IdeaDetailModal({
 
         <DialogFooter>
           {!isBrainstorming && (
-            <Button
-              variant="destructive"
-              onClick={onDelete}
-              disabled={isDeleting}
-              className="mr-auto"
-            >
-              {isDeleting ? "Deleting…" : "Delete"}
-            </Button>
+            <AlertDialog>
+              <AlertDialogTrigger asChild>
+                <Button variant="destructive" disabled={isDeleting} className="mr-auto">
+                  {isDeleting ? "Deleting…" : "Delete"}
+                </Button>
+              </AlertDialogTrigger>
+              <AlertDialogContent>
+                <AlertDialogHeader>
+                  <AlertDialogTitle>Move to trash?</AlertDialogTitle>
+                  <AlertDialogDescription>This will move the idea to trash. You can restore it later.</AlertDialogDescription>
+                </AlertDialogHeader>
+                <AlertDialogFooter>
+                  <AlertDialogCancel>Cancel</AlertDialogCancel>
+                  <AlertDialogAction onClick={onDelete}>Delete</AlertDialogAction>
+                </AlertDialogFooter>
+              </AlertDialogContent>
+            </AlertDialog>
           )}
           <Button variant="ghost" onClick={() => onOpenChange(false)}>Close</Button>
           <Button
