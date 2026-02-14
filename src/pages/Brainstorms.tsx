@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { Brain, Plus } from "lucide-react";
+import { Brain, Plus, Grid3X3, List, Trash2 } from "lucide-react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
@@ -13,6 +13,14 @@ export default function BrainstormsPage() {
   const { user } = useAuth();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
+  const [viewMode, setViewMode] = useState<"grid" | "list">(
+    () => (localStorage.getItem("brainstorms-view-mode") as "grid" | "list") || "grid"
+  );
+
+  const toggleView = (mode: "grid" | "list") => {
+    setViewMode(mode);
+    localStorage.setItem("brainstorms-view-mode", mode);
+  };
 
   const { data: brainstorms = [], isLoading } = useQuery({
     queryKey: ["brainstorms"],
@@ -44,6 +52,21 @@ export default function BrainstormsPage() {
     onError: (e: Error) => toast.error(e.message),
   });
 
+  const deleteBrainstorm = useMutation({
+    mutationFn: async (id: string) => {
+      const { error } = await supabase
+        .from("brainstorms")
+        .update({ deleted_at: new Date().toISOString() } as any)
+        .eq("id", id);
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["brainstorms"] });
+      toast.success("Brainstorm moved to trash");
+    },
+    onError: (e: Error) => toast.error(e.message),
+  });
+
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
@@ -51,9 +74,17 @@ export default function BrainstormsPage() {
           <h1 className="text-3xl font-bold">Brainstorms</h1>
           <p className="text-muted-foreground">Research workspaces for developing your ideas</p>
         </div>
-        <Button onClick={() => createBrainstorm.mutate()} disabled={createBrainstorm.isPending} className="gap-2">
-          <Plus className="h-4 w-4" /> New Brainstorm
-        </Button>
+        <div className="flex items-center gap-2">
+          <Button variant="ghost" size="icon" onClick={() => toggleView("grid")} className={viewMode === "grid" ? "text-primary" : ""}>
+            <Grid3X3 className="h-4 w-4" />
+          </Button>
+          <Button variant="ghost" size="icon" onClick={() => toggleView("list")} className={viewMode === "list" ? "text-primary" : ""}>
+            <List className="h-4 w-4" />
+          </Button>
+          <Button onClick={() => createBrainstorm.mutate()} disabled={createBrainstorm.isPending} className="gap-2">
+            <Plus className="h-4 w-4" /> New Brainstorm
+          </Button>
+        </div>
       </div>
 
       {isLoading ? (
@@ -67,7 +98,7 @@ export default function BrainstormsPage() {
           <p className="text-sm text-muted-foreground/70">Start a brainstorm from an idea or create one directly</p>
         </div>
       ) : (
-        <div className="space-y-3">
+        <div className={viewMode === "grid" ? "grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3" : "space-y-3"}>
           {brainstorms.map((b: any) => (
             <Card
               key={b.id}
@@ -93,7 +124,21 @@ export default function BrainstormsPage() {
                     From: {b.ideas.processed_summary || b.ideas.raw_dump?.slice(0, 80)}
                   </p>
                 )}
-                <p className="text-xs text-muted-foreground">{new Date(b.created_at).toLocaleDateString()}</p>
+                <div className="flex items-center justify-between">
+                  <p className="text-xs text-muted-foreground">{new Date(b.created_at).toLocaleDateString()}</p>
+                  <Button
+                    variant="destructive"
+                    size="sm"
+                    className="h-7 text-xs"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      deleteBrainstorm.mutate(b.id);
+                    }}
+                    disabled={deleteBrainstorm.isPending}
+                  >
+                    <Trash2 className="h-3 w-3 mr-1" /> Delete
+                  </Button>
+                </div>
               </CardContent>
             </Card>
           ))}
