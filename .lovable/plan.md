@@ -1,102 +1,94 @@
 
+# Titles, Data Transfer, and Flashcard Q&A
 
-# Idea Dashboard UX Overhaul + Brainstorm Workspace
+## 1. Database Migration
 
-This plan covers two major pieces: refining the Ideas page with truncated cards, a detail modal, and the "Start Brainstorm" flow, then building out the full Brainstorm Workspace page.
+Add a `title` column to the `ideas` table:
 
----
+```sql
+ALTER TABLE public.ideas ADD COLUMN IF NOT EXISTS title text DEFAULT '';
+```
 
-## Part 1: Ideas Dashboard Refinements
-
-### 1A. Truncated Idea Cards
-Simplify `IdeaCard` in `src/pages/Ideas.tsx`:
-- Show only: category badge, tags row, and a max 3-line truncated `processed_summary` (use `line-clamp-3`)
-- Remove the inline expandable key features section from the card
-- Remove the date and status badge from the card face (keep processing glow for in-progress items)
-- Card click opens the detail modal (pass `onClick` handler)
-
-### 1B. Idea Detail Modal
-Add a new `Dialog` to `IdeasPage` that opens when any card is clicked:
-- **Header**: Category badge + trash icon (delete button) aligned right
-- **Body sections**:
-  - "Raw Dump" label with the full `raw_dump` text in a muted block
-  - "Summary" label with the complete `processed_summary`
-  - "Key Features" label with the bulleted `key_features` list
-  - Tags row at the bottom
-- **Footer**: "Start Brainstorm" primary button
-- **Delete**: Clicking trash shows a confirmation (or immediate delete with toast), removes the idea from the DB, closes the modal, invalidates the query
-
-### 1C. "Start Brainstorm" Action
-When the user clicks "Start Brainstorm" in the detail modal:
-1. Insert a new row into `brainstorms` with `idea_id` set to this idea, `title` derived from the processed summary (first ~50 chars), and `user_id`
-2. Update the idea's `status` to `'brainstorming'`
-3. Navigate to `/brainstorms/:id` (the new workspace page)
-
-**Disabled state**: If `idea.status === 'brainstorming'`, the button text changes to "Brainstorming..." and is grayed out / disabled.
-
-### 1D. New Mutations
-- `deleteIdea` mutation: `supabase.from("ideas").delete().eq("id", id)`
-- `startBrainstorm` mutation: insert brainstorm + update idea status, then `navigate`
+The `brainstorms` table already has a `title` column, so no change needed there.
 
 ---
 
-## Part 2: Brainstorm Workspace
+## 2. Update `process-idea` Edge Function
 
-### 2A. New Route
-Add `/brainstorms/:id` route in `src/App.tsx` pointing to a new `BrainstormWorkspace` page component.
+Add `title` to the AI tool call schema:
 
-### 2B. Brainstorm Workspace Page (`src/pages/BrainstormWorkspace.tsx`)
-A full-width workspace with three main sections:
-
-**Top Bar**:
-- Back arrow to `/brainstorms`
-- Editable brainstorm title (inline edit, auto-saves)
-- Link to source idea (if `idea_id` exists, clickable badge)
-- "Promote to Project" button (creates project row, navigates to `/projects`)
-
-**Layout** (two-column on desktop, stacked on mobile):
-
-**Left Column -- Reference Board** (~60% width):
-- "Add Reference" button that opens a dropdown/popover with options: Link, Image, Video, Note
-- **Link**: text input for URL + title + optional description, saves to `brainstorm_references`
-- **Image**: file upload to `brainstorm-references` storage bucket, saves path to `brainstorm_references`
-- **Video**: paste YouTube/Vimeo URL, saves with type "video"
-- **Note**: simple text input for quick thoughts
-- References displayed as a grid of cards, each showing:
-  - Type icon (Link, Image, Film, FileText, StickyNote)
-  - Title, thumbnail (for images/videos), description snippet
-  - Delete button (X icon)
-- Query: `supabase.from("brainstorm_references").select("*").eq("brainstorm_id", id).order("sort_order")`
-
-**Right Column -- AI Chat + Synthesis** (~40% width):
-- **Compiled Description**: An editable `Textarea` bound to `brainstorms.compiled_description`, auto-saves on blur
-- **Bullet Breakdown**: An editable `Textarea` bound to `brainstorms.bullet_breakdown`, auto-saves on blur
-- **AI Chat Panel**: Scrollable chat area with message bubbles
-  - Input bar at the bottom with send button
-  - Chat history stored in `brainstorms.chat_history` (JSONB array of `{role, content}`)
-  - On send: call a new `brainstorm-chat` edge function that streams AI responses
-  - The AI has context of the idea's raw dump + all references + current description
-
-### 2C. Brainstorm Chat Edge Function (`supabase/functions/brainstorm-chat/index.ts`)
-- Accepts `{ brainstorm_id, message, chat_history, context }` in the POST body
-- `context` includes: idea raw dump, idea summary, references list, current compiled description
-- Uses `google/gemini-3-flash-preview` via Lovable AI Gateway
-- System prompt: "You are an engineering/design research partner. Help the user explore, refine, and structure their idea. Be specific, ask clarifying questions, suggest approaches."
-- Returns the AI response (non-streaming for simplicity in v1, can upgrade later)
-- Appends both user message and AI response to `chat_history` in the brainstorms row
-
-### 2D. Update Brainstorms List Page
-- Each brainstorm card becomes clickable, navigating to `/brainstorms/:id`
-- Show reference count badge on each card
-- Add a "New Brainstorm" button at the top to create a standalone brainstorm (no linked idea)
+- New property: `title` (string, "A short punchy 3-5 word title for the idea")
+- Add to `required` array
+- Save `result.title` to `ideas.title` in the DB update
 
 ---
 
-## Part 3: Database Migration
+## 3. Update `brainstorm-chat` Edge Function (Flashcard Mode)
 
-A single migration to support the new `'brainstorming'` status value. No schema changes needed since all columns already exist. The `status` field on `ideas` is a text column with no enum constraint, so `'brainstorming'` works without migration.
+Completely rework this function to support the flashcard Q&A loop. Two modes:
 
-No new tables or columns required -- all structures are already in place.
+**Mode A -- "generate_question"**: Called with `{ brainstorm_id, compiled_description, bullet_breakdown, chat_history, context }`. The AI reviews the current state and returns a JSON object with:
+- `question`: The next critical question to ask
+- (No description/bullet updates on question generation)
+
+**Mode B -- "submit_answer"**: Called with `{ brainstorm_id, answer, question, compiled_description, bullet_breakdown, chat_history, context }`. The AI:
+1. Incorporates the answer into the compiled description and bullet breakdown
+2. Generates the next question
+3. Returns: `{ updated_description, updated_bullets, next_question }`
+
+Use tool calling to enforce structured output. The system prompt instructs the AI to act as a structured interviewer that builds up a project description one answer at a time.
+
+Chat history continues to be passed for context but is saved server-side only (not displayed to user).
+
+---
+
+## 4. Ideas Dashboard Updates (`src/pages/Ideas.tsx`)
+
+### IdeaCard
+- Show `idea.title` as a bold header line above the truncated summary
+- Fall back to truncated summary if no title yet (processing/new state)
+
+### IdeaDetailModal
+- Use `idea.title` as the `DialogTitle` instead of "Idea Details"
+- Keep category badge in the header
+
+### "Start Brainstorm" Mutation
+Update the data transfer when promoting an idea:
+- `brainstorm.title` = `idea.title` (instead of truncated summary)
+- `brainstorm.compiled_description` = `idea.processed_summary`
+- `brainstorm.bullet_breakdown` = `idea.key_features`
+
+---
+
+## 5. Brainstorm Workspace Overhaul (`src/pages/BrainstormWorkspace.tsx`)
+
+### Data Fetching
+- Update the brainstorm query to also select `ideas(raw_dump, processed_summary, title, key_features, tags, category)` for richer context
+
+### Header
+- Already has an editable title -- no changes needed (already uses `brainstorm.title`)
+
+### Synced Local State
+- On load, pre-fill `description` from `brainstorm.compiled_description` and `bullets` from `brainstorm.bullet_breakdown` (already happening)
+
+### Replace Chat with Flashcard Q&A
+Remove the entire scrolling chat panel (lines ~410-473). Replace with:
+
+**FlashcardQA Component:**
+- State: `currentQuestion` (string), `answer` (string), `isThinking` (boolean)
+- On mount / when brainstorm loads: call the edge function in "generate_question" mode to get the first question
+- Display: A single card showing the current AI question in a styled block, a textarea below for the user's answer, and a "Submit Answer" button
+- On submit:
+  1. Set `isThinking = true`
+  2. Call edge function in "submit_answer" mode with the answer, current question, description, bullets, and chat_history
+  3. On response: update `description` and `bullets` state with the AI's rewritten versions, save all three fields to the DB (compiled_description, bullet_breakdown, chat_history), set `currentQuestion` to the `next_question`, clear the answer field
+  4. Set `isThinking = false`
+- While thinking: show a subtle loading animation on the card (spinner or skeleton pulse)
+- The compiled description and bullet breakdown textareas above update automatically as the AI rewrites them
+
+### Chat History (Hidden)
+- Continue appending `{role: "user", content: answer}` and `{role: "assistant", content: ...}` entries to `chat_history` in the database
+- Never display this history in the UI -- it's backend context only
 
 ---
 
@@ -104,18 +96,17 @@ No new tables or columns required -- all structures are already in place.
 
 | File | Action |
 |---|---|
-| `src/pages/Ideas.tsx` | Refactor cards (truncated), add detail modal, delete mutation, start brainstorm mutation |
-| `src/pages/Brainstorms.tsx` | Add clickable navigation, reference count, "New Brainstorm" button |
-| `src/pages/BrainstormWorkspace.tsx` | **New** -- full workspace with reference board, chat, synthesis |
-| `src/App.tsx` | Add `/brainstorms/:id` route |
-| `supabase/functions/brainstorm-chat/index.ts` | **New** -- AI chat edge function |
+| Migration SQL | Add `title` column to `ideas` |
+| `supabase/functions/process-idea/index.ts` | Add `title` to tool schema and DB update |
+| `supabase/functions/brainstorm-chat/index.ts` | Rewrite for flashcard Q&A (two modes: generate_question, submit_answer) |
+| `src/pages/Ideas.tsx` | Show title on cards/modal, update startBrainstorm data transfer |
+| `src/pages/BrainstormWorkspace.tsx` | Replace chat with flashcard Q&A component, update query |
 
 ---
 
 ## Technical Notes
 
-- The `brainstorm_references` table already has a foreign key to `brainstorms` and RLS policies scoped to `user_id`
-- The `brainstorm-references` storage bucket already exists (private)
-- Chat history is stored as JSONB in `brainstorms.chat_history`, defaulting to `[]`
-- Image uploads use `supabase.storage.from("brainstorm-references").upload(path, file)` and the public URL is stored in `brainstorm_references.url`
-- The "Promote to Project" action inserts into `projects` with `brainstorm_id` set, updates brainstorm status to `'completed'`, and navigates to `/projects`
+- The `brainstorms.chat_history` JSONB column stores the full Q&A history for AI context but is never rendered in the UI
+- The edge function uses tool calling to return structured JSON (updated_description, updated_bullets, next_question) ensuring reliable parsing
+- The flashcard loop is self-sustaining: each answer triggers a rewrite of the synthesis fields and generates the next question automatically
+- Existing brainstorms with old chat_history format will still work since the new function accepts the same array structure
