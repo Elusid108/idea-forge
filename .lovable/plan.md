@@ -1,74 +1,71 @@
 
+# UI Polish: Auto-focus, Colorful Icons, Delete Logic, Layout & Tags
 
-# Brainstorms View Toggle, Ideas Modal Tweaks, Brainstorm Workspace Layout & Typography
+## 1. Auto-focus Textarea After AI Response
 
-## 1. Brainstorms Page -- List/Tile View Toggle + Delete Button
+**File: `src/pages/BrainstormWorkspace.tsx`**
+
+Add a `useRef` for the answer textarea. After `handleSubmitAnswer` completes (in the `finally` block, after `setIsThinking(false)` and `setAnswer("")`), call `textareaRef.current?.focus()`. Also add the `ref` attribute to the Textarea element.
+
+## 2. Colorful Sidebar Icons
+
+**File: `src/components/AppSidebar.tsx`**
+
+The screenshot shows emoji-style colorful icons in the sidebar labels. Replace the monochrome Lucide icons with the emoji strings already defined in the `sections` array:
+
+- Ideas: show the lightbulb emoji (already in `section.emoji`)
+- Brainstorms: show the brain emoji
+- Projects: show the wrench emoji
+
+Replace `<section.icon className="h-4 w-4" />` with `<span>{section.emoji}</span>` in the sidebar group labels. Also give the Trash icon a color (e.g., `text-muted-foreground`).
+
+## 3. Remove Delete Button from Brainstorms List Page
 
 **File: `src/pages/Brainstorms.tsx`**
 
-- Add `viewMode` state initialized from `localStorage.getItem("brainstorms-view-mode") || "grid"`, persist on change
-- Add Grid3X3 and List icon toggle buttons in the header next to "New Brainstorm"
-- Grid view: responsive `grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3` with compact cards
-- List view: current `space-y-3` vertical stack
-- Add a soft-delete mutation (update `deleted_at`) and a red "Delete" button on each card (stopping event propagation so the card click still navigates)
+Remove the red "Delete" button and the `deleteBrainstorm` mutation entirely from this file. Delete is only available inside the opened brainstorm workspace.
 
-## 2. Ideas Page -- Persistent View Mode
-
-**File: `src/pages/Ideas.tsx`**
-
-- Initialize `viewMode` from `localStorage.getItem("ideas-view-mode") || "grid"`, write to localStorage on change
-
-## 3. Ideas Modal -- Title Below Category Chip + Delete Button in Footer
+## 4. Prevent Deleting Ideas in "Brainstorming" Status
 
 **File: `src/pages/Ideas.tsx` (IdeaDetailModal)**
 
-- Restructure the `DialogHeader`: stack category badge and title vertically (badge first, title below)
-- Remove the trash icon button from the header
-- Add a red "Delete" `Button variant="destructive"` in the `DialogFooter` with `className="mr-auto"` to push it left, keeping Close and Start Brainstorm right-aligned
+When `idea.status === "brainstorming"`, hide the Delete button from the modal footer. The idea can only be deleted if its linked brainstorm is deleted first.
 
-## 4. Brainstorm Workspace -- Two-Column Layout
+## 5. Move Compiled Description to Left Column
 
 **File: `src/pages/BrainstormWorkspace.tsx`**
 
-Restore a two-column layout below the title bar:
+Change the two-column layout:
 
-- **Left column** (approx 3/5 width): AI Interview card, then References section below it
-- **Right column** (approx 2/5 width): Compiled Description, then Bullet Breakdown
+- **Left column** (3/5): AI Interview, then Compiled Description, then References
+- **Right column** (2/5): Bullet Breakdown, then Tags section (new)
 
-Keep the title bar, linked idea badge, and promote button full-width above the columns.
-
-## 5. Linked Idea Badge -- Opens Idea Popup
+## 6. Display Tags on Brainstorm Workspace
 
 **File: `src/pages/BrainstormWorkspace.tsx`**
 
-- Add state for `showLinkedIdea` (boolean)
-- Make the "Linked Idea" badge clickable -- on click, set `showLinkedIdea = true`
-- Render a `Dialog` that displays the linked idea details (using data already fetched via the brainstorm query's `ideas(...)` join): category badge, title, raw_dump, processed_summary, key_features, tags
-- This is a read-only popup (no delete/brainstorm actions needed since it's already linked)
+Below the Bullet Breakdown in the right column, add a "Tags" section that displays tags from the linked idea (`linkedIdea?.tags`). Render them as `Badge` components with `variant="secondary"`. If no linked idea or no tags, show a subtle empty state.
 
-## 6. Brainstorm Workspace -- Delete Button
+## 7. Apply Idea Category to Brainstorm Display
 
 **File: `src/pages/BrainstormWorkspace.tsx`**
 
-- Add a soft-delete mutation for the brainstorm (update `deleted_at`)
-- Add a red "Delete" button in the title bar area (next to Promote to Project), which soft-deletes and navigates back to `/brainstorms`
+Show the linked idea's category as a colored badge in the title bar (next to the "Linked Idea" badge). Use the existing `CATEGORY_COLORS` map for styling. This makes the category visible without needing a separate database column on brainstorms.
 
-## 7. Typography & Visual Framing for Wiki Sections
+---
 
-**File: `tailwind.config.ts`**
+## Database Changes
 
-- Install and add `@tailwindcss/typography` plugin
+**Migration needed:** Add `category` and `tags` columns to the `brainstorms` table so that when a brainstorm is created from an idea, the category and tags are copied over and can evolve independently.
 
-**File: `src/components/EditableMarkdown.tsx`**
+```sql
+ALTER TABLE public.brainstorms ADD COLUMN category text DEFAULT NULL;
+ALTER TABLE public.brainstorms ADD COLUMN tags text[] DEFAULT NULL;
+```
 
-- Update the read-mode container with visual framing: `bg-zinc-900/50 border border-white/5 rounded-lg p-4`
-- Update the prose wrapper to use `prose prose-invert max-w-none` for proper dark-mode list formatting, bullet points, and spacing
-- Add `leading-relaxed` and softer text color (`text-gray-300`) for readability
-- The edit-mode textarea gets matching container styling for visual consistency
+**File: `src/pages/Ideas.tsx`** (startBrainstorm mutation): Copy `idea.category` and `idea.tags` into the new brainstorm record during creation.
 
-**File: `src/pages/BrainstormWorkspace.tsx`**
-
-- The Description and Bullet Breakdown sections already use `EditableMarkdown`, so the typography improvements cascade automatically
+**File: `src/pages/BrainstormWorkspace.tsx`**: Use `brainstorm.category` and `brainstorm.tags` directly (with fallback to `linkedIdea` data for existing brainstorms). The brainstorm-chat edge function can also update tags as the brainstorm evolves.
 
 ---
 
@@ -76,19 +73,18 @@ Keep the title bar, linked idea badge, and promote button full-width above the c
 
 | File | Changes |
 |---|---|
-| `src/pages/Brainstorms.tsx` | Grid/list toggle, localStorage persistence, soft-delete with red Delete button |
-| `src/pages/Ideas.tsx` | localStorage persistence for viewMode, modal header restructure (title below badge), move delete to footer as red button |
-| `src/pages/BrainstormWorkspace.tsx` | Two-column layout (left: interview + refs, right: description + bullets), linked idea popup dialog, red delete button in title bar |
-| `src/components/EditableMarkdown.tsx` | Visual framing containers, `prose prose-invert` classes, `leading-relaxed`, softer text color |
-| `tailwind.config.ts` | Add `@tailwindcss/typography` plugin |
-| `package.json` | Add `@tailwindcss/typography` dependency |
+| Migration SQL | Add `category` and `tags` columns to brainstorms table |
+| `src/pages/BrainstormWorkspace.tsx` | Auto-focus textarea, move compiled description to left column, add tags section in right column, show category badge in title bar |
+| `src/components/AppSidebar.tsx` | Replace Lucide icons with emojis in section labels |
+| `src/pages/Brainstorms.tsx` | Remove delete button and mutation |
+| `src/pages/Ideas.tsx` | Hide delete button when status is "brainstorming", copy category/tags on brainstorm creation |
 
 ---
 
 ## Technical Notes
 
-- localStorage keys: `"ideas-view-mode"` and `"brainstorms-view-mode"`
-- The linked idea popup reuses data from the existing brainstorm query join (`ideas(raw_dump, processed_summary, title, key_features, tags, category)`) -- no extra fetch needed
-- `@tailwindcss/typography` provides the `prose` and `prose-invert` classes that restore proper list markers, heading sizes, and paragraph spacing stripped by Tailwind's CSS reset
-- Soft delete on brainstorms page uses `update({ deleted_at: new Date().toISOString() })` same pattern as ideas
-- The two-column grid uses `grid grid-cols-1 lg:grid-cols-5` with `lg:col-span-3` (left) and `lg:col-span-2` (right)
+- The textarea ref uses `useRef<HTMLTextAreaElement>(null)` and is passed to the `Textarea` component via the `ref` prop (Textarea already forwards refs)
+- Tags are stored as `text[]` in Postgres (same as ideas table), rendered as Badge components
+- Category is copied at brainstorm creation time so it can be displayed independently even if the idea is later modified
+- For existing brainstorms without category/tags, fall back to `linkedIdea?.category` and `linkedIdea?.tags`
+- The auto-focus happens after `setIsThinking(false)` using a small `setTimeout` to ensure the textarea is re-enabled before focusing
