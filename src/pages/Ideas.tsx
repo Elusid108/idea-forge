@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { Plus, Lightbulb, Grid3X3, List, Mic, MicOff, Loader2, Trash2, Brain } from "lucide-react";
+import { Plus, Lightbulb, Grid3X3, List, Mic, MicOff, Loader2, Brain } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
@@ -101,22 +101,11 @@ function IdeaDetailModal({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-2xl max-h-[85vh] overflow-y-auto">
         <DialogHeader>
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              {idea.category && (
-                <Badge className={`text-xs border ${categoryClass}`}>{idea.category}</Badge>
-              )}
-              <DialogTitle>{idea.title || "Idea Details"}</DialogTitle>
-            </div>
-            <Button
-              variant="ghost"
-              size="icon"
-              className="h-8 w-8 text-muted-foreground hover:text-destructive"
-              onClick={onDelete}
-              disabled={isDeleting}
-            >
-              <Trash2 className="h-4 w-4" />
-            </Button>
+          <div className="space-y-2">
+            {idea.category && (
+              <Badge className={`text-xs border ${categoryClass}`}>{idea.category}</Badge>
+            )}
+            <DialogTitle>{idea.title || "Idea Details"}</DialogTitle>
           </div>
           <DialogDescription className="sr-only">View idea details, delete, or start a brainstorm</DialogDescription>
         </DialogHeader>
@@ -161,6 +150,14 @@ function IdeaDetailModal({
         <Separator />
 
         <DialogFooter>
+          <Button
+            variant="destructive"
+            onClick={onDelete}
+            disabled={isDeleting}
+            className="mr-auto"
+          >
+            {isDeleting ? "Deleting…" : "Delete"}
+          </Button>
           <Button variant="ghost" onClick={() => onOpenChange(false)}>Close</Button>
           <Button
             onClick={onStartBrainstorm}
@@ -182,9 +179,16 @@ export default function IdeasPage() {
   const navigate = useNavigate();
   const [dumpOpen, setDumpOpen] = useState(false);
   const [rawDump, setRawDump] = useState("");
-  const [viewMode, setViewMode] = useState<"grid" | "list">("grid");
+  const [viewMode, setViewMode] = useState<"grid" | "list">(
+    () => (localStorage.getItem("ideas-view-mode") as "grid" | "list") || "grid"
+  );
   const [isListening, setIsListening] = useState(false);
   const [selectedIdea, setSelectedIdea] = useState<any>(null);
+
+  const toggleView = (mode: "grid" | "list") => {
+    setViewMode(mode);
+    localStorage.setItem("ideas-view-mode", mode);
+  };
 
   const { data: ideas = [], isLoading } = useQuery({
     queryKey: ["ideas"],
@@ -302,7 +306,6 @@ export default function IdeasPage() {
     createIdea.mutate(rawDump.trim());
   };
 
-  // Keep selectedIdea in sync with latest data
   const currentIdea = selectedIdea ? ideas.find((i: any) => i.id === selectedIdea.id) || selectedIdea : null;
 
   return (
@@ -313,10 +316,10 @@ export default function IdeasPage() {
           <p className="text-muted-foreground">Capture raw thoughts and let AI help organize them</p>
         </div>
         <div className="flex items-center gap-2">
-          <Button variant="ghost" size="icon" onClick={() => setViewMode("grid")} className={viewMode === "grid" ? "text-primary" : ""}>
+          <Button variant="ghost" size="icon" onClick={() => toggleView("grid")} className={viewMode === "grid" ? "text-primary" : ""}>
             <Grid3X3 className="h-4 w-4" />
           </Button>
-          <Button variant="ghost" size="icon" onClick={() => setViewMode("list")} className={viewMode === "list" ? "text-primary" : ""}>
+          <Button variant="ghost" size="icon" onClick={() => toggleView("list")} className={viewMode === "list" ? "text-primary" : ""}>
             <List className="h-4 w-4" />
           </Button>
           <Button onClick={() => setDumpOpen(true)} className="gap-2">
