@@ -75,3 +75,18 @@
     @apply bg-background text-foreground font-sans antialiased;
   }
 }
+
+@keyframes processing-glow {
+  0%, 100% {
+    border-color: hsl(var(--primary) / 0.3);
+    box-shadow: 0 0 8px hsl(var(--primary) / 0.15);
+  }
+  50% {
+    border-color: hsl(var(--primary) / 0.7);
+    box-shadow: 0 0 20px hsl(var(--primary) / 0.35);
+  }
+}
+
+.animate-processing-glow {
+  animation: processing-glow 2s ease-in-out infinite;
+}
