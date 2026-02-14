@@ -1,122 +1,94 @@
 
 
-# Global Trash, Layout Hierarchy, and Wiki-Style Editing
+# Brainstorms View Toggle, Ideas Modal Tweaks, Brainstorm Workspace Layout & Typography
 
-## 1. Database Migration
+## 1. Brainstorms Page -- List/Tile View Toggle + Delete Button
 
-Add `deleted_at` column to three tables:
+**File: `src/pages/Brainstorms.tsx`**
 
-```sql
-ALTER TABLE public.ideas ADD COLUMN deleted_at timestamptz DEFAULT NULL;
-ALTER TABLE public.brainstorms ADD COLUMN deleted_at timestamptz DEFAULT NULL;
-ALTER TABLE public.projects ADD COLUMN deleted_at timestamptz DEFAULT NULL;
-```
+- Add `viewMode` state initialized from `localStorage.getItem("brainstorms-view-mode") || "grid"`, persist on change
+- Add Grid3X3 and List icon toggle buttons in the header next to "New Brainstorm"
+- Grid view: responsive `grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3` with compact cards
+- List view: current `space-y-3` vertical stack
+- Add a soft-delete mutation (update `deleted_at`) and a red "Delete" button on each card (stopping event propagation so the card click still navigates)
 
-No new RLS policies needed -- existing per-user policies already cover these tables.
+## 2. Ideas Page -- Persistent View Mode
 
----
+**File: `src/pages/Ideas.tsx`**
 
-## 2. Soft Delete and Filtered Queries
+- Initialize `viewMode` from `localStorage.getItem("ideas-view-mode") || "grid"`, write to localStorage on change
 
-### Update all list queries to filter out soft-deleted items:
-- `Ideas.tsx`: Add `.is("deleted_at", null)` to the ideas query
-- `Brainstorms.tsx`: Add `.is("deleted_at", null)` to the brainstorms query
-- `Projects.tsx`: Add `.is("deleted_at", null)` to the projects query
+## 3. Ideas Modal -- Title Below Category Chip + Delete Button in Footer
 
-### Convert delete actions to soft deletes:
-- `Ideas.tsx` (`deleteIdea` mutation): Change `.delete()` to `.update({ deleted_at: new Date().toISOString() })`
-- `BrainstormWorkspace.tsx`: No delete action currently -- no change needed
-- `Projects.tsx`: No delete action currently -- no change needed
+**File: `src/pages/Ideas.tsx` (IdeaDetailModal)**
 
----
+- Restructure the `DialogHeader`: stack category badge and title vertically (badge first, title below)
+- Remove the trash icon button from the header
+- Add a red "Delete" `Button variant="destructive"` in the `DialogFooter` with `className="mr-auto"` to push it left, keeping Close and Start Brainstorm right-aligned
 
-## 3. Trash Page (`src/pages/Trash.tsx`)
+## 4. Brainstorm Workspace -- Two-Column Layout
 
-New page at `/trash` route. Displays three collapsible sections:
+**File: `src/pages/BrainstormWorkspace.tsx`**
 
-- **Trashed Ideas**: Query ideas where `deleted_at IS NOT NULL`, show title/summary, with "Restore" and "Permanently Delete" buttons
-- **Trashed Brainstorms**: Same pattern for brainstorms
-- **Trashed Projects**: Same pattern for projects
+Restore a two-column layout below the title bar:
 
-Actions:
-- **Restore**: `update({ deleted_at: null })` on the row
-- **Permanently Delete**: `.delete()` on the row
+- **Left column** (approx 3/5 width): AI Interview card, then References section below it
+- **Right column** (approx 2/5 width): Compiled Description, then Bullet Breakdown
 
-### Sidebar Update
-Add a "Trash" link at the bottom of the sidebar sections (before the footer), using the `Trash2` icon.
+Keep the title bar, linked idea badge, and promote button full-width above the columns.
 
-### Routing
-Add `/trash` route in `App.tsx` wrapped in `ProtectedRoute` and `AppLayout`.
+## 5. Linked Idea Badge -- Opens Idea Popup
 
----
+**File: `src/pages/BrainstormWorkspace.tsx`**
 
-## 4. Brainstorm Workspace Layout Reorganization
+- Add state for `showLinkedIdea` (boolean)
+- Make the "Linked Idea" badge clickable -- on click, set `showLinkedIdea = true`
+- Render a `Dialog` that displays the linked idea details (using data already fetched via the brainstorm query's `ideas(...)` join): category badge, title, raw_dump, processed_summary, key_features, tags
+- This is a read-only popup (no delete/brainstorm actions needed since it's already linked)
 
-Restructure the page from the current two-column layout to a single-column vertical flow:
+## 6. Brainstorm Workspace -- Delete Button
 
-1. **Title** (editable header) + Linked Idea badge + Promote to Project button
-2. **AI Interview** (Flashcard Q&A card) -- moved up to be immediately after the title
-3. **Compiled Description** and **Bullet Breakdown** sections (wiki-style, see section 6)
-4. **References** section at the bottom
+**File: `src/pages/BrainstormWorkspace.tsx`**
 
-This replaces the current `grid grid-cols-1 lg:grid-cols-5` two-column layout with a simple vertical `space-y-6` stack.
+- Add a soft-delete mutation for the brainstorm (update `deleted_at`)
+- Add a red "Delete" button in the title bar area (next to Promote to Project), which soft-deletes and navigates back to `/brainstorms`
 
----
+## 7. Typography & Visual Framing for Wiki Sections
 
-## 5. Enter-to-Send for Flashcard Q&A
+**File: `tailwind.config.ts`**
 
-Add an `onKeyDown` handler to the answer `Textarea`:
-- If `Enter` is pressed without `Shift`, call `e.preventDefault()` and trigger `handleSubmitAnswer()`
-- `Shift+Enter` allows normal newline behavior
-- Keep the "Submit Answer" button visible for accessibility
+- Install and add `@tailwindcss/typography` plugin
 
----
+**File: `src/components/EditableMarkdown.tsx`**
 
-## 6. Wiki-Style Inline Editing with Markdown
+- Update the read-mode container with visual framing: `bg-zinc-900/50 border border-white/5 rounded-lg p-4`
+- Update the prose wrapper to use `prose prose-invert max-w-none` for proper dark-mode list formatting, bullet points, and spacing
+- Add `leading-relaxed` and softer text color (`text-gray-300`) for readability
+- The edit-mode textarea gets matching container styling for visual consistency
 
-### New dependency
-Install `react-markdown` for rendering markdown content.
+**File: `src/pages/BrainstormWorkspace.tsx`**
 
-### Implementation
-Create a reusable `EditableMarkdown` component that toggles between two states:
-
-**Read mode** (default):
-- Render the content using `react-markdown` with clean styling
-- Entire block is clickable -- clicking swaps to edit mode
-- Show a subtle pencil icon on hover to indicate editability
-
-**Edit mode** (on click):
-- Swap to a `Textarea` pre-filled with the raw markdown text
-- Auto-focus the textarea
-- On `blur` or `Escape` keypress: save changes to the database and swap back to read mode
-
-### Usage
-Replace the plain `Textarea` components for Compiled Description and Bullet Breakdown with `EditableMarkdown` instances. Each saves to the respective `brainstorms` column on blur.
+- The Description and Bullet Breakdown sections already use `EditableMarkdown`, so the typography improvements cascade automatically
 
 ---
 
-## Files to Create/Modify
+## Files to Modify
 
-| File | Action |
+| File | Changes |
 |---|---|
-| Migration SQL | Add `deleted_at` to ideas, brainstorms, projects |
-| `src/pages/Ideas.tsx` | Filter `deleted_at IS NULL`, soft delete mutation |
-| `src/pages/Brainstorms.tsx` | Filter `deleted_at IS NULL` |
-| `src/pages/Projects.tsx` | Filter `deleted_at IS NULL` |
-| `src/pages/Trash.tsx` | **New** -- trash page with restore/permanent delete |
-| `src/components/EditableMarkdown.tsx` | **New** -- wiki-style click-to-edit markdown component |
-| `src/components/AppSidebar.tsx` | Add Trash link |
-| `src/pages/BrainstormWorkspace.tsx` | Layout reorder, enter-to-send, use EditableMarkdown |
-| `src/App.tsx` | Add `/trash` route |
-| `package.json` | Add `react-markdown` dependency |
+| `src/pages/Brainstorms.tsx` | Grid/list toggle, localStorage persistence, soft-delete with red Delete button |
+| `src/pages/Ideas.tsx` | localStorage persistence for viewMode, modal header restructure (title below badge), move delete to footer as red button |
+| `src/pages/BrainstormWorkspace.tsx` | Two-column layout (left: interview + refs, right: description + bullets), linked idea popup dialog, red delete button in title bar |
+| `src/components/EditableMarkdown.tsx` | Visual framing containers, `prose prose-invert` classes, `leading-relaxed`, softer text color |
+| `tailwind.config.ts` | Add `@tailwindcss/typography` plugin |
+| `package.json` | Add `@tailwindcss/typography` dependency |
 
 ---
 
 ## Technical Notes
 
-- `deleted_at` is nullable -- `NULL` means active, a timestamp means soft-deleted
-- The `react-markdown` package renders standard markdown (bold, lists, headers, links) without needing `dangerouslySetInnerHTML`
-- The `EditableMarkdown` component uses local state to toggle between read/edit modes, with `onBlur` triggering the save callback
-- The layout change is purely CSS/JSX restructuring -- no data model changes needed for the reorder
-- Enter-to-send checks `e.key === "Enter" && !e.shiftKey` to preserve multiline input capability
-
+- localStorage keys: `"ideas-view-mode"` and `"brainstorms-view-mode"`
+- The linked idea popup reuses data from the existing brainstorm query join (`ideas(raw_dump, processed_summary, title, key_features, tags, category)`) -- no extra fetch needed
+- `@tailwindcss/typography` provides the `prose` and `prose-invert` classes that restore proper list markers, heading sizes, and paragraph spacing stripped by Tailwind's CSS reset
+- Soft delete on brainstorms page uses `update({ deleted_at: new Date().toISOString() })` same pattern as ideas
+- The two-column grid uses `grid grid-cols-1 lg:grid-cols-5` with `lg:col-span-3` (left) and `lg:col-span-2` (right)
