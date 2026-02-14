@@ -64,6 +64,7 @@ export type Database = {
       brainstorms: {
         Row: {
           bullet_breakdown: string | null
+          category: string | null
           chat_history: Json | null
           compiled_description: string | null
           created_at: string
@@ -71,12 +72,14 @@ export type Database = {
           id: string
           idea_id: string | null
           status: string
+          tags: string[] | null
           title: string
           updated_at: string
           user_id: string
         }
         Insert: {
           bullet_breakdown?: string | null
+          category?: string | null
           chat_history?: Json | null
           compiled_description?: string | null
           created_at?: string
@@ -84,12 +87,14 @@ export type Database = {
           id?: string
           idea_id?: string | null
           status?: string
+          tags?: string[] | null
           title?: string
           updated_at?: string
           user_id: string
         }
         Update: {
           bullet_breakdown?: string | null
+          category?: string | null
           chat_history?: Json | null
           compiled_description?: string | null
           created_at?: string
@@ -97,6 +102,7 @@ export type Database = {
           id?: string
           idea_id?: string | null
           status?: string
+          tags?: string[] | null
           title?: string
           updated_at?: string
           user_id?: string

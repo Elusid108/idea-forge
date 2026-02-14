@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { Brain, Plus, Grid3X3, List, Trash2 } from "lucide-react";
+import { Brain, Plus, Grid3X3, List } from "lucide-react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
@@ -48,21 +48,6 @@ export default function BrainstormsPage() {
     onSuccess: (data) => {
       queryClient.invalidateQueries({ queryKey: ["brainstorms"] });
       navigate(`/brainstorms/${data.id}`);
-    },
-    onError: (e: Error) => toast.error(e.message),
-  });
-
-  const deleteBrainstorm = useMutation({
-    mutationFn: async (id: string) => {
-      const { error } = await supabase
-        .from("brainstorms")
-        .update({ deleted_at: new Date().toISOString() } as any)
-        .eq("id", id);
-      if (error) throw error;
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["brainstorms"] });
-      toast.success("Brainstorm moved to trash");
     },
     onError: (e: Error) => toast.error(e.message),
   });
@@ -124,21 +109,7 @@ export default function BrainstormsPage() {
                     From: {b.ideas.processed_summary || b.ideas.raw_dump?.slice(0, 80)}
                   </p>
                 )}
-                <div className="flex items-center justify-between">
-                  <p className="text-xs text-muted-foreground">{new Date(b.created_at).toLocaleDateString()}</p>
-                  <Button
-                    variant="destructive"
-                    size="sm"
-                    className="h-7 text-xs"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      deleteBrainstorm.mutate(b.id);
-                    }}
-                    disabled={deleteBrainstorm.isPending}
-                  >
-                    <Trash2 className="h-3 w-3 mr-1" /> Delete
-                  </Button>
-                </div>
+                <p className="text-xs text-muted-foreground">{new Date(b.created_at).toLocaleDateString()}</p>
               </CardContent>
             </Card>
           ))}
