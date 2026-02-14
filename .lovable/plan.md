@@ -1,71 +1,54 @@
 
-# UI Polish: Auto-focus, Colorful Icons, Delete Logic, Layout & Tags
 
-## 1. Auto-focus Textarea After AI Response
+# Layout Reorder, Post-Promotion Chatbot Mode, and Sidebar Simplification
+
+## 1. Reorder Brainstorm Workspace Sections
 
 **File: `src/pages/BrainstormWorkspace.tsx`**
 
-Add a `useRef` for the answer textarea. After `handleSubmitAnswer` completes (in the `finally` block, after `setIsThinking(false)` and `setAnswer("")`), call `textareaRef.current?.focus()`. Also add the `ref` attribute to the Textarea element.
+**Left column (3/5):** AI Interview, then Compiled Description, then References (current order has References before Description -- swap them).
 
-## 2. Colorful Sidebar Icons
+**Right column (2/5):** Tags first, then Bullet Breakdown below.
+
+**Title bar badge order:** Back arrow, Title, Category badge, Linked Idea badge, then ml-auto Delete + Promote buttons.
+
+Current order in title bar: Title, Linked Idea, Category. Change to: Title, Category, Linked Idea.
+
+## 2. Post-Promotion Read-Only Chatbot Mode
+
+**File: `src/pages/BrainstormWorkspace.tsx`**
+
+When `brainstorm.status === "completed"`:
+
+- Replace the flashcard Q&A interview with an AI chatbot interface. The user can ask questions about the brainstorm content (description, bullets, tags, references, title) but nothing new is added to the brainstorm record.
+- The chatbot uses the same `brainstorm-chat` edge function but with a new mode `"chat_query"`.
+- All `EditableMarkdown` sections become read-only (render markdown without the edit-on-click behavior). Pass a `readOnly` prop to `EditableMarkdown`.
+- Hide the Delete button and the Promote button. Show a "Completed" badge instead.
+- References section hides the Add button and the delete (X) buttons on each reference card.
+
+**File: `src/components/EditableMarkdown.tsx`**
+
+Add an optional `readOnly?: boolean` prop. When true, skip the `onClick` handler and hide the pencil icon -- just render the markdown (or placeholder) in the styled container.
+
+**File: `supabase/functions/brainstorm-chat/index.ts`**
+
+Add a third mode `"chat_query"`. The system prompt tells the AI it is a read-only assistant that answers questions about the brainstorm content. It receives the full brainstorm context (title, description, bullets, tags, references) and a chat history. It returns a plain text answer (no tool call needed -- use regular message completion). Store a separate `query_chat_history` in component state (not persisted to DB).
+
+## 3. Flatten Sidebar Navigation
 
 **File: `src/components/AppSidebar.tsx`**
 
-The screenshot shows emoji-style colorful icons in the sidebar labels. Replace the monochrome Lucide icons with the emoji strings already defined in the `sections` array:
+Remove the `Collapsible` wrapper entirely. Each section becomes a direct `SidebarMenuItem` link with the emoji and label. The structure becomes:
 
-- Ideas: show the lightbulb emoji (already in `section.emoji`)
-- Brainstorms: show the brain emoji
-- Projects: show the wrench emoji
-
-Replace `<section.icon className="h-4 w-4" />` with `<span>{section.emoji}</span>` in the sidebar group labels. Also give the Trash icon a color (e.g., `text-muted-foreground`).
-
-## 3. Remove Delete Button from Brainstorms List Page
-
-**File: `src/pages/Brainstorms.tsx`**
-
-Remove the red "Delete" button and the `deleteBrainstorm` mutation entirely from this file. Delete is only available inside the opened brainstorm workspace.
-
-## 4. Prevent Deleting Ideas in "Brainstorming" Status
-
-**File: `src/pages/Ideas.tsx` (IdeaDetailModal)**
-
-When `idea.status === "brainstorming"`, hide the Delete button from the modal footer. The idea can only be deleted if its linked brainstorm is deleted first.
-
-## 5. Move Compiled Description to Left Column
-
-**File: `src/pages/BrainstormWorkspace.tsx`**
-
-Change the two-column layout:
-
-- **Left column** (3/5): AI Interview, then Compiled Description, then References
-- **Right column** (2/5): Bullet Breakdown, then Tags section (new)
-
-## 6. Display Tags on Brainstorm Workspace
-
-**File: `src/pages/BrainstormWorkspace.tsx`**
-
-Below the Bullet Breakdown in the right column, add a "Tags" section that displays tags from the linked idea (`linkedIdea?.tags`). Render them as `Badge` components with `variant="secondary"`. If no linked idea or no tags, show a subtle empty state.
-
-## 7. Apply Idea Category to Brainstorm Display
-
-**File: `src/pages/BrainstormWorkspace.tsx`**
-
-Show the linked idea's category as a colored badge in the title bar (next to the "Linked Idea" badge). Use the existing `CATEGORY_COLORS` map for styling. This makes the category visible without needing a separate database column on brainstorms.
-
+```
+[emoji] Ideas        >
+[emoji] Brainstorms  >
+[emoji] Projects     >
 ---
-
-## Database Changes
-
-**Migration needed:** Add `category` and `tags` columns to the `brainstorms` table so that when a brainstorm is created from an idea, the category and tags are copied over and can evolve independently.
-
-```sql
-ALTER TABLE public.brainstorms ADD COLUMN category text DEFAULT NULL;
-ALTER TABLE public.brainstorms ADD COLUMN tags text[] DEFAULT NULL;
+Trash
 ```
 
-**File: `src/pages/Ideas.tsx`** (startBrainstorm mutation): Copy `idea.category` and `idea.tags` into the new brainstorm record during creation.
-
-**File: `src/pages/BrainstormWorkspace.tsx`**: Use `brainstorm.category` and `brainstorm.tags` directly (with fallback to `linkedIdea` data for existing brainstorms). The brainstorm-chat edge function can also update tags as the brainstorm evolves.
+No nested collapsible groups -- each item is a direct link to its respective page.
 
 ---
 
@@ -73,18 +56,17 @@ ALTER TABLE public.brainstorms ADD COLUMN tags text[] DEFAULT NULL;
 
 | File | Changes |
 |---|---|
-| Migration SQL | Add `category` and `tags` columns to brainstorms table |
-| `src/pages/BrainstormWorkspace.tsx` | Auto-focus textarea, move compiled description to left column, add tags section in right column, show category badge in title bar |
-| `src/components/AppSidebar.tsx` | Replace Lucide icons with emojis in section labels |
-| `src/pages/Brainstorms.tsx` | Remove delete button and mutation |
-| `src/pages/Ideas.tsx` | Hide delete button when status is "brainstorming", copy category/tags on brainstorm creation |
+| `src/pages/BrainstormWorkspace.tsx` | Reorder sections (desc above refs in left col, tags above bullets in right col), reorder title bar badges, add completed/read-only mode with chatbot |
+| `src/components/EditableMarkdown.tsx` | Add `readOnly` prop |
+| `src/components/AppSidebar.tsx` | Remove Collapsible wrappers, flatten to direct links |
+| `supabase/functions/brainstorm-chat/index.ts` | Add `chat_query` mode for read-only Q&A |
 
 ---
 
 ## Technical Notes
 
-- The textarea ref uses `useRef<HTMLTextAreaElement>(null)` and is passed to the `Textarea` component via the `ref` prop (Textarea already forwards refs)
-- Tags are stored as `text[]` in Postgres (same as ideas table), rendered as Badge components
-- Category is copied at brainstorm creation time so it can be displayed independently even if the idea is later modified
-- For existing brainstorms without category/tags, fall back to `linkedIdea?.category` and `linkedIdea?.tags`
-- The auto-focus happens after `setIsThinking(false)` using a small `setTimeout` to ensure the textarea is re-enabled before focusing
+- The chatbot query history is kept in local component state only (not persisted) since it is ephemeral Q&A about existing content
+- `readOnly` on `EditableMarkdown` simply removes the `onClick` and pencil icon -- no new component needed
+- The `chat_query` mode uses regular chat completion (no tool calling) since it just returns a text answer
+- The sidebar flattening removes `Collapsible`, `CollapsibleTrigger`, `CollapsibleContent` imports and the `openSections` state entirely
+
