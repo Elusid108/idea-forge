@@ -1,94 +1,143 @@
 
 
-# UI Polish Round 2: Voice Fix, Cascading Scrap, Logo, Mobile, and FAB
+# UI & UX Improvements: Round 3
 
-This plan combines the previously approved items (cascading scrap, custom logo, mobile responsiveness, mobile Dump Idea FAB) with the new voice-to-text bug fix.
+This plan covers 9 changes across signup, idea workflow, AI chatbots, notes display, rich text editing, link behavior, and task generation.
 
 ---
 
-## 1. Fix Voice-to-Text Bug
+## 1. Confirm Password Field on Signup
 
-**Problem**: Every call to `handleVoice` creates a brand new `SpeechRecognition` instance. When the user clicks "Stop Recording", it stops the **new** instance -- not the one actually listening. Additionally, `interimResults` with `continuous` causes cumulative transcript appending, resulting in duplicated/repeated text (as seen in the screenshot).
+Add a "Confirm Password" field to `src/pages/Signup.tsx`. Validate that both passwords match before submitting -- show an error toast if they don't.
 
-**Fix in `src/pages/Ideas.tsx`**:
-- Store the recognition instance in a `useRef` so the same instance persists across renders
-- Track listening state with a ref (`isListeningRef`) alongside the state variable
-- On "stop", call `.stop()` on the **stored ref instance**
-- Fix `onresult` to only append the **final** transcript (not interim), preventing duplication
-- Clean up recognition on component unmount
+**File**: `src/pages/Signup.tsx`
+- Add `confirmPassword` state
+- Add a "Confirm Password" input field below the Password field
+- In `handleSignup`, check `password === confirmPassword` before calling `supabase.auth.signUp`; if mismatch, show `toast.error("Passwords do not match")`
 
+---
+
+## 2. Auto-Open Idea Detail After Processing
+
+When a new idea is dumped and the AI finishes processing, auto-open the idea detail modal so the user can see the results immediately.
+
+**File**: `src/pages/Ideas.tsx`
+- In the `createIdea` mutation's `onSuccess`, after the `process-idea` edge function completes successfully, re-fetch the idea data and call `setSelectedIdea(updatedIdea)` to auto-open the detail modal
+- The refetch interval already polls for `processing` status; we just need to track the newly created idea ID and auto-select it once status changes from `processing` to `processed`
+- Add a `pendingIdeaId` ref that stores the ID of the just-created idea
+- In the `useQuery` for ideas, when we detect the pending idea has been processed (status changed), auto-select it and clear the ref
+
+---
+
+## 3. Brainstorm AI Chatbot: Add Note Creation Capability
+
+Currently the brainstorm `chat_query` mode is read-only. Add the `create_note` tool to it, matching the project chat's pattern.
+
+**File**: `supabase/functions/brainstorm-chat/index.ts`
+- In the `chat_query` mode, add a `create_note` tool definition (same as project-chat)
+- Parse tool calls from the response and return actions array (like project-chat does)
+- Return `{ answer, actions }` instead of just `{ answer }`
+
+**File**: `src/pages/BrainstormWorkspace.tsx`
+- In `handleChatSubmit` (the post-promotion/scrapped chat handler, ~line 665-694), process `data.actions` to insert notes into `brainstorm_references` (matching how project-chat handles `create_note`)
+- Add `noteId`/`noteTitle` to assistant messages for clickable note badges
+- Update the `renderMessage` in the floating chat widget to show note badges (matching project workspace pattern)
+
+---
+
+## 4. Notes: Fixed Window Size with Scroll
+
+Notes currently expand to fit all content in the `ReferenceViewer` dialog. Add a fixed max-height with vertical scrollbar.
+
+**File**: `src/components/ReferenceViewer.tsx`
+- In the note rendering section, wrap the content in a `div` with `max-h-[60vh] overflow-y-auto` so long notes scroll instead of making the dialog grow unbounded
+
+---
+
+## 5. Rich Text Editing for Bullet Breakdown, Description, and Execution Strategy
+
+The `EditableMarkdown` component currently uses a plain `Textarea` for editing and renders markdown. The user wants the edit mode to use rich text (WYSIWYG) and match the display size of the frame.
+
+**File**: `src/components/EditableMarkdown.tsx`
+- Replace the `Textarea` in edit mode with the existing `RichTextNoteEditor` component
+- Convert between markdown (storage format) and HTML (edit format) using simple regex-based converters:
+  - Markdown to HTML: convert `**bold**` to `<b>`, `*italic*` to `<i>`, `- item` to `<ul><li>`, numbered lists, headings, etc.
+  - HTML to Markdown: reverse conversion on save
+- The editor div should match the size of the display container (remove fixed `minHeight` on textarea, let it auto-size based on content)
+- Remove the small textarea and instead show the `RichTextNoteEditor` inline with the same container styling
+
+---
+
+## 6. All Links Open in New Tab
+
+Ensure all links in the app open in a new window/tab, not replacing the current page. The main concern is links rendered inside AI-generated notes and markdown content.
+
+**Files**:
+- `src/components/ReferenceViewer.tsx` -- Add `target="_blank" rel="noopener noreferrer"` to any rendered links. For the HTML `dangerouslySetInnerHTML` content, post-process the HTML to add `target="_blank"` to all `<a>` tags
+- `src/components/EditableMarkdown.tsx` -- In the `ReactMarkdown` rendering, add a custom `a` component that opens in new tab
+- Any other `ReactMarkdown` usage across workspaces (BrainstormWorkspace, ProjectWorkspace, CampaignWorkspace floating chat messages) -- add the custom link renderer
+
+Create a shared markdown components config:
 ```text
-Key changes:
-- Add: const recognitionRef = useRef<any>(null);
-- handleVoice "start": create instance only if ref is null, store in ref, call ref.current.start()
-- handleVoice "stop": call recognitionRef.current.stop(), set ref to null
-- onresult: only setRawDump when result.isFinal, using only the latest final result
-- onend: clear isListening state and ref
-- useEffect cleanup: stop recognition on unmount
+const markdownComponents = {
+  a: ({ href, children }) => (
+    <a href={href} target="_blank" rel="noopener noreferrer">{children}</a>
+  )
+};
 ```
 
----
-
-## 2. Cascading Scrap (Database Trigger)
-
-**Database migration**: Create a trigger function `cascade_scrap()` that fires `AFTER UPDATE` on `ideas`, `brainstorms`, `projects`:
-- When an **idea** is scrapped: find brainstorm with `idea_id = id`, set to scrapped
-- When a **brainstorm** is scrapped: find project with `brainstorm_id = id`, set to scrapped
-- When a **project** is scrapped: find campaign with `project_id = id`, set to scrapped
-
-Un-scrapping does NOT cascade -- only scrapping propagates downstream.
-
-**Frontend changes** (cache invalidation after scrap):
-- `src/pages/Ideas.tsx` (scrapIdea mutation): add invalidation for `brainstorms`, `projects`, `campaigns`, `sidebar-items`
-- `src/pages/BrainstormWorkspace.tsx` (status change): add invalidation for `projects`, `campaigns`, `sidebar-items`
-- `src/pages/ProjectWorkspace.tsx` (status change): add invalidation for `campaigns`, `sidebar-items`
+Apply this to all `<ReactMarkdown>` instances across the app.
 
 ---
 
-## 3. Custom Logo (Brain + Anvil + Mallet)
+## 7. AI Chatbot Welcome Messages
 
-**New file**: `src/components/IdeaForgeLogo.tsx`
-- An inline SVG component depicting a stylized brain with an anvil/hammer motif
-- Accepts `className` prop for sizing
-- Uses `currentColor` so it inherits text color
+All AI chatbots should launch with an introductory welcome message explaining what they can do.
 
-**Updated files**:
-- `src/components/AppSidebar.tsx` (line 100): replace `Lightbulb` icon with `IdeaForgeLogo`
-- `src/pages/Login.tsx` (line 33): replace `Zap` icon with `IdeaForgeLogo`
-- `src/pages/Signup.tsx` (line 42): replace `Zap` icon with `IdeaForgeLogo`
-- `src/components/AppSidebar.tsx` (line 103): bump version from `v0.2` to `v0.3`
+**Files**:
+- `src/pages/BrainstormWorkspace.tsx` -- For the AI Interview, update the initial question generation to include a welcome intro. For the post-promotion/scrapped floating chat, initialize `queryChatHistory` with a welcome message
+- `src/pages/ProjectWorkspace.tsx` -- Initialize `chatHistory` with a welcome message about capabilities (generating notes, updating strategy, creating tasks, recommending resources)
+- `src/pages/CampaignWorkspace.tsx` -- Initialize `chatHistory` with a welcome message about campaign assistant capabilities
 
----
+Welcome message examples:
+- **AI Interview**: The first question should be preceded by an explanation: "I'm your brainstorm interview partner. I'll ask you targeted questions to help flesh out your idea into a complete project description..."
+- **Project Assistant**: "I'm your project assistant. I can help you create tasks and subtasks, generate research notes, update your execution strategy, and recommend specific resources. Ask me anything!"
+- **Campaign Assistant**: "I'm your campaign assistant. I can help plan marketing strategy, create tasks, generate research notes, and provide actionable recommendations. How can I help?"
 
-## 4. Mobile Responsiveness
-
-**`src/components/AppLayout.tsx`**:
-- Change main padding from `p-6` to `p-4 md:p-6`
-
-**Dashboard pages** (`Ideas.tsx`, `Brainstorms.tsx`, `Projects.tsx`, `Campaigns.tsx`):
-- Add `flex-wrap gap-2` to header flex containers so buttons wrap on small screens
-- Sort dropdown and view toggle buttons wrap naturally below the title on mobile
-
-**Workspace pages** (`BrainstormWorkspace.tsx`, `ProjectWorkspace.tsx`, `CampaignWorkspace.tsx`):
-- Already use `grid-cols-1 lg:grid-cols-2` for two-column layouts -- these are fine
-- Badge rows already use `flex-wrap` -- these are fine
-- Floating chat widget uses fixed positioning -- works on mobile
+Implementation: Set the initial `chatHistory` state to include one assistant welcome message instead of starting empty.
 
 ---
 
-## 5. Mobile Floating "Dump Idea" Button
+## 8. AI Should Ask About Scope for Resource/Note Generation
 
-**New file**: `src/components/MobileDumpIdea.tsx`
-- A floating action button (FAB) visible only on mobile (`md:hidden`)
-- Positioned `fixed bottom-20 right-4 z-50` (above the chat widget area)
-- Circular button with a `Plus` icon
-- Opens a Dialog identical to the "Dump Idea" dialog on the Ideas page
-- Includes the same textarea and voice input (using the fixed voice logic)
-- Uses the same `createIdea` mutation to save, then navigates to `/ideas`
-- Only renders when the user is authenticated
+When users ask for resources or research, the AI should ask how extensive the response should be.
 
-**Updated file**: `src/components/AppLayout.tsx`
-- Import and render `MobileDumpIdea` inside the layout so it appears on every page
+**Files**:
+- `supabase/functions/project-chat/index.ts` -- Add guidance to the system prompt: "When the user asks for resources, research, book recommendations, or notes, FIRST ask them how extensive they want the list to be (e.g., 'Would you like a quick list of 3-5 top resources, or a comprehensive list of 15-30?'). Only generate after they specify."
+- `supabase/functions/brainstorm-chat/index.ts` -- Add the same guidance to the `chat_query` mode system prompt (once note creation is enabled there)
+
+---
+
+## 9. Project Chat: Fix Subtask Generation
+
+The AI is generating subtasks as top-level tasks instead of using `parent_task_id`. The issue is that the AI needs to know the IDs of tasks it just created in order to create subtasks under them.
+
+**Problem**: When the AI generates a batch of tasks (parents + subtasks) in a single response, it doesn't know the UUIDs of the parent tasks it's creating because they haven't been inserted yet. The current system processes all tool calls after the AI responds, so the AI can't reference parent IDs it hasn't seen.
+
+**Solution**: Process `add_task` actions in two passes:
+1. First pass: Insert all tasks that have no `parent_task_id` (or have a placeholder parent ID). Collect a mapping of placeholder/title to real UUID.
+2. Second pass: Insert subtasks, replacing placeholder `parent_task_id` with real UUIDs.
+
+**File**: `src/pages/ProjectWorkspace.tsx` (handleChatSubmit, ~line 646-664)
+- Change the task processing logic to:
+  1. Separate actions into parent tasks (no `parent_task_id`) and subtasks (with `parent_task_id`)
+  2. Insert parent tasks first, collecting `{ title -> real_id }` mapping
+  3. For subtasks, try to match `parent_task_id` to an existing task ID first; if not found, try to match by title from the just-created parents
+  4. Insert subtasks with corrected `parent_task_id`
+
+**File**: `supabase/functions/project-chat/index.ts`
+- Update the system prompt to instruct the AI more explicitly: "When creating tasks and subtasks in the same response, use the TITLE of the parent task as the parent_task_id for subtasks. The system will automatically resolve these to real IDs."
+- Add instruction: "ALWAYS break complex work into parent tasks with subtasks underneath. Never create flat lists of tasks when hierarchical grouping makes sense."
 
 ---
 
@@ -96,17 +145,13 @@ Un-scrapping does NOT cascade -- only scrapping propagates downstream.
 
 | File | Changes |
 |---|---|
-| **Migration SQL** | Create `cascade_scrap()` trigger function + triggers on ideas, brainstorms, projects |
-| `src/pages/Ideas.tsx` | Fix voice-to-text (useRef pattern), add cascade invalidations on scrap |
-| `src/components/IdeaForgeLogo.tsx` | New custom SVG logo component |
-| `src/components/MobileDumpIdea.tsx` | New floating "Dump Idea" FAB for mobile |
-| `src/components/AppSidebar.tsx` | Replace Lightbulb with IdeaForgeLogo, bump to v0.3 |
-| `src/components/AppLayout.tsx` | Add MobileDumpIdea, reduce mobile padding |
-| `src/pages/Login.tsx` | Replace Zap with IdeaForgeLogo |
-| `src/pages/Signup.tsx` | Replace Zap with IdeaForgeLogo |
-| `src/pages/Brainstorms.tsx` | Mobile header wrapping |
-| `src/pages/Projects.tsx` | Mobile header wrapping |
-| `src/pages/Campaigns.tsx` | Mobile header wrapping |
-| `src/pages/BrainstormWorkspace.tsx` | Add cascade invalidations on status change |
-| `src/pages/ProjectWorkspace.tsx` | Add cascade invalidations on status change |
+| `src/pages/Signup.tsx` | Add confirm password field and validation |
+| `src/pages/Ideas.tsx` | Auto-open idea detail modal after processing completes |
+| `supabase/functions/brainstorm-chat/index.ts` | Add `create_note` tool to `chat_query` mode; add scope-asking guidance |
+| `src/pages/BrainstormWorkspace.tsx` | Process note creation actions from chat; add welcome message |
+| `src/components/ReferenceViewer.tsx` | Add max-height + scroll to notes; add target=_blank to links |
+| `src/components/EditableMarkdown.tsx` | Switch to RichTextNoteEditor for editing; add target=_blank to markdown links |
+| `src/pages/ProjectWorkspace.tsx` | Fix subtask resolution in handleChatSubmit; add welcome message; add target=_blank to chat markdown |
+| `src/pages/CampaignWorkspace.tsx` | Add welcome message; add target=_blank to chat markdown |
+| `supabase/functions/project-chat/index.ts` | Add scope-asking guidance; improve subtask creation instructions |
 
