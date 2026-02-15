@@ -1,64 +1,62 @@
-**UX Fixes: Ideas Refresh, Mobile Widget, GTM Interview Cleanup, and Icon Consistency**
 
-This plan addresses 7 distinct issues across the application.
 
-**1. Brainstorm Deletion Should Scrap the Linked Idea (Not Reset to Fresh)** Currently, deleting a brainstorm sets the linked idea's status to "new" (Fresh). Instead, it should set it to "scrapped". *File: src/pages/BrainstormWorkspace.tsx (~line 345)*
+# Fix GTM Interview: Forge Button Visibility and Progress Persistence
 
-- Change `{ status: "new" }` to `{ status: "scrapped" }` in the deleteBrainstorm mutation.
+Two bugs exist in the Campaign GTM Interview flow, both stemming from the same root cause: `topicsRemaining` is not persisted and defaults to an empty array `[]`.
 
-**2. Fix Idea Card Not Showing Title, Tags, and Correct Category Color After Status Change** When an idea goes from "brainstorming" back to another status (like "scrapped"), the card may not refresh its display because the query cache has stale data. The fix is to ensure the ideas query is invalidated properly and the IdeaCard component correctly renders for scrapped ideas. *File: src/pages/BrainstormWorkspace.tsx (~line 349-352)*
+---
 
-- The onSuccess already invalidates ["ideas"] -- this is correct. The real issue is that the first card in Screenshot 1 (the cup holder idea) has no title, no tags, and a dark/unstyled category badge. This happens because the idea was never fully processed (its status was "new" or it was reset before AI processing completed).
-- No additional code change needed beyond fix #1 -- once ideas are scrapped instead of reset to "new", the IdeaCard renders with the "Scrapped" badge correctly.
+## Bug 1: "Forge Playbook" button missing when it should show
 
-**3. Orphaned Ideas Cleanup: Scrap Ideas Whose Brainstorms No Longer Exist** Some ideas are stuck in "brainstorming" status but their linked brainstorms have been deleted. Add a cleanup check on the Ideas page load. *File: src/pages/Ideas.tsx*
+**Root cause:** When the user leaves the page and returns, `topicsRemaining` resets to `[]` (its default). The progress text checks `topicsRemaining.length > 0` and shows "You can now forge your playbook" (correct-looking text), but the **button** uses a completely separate condition: `exchangeCount >= 3`. If the user had fewer than 3 exchanges, the button is hidden even though the AI said all topics are covered.
 
-- Add a `useEffect` after the ideas query loads that:
-  - Filters ideas with `status === "brainstorming"`
-  - For each, queries brainstorms table for any brainstorm with `idea_id = idea.id` and `deleted_at IS NULL`
-  - If no brainstorm exists, updates the idea's status to "scrapped"
-  - Invalidates the ideas cache after any updates
+## Bug 2: "Forge Playbook" button showing when topics remain
 
-**4. Mobile: Fix Floating Chat Widget Being Cut Off** The widget uses fixed `bottom-4 right-4 w-[400px]` which overflows on mobile screens. The collapsed flag button also gets cut off. *File: src/components/FloatingChatWidget.tsx*
+**Root cause:** The button condition is only `exchangeCount >= 3`, which ignores whether topics are actually covered. So once 3 answers are submitted, the button appears regardless of the AI's `topics_remaining` response.
 
-- Change the expanded container class from `w-[400px]` to `w-[calc(100vw-2rem)] sm:w-[400px]` (or similar responsive approach) so it fits within mobile viewport.
-- For the collapsed button, ensure it doesn't overflow by constraining its max-width.
+---
 
-**5. Remove the Mobile Floating "+" (Dump Idea) FAB** The user wants to remove the floating + button that appears on every page on mobile. *File: src/components/AppLayout.tsx*
+## Fix
 
-- Remove the `<MobileDumpIdea />` component from the layout.
-- The import can also be removed.
+### 1. Use `topicsRemaining` state to control the Forge button (not exchange count)
 
-**6. GTM Interview UI Overhaul** Several changes to the GTM Strategy Interview (State 1 in CampaignWorkspace):
+**File: `src/pages/CampaignWorkspace.tsx`**
 
-**6a. Project Context: Add Timestamp, Lineage Badges, Remove Tag Badges** *File: src/pages/CampaignWorkspace.tsx (~lines 438-458)*
+- Change `topicsRemaining` initial state from `[]` to `null` (use type `string[] | null`). This distinguishes "not yet loaded" from "AI says all topics covered."
+- The Forge button condition changes from `exchangeCount >= 3` to:
+  `topicsRemaining !== null && topicsRemaining.length === 0 && exchangeCount >= 1`
+  This means: the AI has explicitly confirmed all topics are covered, and at least one exchange has occurred.
+- The progress indicator text changes to:
+  - `topicsRemaining === null`: show nothing (still loading)
+  - `topicsRemaining.length > 0`: "To forge your playbook, we still need to discuss: [topics]"
+  - `topicsRemaining.length === 0 && exchangeCount >= 1`: "You can now forge your playbook, or continue answering to refine it."
 
-- Add the creation timestamp to the Project Context card
-- Add category badge (already present -- keep it)
-- Add Linked Idea badge (clickable, opens the same read-only Linked Idea overlay dialog that the dashboard state uses)
-- Add Linked Brainstorm badge (clickable, navigates to brainstorm)
-- Add Linked Project badge (clickable, navigates to project) -- use Wrench icon instead of FolderOpen
-- Remove the tag badges from the Project Context section (currently lines 452-454 render each tag as a badge)
+### 2. Persist `topicsRemaining` alongside `chat_history`
 
-**6b. Add Linked Idea Overlay to GTM Interview State** Currently `showLinkedIdea` and the Linked Idea dialog only exist in the dashboard state (State 2). Move the state and dialog to be available in both states, so clicking "Linked Idea" in the interview context opens the overlay on top of the interview.
+**File: `src/pages/CampaignWorkspace.tsx`**
 
-**6c. Remove Chat History Log from Interview** *File: src/pages/CampaignWorkspace.tsx (~lines 468-492)*
+- When saving `chat_history` to the database (lines 253 and 260), also save `topicsRemaining` as a JSON field. Since there is no dedicated column, store it inside the chat_history payload by appending a metadata entry, OR add a simple approach: save it as part of the campaign update alongside chat_history.
 
-- Remove the `interviewChatHistory` scrollable log and the separator below it. The interview should only show the current question and answer box (like the brainstorm interview).
+**Simpler approach (no DB migration):** Store `topics_remaining` as a JSON metadata object at the end of the `chat_history` array, e.g. `{ role: "system", content: JSON.stringify({ topics_remaining: [...] }) }`. On load, extract it.
 
-**6d. Add Dynamic Topic-Based Progress Indicator** Instead of a hardcoded question counter, the AI should dictate what topics are left to discuss. *Backend Update:* Update the Edge Function/AI Prompt handling the GTM interview. Instruct the AI to include a `topics_remaining` array (e.g., `["Pricing Strategy", "Target Audience"]`) in its JSON response. *UI Update:* Add a small text line above or below the question area. If the `topics_remaining` array has items, display: *"To forge your playbook, we still need to discuss: [Topic 1], [Topic 2]..."* *Ready State:* If the array is empty (or the AI determines it has enough info), change the text to: *"You can now forge your playbook, or continue answering to refine it."*
+**Even simpler approach:** On page reload, the existing code already calls `generateFirstQuestion()` which sends the full `chat_history` to the AI and gets back `topics_remaining`. The problem is just the **initial state** before that call completes. Setting the initial state to `null` and showing no progress text until the AI responds fixes the visual inconsistency without needing persistence.
 
-**7. Fix "Linked Project" Icon: Use Wrench Instead of FolderOpen** The sidebar and Projects page use a wrench icon for projects, but the "Linked Project" badges use FolderOpen. Change all "Linked Project" badges to use Wrench. *Files:*
+### 3. Ensure reload properly restores state
 
-- `src/pages/CampaignWorkspace.tsx` (~line 656): Change FolderOpen to Wrench
-- `src/pages/BrainstormWorkspace.tsx` (~line 896): Change FolderOpen to Wrench
-- `src/pages/Ideas.tsx` (~line 224): Change FolderOpen to Wrench
+**File: `src/pages/CampaignWorkspace.tsx`** (lines 175-191)
 
-**Technical Summary**
+The `useEffect` that runs on reload already calls `generateFirstQuestion()` when there is existing chat history but no cached question. This call returns `topics_remaining` from the AI. Combined with the `null` initial state fix, this means:
+- On reload: progress shows nothing (loading state) until the AI responds
+- Once AI responds: `topicsRemaining` is set correctly, and the Forge button appears or not based on the AI's assessment
 
-- **src/pages/BrainstormWorkspace.tsx:** Change idea reset from "new" to "scrapped" on brainstorm delete; change Linked Project icon from FolderOpen to Wrench.
-- **src/pages/Ideas.tsx:** Add orphaned idea cleanup useEffect; change Linked Project icon from FolderOpen to Wrench.
-- **src/components/FloatingChatWidget.tsx:** Make widget responsive on mobile (constrain width to viewport).
-- **src/components/AppLayout.tsx:** Remove MobileDumpIdea component.
-- **src/pages/CampaignWorkspace.tsx:** GTM interview: add timestamp + lineage badges to Project Context, remove tag badges, remove chat history log, add dynamic `topics_remaining` progress indicator, move Linked Idea overlay to work in both states, change Linked Project icon to Wrench.
-- **Supabase Edge Functions:** Update GTM Interview AI prompt to return a `topics_remaining` array in the JSON response.
+---
+
+## Summary of Changes
+
+| Area | Change |
+|---|---|
+| `topicsRemaining` initial state | Change from `[]` to `null` |
+| Forge button condition | Change from `exchangeCount >= 3` to `topicsRemaining !== null && topicsRemaining.length === 0 && exchangeCount >= 1` |
+| Progress text rendering | Add null check: show nothing when `topicsRemaining === null` |
+| No DB migration needed | The AI re-evaluates topics on reload via `generateFirstQuestion` |
+
