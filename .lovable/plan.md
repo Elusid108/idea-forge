@@ -1,43 +1,47 @@
 
-
-# Fix AI Interview Welcome Message & Project Assistant Default State
-
-Two targeted fixes for the brainstorm interview experience and the floating chat widget behavior.
+# Three UX Fixes: Brainstorm Delete Reset, Chat Auto-Focus, and Click-Outside Auto-Save
 
 ---
 
-## 1. AI Interview Welcome Message
+## 1. Delete Brainstorm Resets Linked Idea to "Fresh"
 
-**Problem**: When an idea is turned into a brainstorm, the AI interview starts with just a bare question -- no introduction explaining its purpose or capabilities.
+When a brainstorm is deleted (soft-deleted), if it has a linked `idea_id`, the linked idea's status should revert from `"brainstorming"` to `"new"` (Fresh Idea).
 
-**Fix in `src/pages/BrainstormWorkspace.tsx`**:
-- In the `generateFirstQuestion` function (around line 294-313), after receiving the question from the edge function, prepend a welcome introduction to the displayed question
-- The welcome text will be shown as a separate introductory line above the question, something like:
+**File: `src/pages/BrainstormWorkspace.tsx`** (deleteBrainstorm mutation, ~line 333-346)
+- In the `mutationFn`, after soft-deleting the brainstorm, check if `brainstorm.idea_id` exists
+- If so, update the linked idea's status back to `"new"`:
+  ```
+  await supabase.from("ideas").update({ status: "new" }).eq("id", brainstorm.idea_id);
+  ```
+- In `onSuccess`, also invalidate the `ideas` and `sidebar-items` query caches
 
-> "Hi! I'm here to help you flesh out your idea by asking you questions. I'll add what we discuss into the compiled description and bullet breakdown, I'll generate tags, and I can generate notes to help keep track of the things we come up with."
-
-- This only applies to the **first** question (when `chatHistory.length === 0`). Subsequent questions display normally.
-- Implementation: After `setCurrentQuestion(data.question)` in `generateFirstQuestion`, also set a `showWelcome` state flag. In the render, when `showWelcome` is true and `chatHistory.length === 0`, display the welcome text above the question in the interview card.
-- Alternatively (simpler): prepend the welcome text directly to the `currentQuestion` state with a separator, and render it as a single block with the welcome message styled differently.
-
-**Chosen approach**: Add a `showWelcomeIntro` state boolean, set it to `true` in `generateFirstQuestion` when `chatHistory.length === 0`. In the interview card UI, render a welcome paragraph above the question when `showWelcomeIntro` is true.
+**File: `src/pages/Trash.tsx`** -- The restore function for brainstorms should also be considered. When restoring a brainstorm from trash, the idea should go back to `"brainstorming"`. However, this requires knowing the brainstorm's `idea_id` which the current generic restore function doesn't have access to. This is a secondary enhancement and can be noted for later.
 
 ---
 
-## 2. Floating Chat Widget: Default to Expanded on First Load per Page
+## 2. Auto-Focus Chat Input After Sending a Message
 
-**Problem**: All floating chat widgets (Brainstorm, Project, Campaign) share the same `localStorage` key `"chat-widget-state"`. If the user collapses the brainstorm assistant, then promotes to a project, the Project Assistant also starts collapsed -- which is wrong for a first visit.
+After the user sends a message in any AI assistant (floating chat widget), the textarea should automatically re-focus so they can keep typing without clicking.
 
-**Fix in `src/components/FloatingChatWidget.tsx`**:
-- Add a `storageKey` prop (optional, defaults to `"chat-widget-state"`) so each page can use a distinct persistence key
-- Update `useState` initializer and `useEffect` to use `storageKey` instead of the hardcoded key
+**File: `src/components/FloatingChatWidget.tsx`**
+- Add a `useRef` for the textarea element
+- Add a `useEffect` that watches `isThinking` -- when it transitions from `true` to `false`, focus the textarea
+- This handles all three workspaces (Brainstorm, Project, Campaign) since they all use this same widget
 
-**Fix in calling pages**:
-- `BrainstormWorkspace.tsx`: pass `storageKey="chat-widget-brainstorm"`
-- `ProjectWorkspace.tsx`: pass `storageKey="chat-widget-project"`  
-- `CampaignWorkspace.tsx`: pass `storageKey="chat-widget-campaign"`
+The brainstorm interview textarea already has auto-focus (line 662 of BrainstormWorkspace.tsx), so no change needed there.
 
-This way each widget remembers its own state independently. A new project page will default to expanded (since its key has never been set).
+---
+
+## 3. Click-Outside Auto-Save for Editable Text Fields
+
+Currently the `EditableMarkdown` component requires clicking a "Done" button to save. Instead, clicking anywhere outside the editor should auto-save and revert to display mode. Only one field should be editable at a time.
+
+**File: `src/components/EditableMarkdown.tsx`**
+- Add a `useRef` for the editor wrapper div
+- Add a `useEffect` with a `mousedown` event listener on `document` that checks if the click target is outside the editor ref
+- When a click-outside is detected, run the same save logic as `handleDone` (convert HTML to markdown, call `onChange`, set `editing` to false, call `onSave`)
+- Remove the "Done" button since saving is now automatic on click-outside
+- The "only one field editable at a time" behavior is naturally achieved: when field A is in edit mode and the user clicks on field B (which is outside field A), the click-outside handler saves field A first. Then field B's `onClick` fires and enters edit mode.
 
 ---
 
@@ -45,8 +49,6 @@ This way each widget remembers its own state independently. A new project page w
 
 | File | Changes |
 |---|---|
-| `src/pages/BrainstormWorkspace.tsx` | Add `showWelcomeIntro` state; set it in `generateFirstQuestion` when history is empty; render welcome paragraph above the first question in the interview card |
-| `src/components/FloatingChatWidget.tsx` | Add `storageKey` prop; use it for localStorage read/write instead of hardcoded key |
-| `src/pages/ProjectWorkspace.tsx` | Pass `storageKey="chat-widget-project"` to FloatingChatWidget |
-| `src/pages/CampaignWorkspace.tsx` | Pass `storageKey="chat-widget-campaign"` to FloatingChatWidget |
-
+| `src/pages/BrainstormWorkspace.tsx` | In `deleteBrainstorm` mutation: reset linked idea status to `"new"`, invalidate ideas cache |
+| `src/components/FloatingChatWidget.tsx` | Add textarea ref; auto-focus textarea when `isThinking` goes from true to false |
+| `src/components/EditableMarkdown.tsx` | Add click-outside detection to auto-save and exit edit mode; remove "Done" button |
