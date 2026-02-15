@@ -312,6 +312,8 @@ export default function ProjectWorkspace() {
           project_id: id!,
           user_id: user!.id,
           title: project?.name || "Untitled Campaign",
+          category: (project as any)?.category || null,
+          tags: (project as any)?.tags || null,
         })
         .select()
         .single();

@@ -163,6 +163,7 @@ export type Database = {
       }
       campaigns: {
         Row: {
+          category: string | null
           created_at: string
           deleted_at: string | null
           id: string
@@ -172,6 +173,7 @@ export type Database = {
           revenue: number
           sales_model: string
           status: string
+          tags: string[] | null
           target_price: number
           title: string
           units_sold: number
@@ -179,6 +181,7 @@ export type Database = {
           user_id: string
         }
         Insert: {
+          category?: string | null
           created_at?: string
           deleted_at?: string | null
           id?: string
@@ -188,6 +191,7 @@ export type Database = {
           revenue?: number
           sales_model?: string
           status?: string
+          tags?: string[] | null
           target_price?: number
           title?: string
           units_sold?: number
@@ -195,6 +199,7 @@ export type Database = {
           user_id: string
         }
         Update: {
+          category?: string | null
           created_at?: string
           deleted_at?: string | null
           id?: string
@@ -204,6 +209,7 @@ export type Database = {
           revenue?: number
           sales_model?: string
           status?: string
+          tags?: string[] | null
           target_price?: number
           title?: string
           units_sold?: number

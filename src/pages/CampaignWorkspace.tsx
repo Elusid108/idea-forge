@@ -2,6 +2,7 @@ import { useState, useEffect } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import {
   ArrowLeft, Trash2, ExternalLink, Plus, X, Pencil, DollarSign, ShoppingCart, Target, Rocket,
+  FolderOpen, Brain, Lightbulb, Megaphone,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -30,6 +31,17 @@ const STATUS_LABELS: Record<string, string> = {
 
 const SALES_MODELS = ["B2B", "B2C", "Open Source", "Marketplace", "Direct", "Other"];
 const CHANNELS = ["Shopify", "Etsy", "GitHub", "Gumroad", "Amazon", "Website", "Other"];
+
+const CATEGORY_COLORS: Record<string, string> = {
+  "Product": "bg-blue-500/20 text-blue-400 border-blue-500/30",
+  "Process": "bg-emerald-500/20 text-emerald-400 border-emerald-500/30",
+  "Fixture/Jig": "bg-amber-500/20 text-amber-400 border-amber-500/30",
+  "Tool": "bg-orange-500/20 text-orange-400 border-orange-500/30",
+  "Art": "bg-pink-500/20 text-pink-400 border-pink-500/30",
+  "Hardware/Electronics": "bg-red-500/20 text-red-400 border-red-500/30",
+  "Software/App": "bg-violet-500/20 text-violet-400 border-violet-500/30",
+  "Environment/Space": "bg-teal-500/20 text-teal-400 border-teal-500/30",
+};
 
 type MarketingLink = { label: string; url: string };
 
@@ -65,14 +77,77 @@ export default function CampaignWorkspace() {
     enabled: !!id,
   });
 
+  // Linked project with full data for chat context
   const { data: linkedProject } = useQuery({
     queryKey: ["campaign-linked-project", campaign?.project_id],
     queryFn: async () => {
       const { data, error } = await supabase
         .from("projects")
-        .select("id, name")
+        .select("id, name, brainstorm_id, compiled_description, execution_strategy, bullet_breakdown")
         .eq("id", campaign!.project_id)
         .single();
+      if (error) throw error;
+      return data;
+    },
+    enabled: !!campaign?.project_id,
+  });
+
+  // Linked brainstorm (through project)
+  const { data: linkedBrainstorm } = useQuery({
+    queryKey: ["campaign-linked-brainstorm", linkedProject?.brainstorm_id],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("brainstorms")
+        .select("id, title, idea_id")
+        .eq("id", linkedProject!.brainstorm_id!)
+        .is("deleted_at", null)
+        .maybeSingle();
+      if (error) throw error;
+      return data;
+    },
+    enabled: !!linkedProject?.brainstorm_id,
+  });
+
+  // Linked idea (through brainstorm)
+  const { data: linkedIdea } = useQuery({
+    queryKey: ["campaign-linked-idea", linkedBrainstorm?.idea_id],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("ideas")
+        .select("id, title")
+        .eq("id", linkedBrainstorm!.idea_id!)
+        .is("deleted_at", null)
+        .maybeSingle();
+      if (error) throw error;
+      return data;
+    },
+    enabled: !!linkedBrainstorm?.idea_id,
+  });
+
+  // Project tasks for chat context
+  const { data: projectTasks = [] } = useQuery({
+    queryKey: ["campaign-project-tasks", campaign?.project_id],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("project_tasks")
+        .select("title, description, priority, completed, due_date")
+        .eq("project_id", campaign!.project_id)
+        .order("sort_order");
+      if (error) throw error;
+      return data;
+    },
+    enabled: !!campaign?.project_id,
+  });
+
+  // Project notes for chat context
+  const { data: projectNotes = [] } = useQuery({
+    queryKey: ["campaign-project-notes", campaign?.project_id],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("project_references")
+        .select("title, description")
+        .eq("project_id", campaign!.project_id)
+        .eq("type", "note");
       if (error) throw error;
       return data;
     },
@@ -153,15 +228,21 @@ export default function CampaignWorkspace() {
     setChatInput("");
     setIsChatThinking(true);
 
+    const tasksStr = projectTasks.map((t: any) => `[${t.completed ? "✓" : "○"}] ${t.title} (${t.priority}${t.due_date ? `, due ${t.due_date}` : ""})`).join("\n") || "None";
+    const notesStr = projectNotes.map((n: any) => `${n.title}: ${n.description || ""}`).join("\n") || "None";
+
     try {
       const { data, error } = await supabase.functions.invoke("project-chat", {
         body: {
           messages: newHistory,
           context: {
             title: campaign?.title || "",
-            description: `Campaign for project. Sales model: ${campaign?.sales_model || "not set"}. Channel: ${campaign?.primary_channel || "not set"}. Revenue: $${campaign?.revenue || 0}. Units sold: ${campaign?.units_sold || 0}.`,
-            tasks: "",
-            notes: "",
+            description: `Campaign for project "${linkedProject?.name || ""}". Sales model: ${campaign?.sales_model || "not set"}. Channel: ${campaign?.primary_channel || "not set"}. Revenue: $${campaign?.revenue || 0}. Units sold: ${campaign?.units_sold || 0}. Target price: $${campaign?.target_price || 0}. Category: ${campaign?.category || "none"}. Tags: ${(campaign?.tags || []).join(", ") || "none"}.`,
+            tasks: tasksStr,
+            notes: notesStr,
+            execution_strategy: (linkedProject as any)?.execution_strategy || "",
+            bullet_breakdown: (linkedProject as any)?.bullet_breakdown || "",
+            project_description: (linkedProject as any)?.compiled_description || "",
           },
         },
       });
@@ -256,16 +337,47 @@ export default function CampaignWorkspace() {
         <p className="text-xs text-muted-foreground">
           Created {format(new Date(campaign.created_at), "MMM d, yyyy 'at' h:mm a")}
         </p>
+        {campaign.category && (
+          <Badge className={`text-xs border ${CATEGORY_COLORS[campaign.category] || "bg-secondary text-secondary-foreground"}`}>
+            {campaign.category}
+          </Badge>
+        )}
+        {linkedIdea && (
+          <Badge
+            variant="outline"
+            className="text-xs gap-1 cursor-pointer hover:bg-accent transition-colors"
+            onClick={() => navigate(`/ideas`)}
+          >
+            <Lightbulb className="h-3 w-3" /> Linked Idea
+          </Badge>
+        )}
+        {linkedBrainstorm && (
+          <Badge
+            variant="outline"
+            className="text-xs gap-1 cursor-pointer hover:bg-accent transition-colors"
+            onClick={() => navigate(`/brainstorms/${linkedBrainstorm.id}`)}
+          >
+            <Brain className="h-3 w-3" /> Linked Brainstorm
+          </Badge>
+        )}
         {linkedProject && (
           <Badge
             variant="outline"
             className="text-xs gap-1 cursor-pointer hover:bg-accent transition-colors"
             onClick={() => navigate(`/projects/${linkedProject.id}`)}
           >
-            <Rocket className="h-3 w-3" /> Linked Project
+            <FolderOpen className="h-3 w-3" /> Linked Project
           </Badge>
         )}
       </div>
+
+      {campaign.tags && campaign.tags.length > 0 && (
+        <div className="flex flex-wrap gap-1">
+          {campaign.tags.map((tag: string) => (
+            <Badge key={tag} variant="secondary" className="text-xs">{tag}</Badge>
+          ))}
+        </div>
+      )}
 
       <Separator />
 
