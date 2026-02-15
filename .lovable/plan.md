@@ -1,47 +1,143 @@
 
-# Three UX Fixes: Brainstorm Delete Reset, Chat Auto-Focus, and Click-Outside Auto-Save
+
+# Combined Plan: Brainstorm Assistant Upgrade + Campaign GTM Interview Overhaul
+
+This plan combines all pending changes into a single implementation pass.
 
 ---
 
-## 1. Delete Brainstorm Resets Linked Idea to "Fresh"
+## Part A: Brainstorm Workspace Changes
 
-When a brainstorm is deleted (soft-deleted), if it has a linked `idea_id`, the linked idea's status should revert from `"brainstorming"` to `"new"` (Fresh Idea).
+### A1. Merge Welcome Message into First Interview Question
 
-**File: `src/pages/BrainstormWorkspace.tsx`** (deleteBrainstorm mutation, ~line 333-346)
-- In the `mutationFn`, after soft-deleting the brainstorm, check if `brainstorm.idea_id` exists
-- If so, update the linked idea's status back to `"new"`:
-  ```
-  await supabase.from("ideas").update({ status: "new" }).eq("id", brainstorm.idea_id);
-  ```
-- In `onSuccess`, also invalidate the `ideas` and `sidebar-items` query caches
+Remove the separate `showWelcomeIntro` state and UI block. Instead, update the `brainstorm-chat` edge function's `generate_question` system prompt to instruct the AI to blend a brief intro into the first question when chat history is empty (e.g., "Let's flesh out this idea of yours. [question]").
 
-**File: `src/pages/Trash.tsx`** -- The restore function for brainstorms should also be considered. When restoring a brainstorm from trash, the idea should go back to `"brainstorming"`. However, this requires knowing the brainstorm's `idea_id` which the current generic restore function doesn't have access to. This is a secondary enhancement and can be noted for later.
+**Files:**
+- `supabase/functions/brainstorm-chat/index.ts` -- Add to the `generate_question` system prompt: "For the FIRST question (when chat history is empty), blend a brief, friendly introduction into the question itself. Start with something like 'Let's flesh out this idea of yours.' then seamlessly transition into your question. Do NOT separate the intro from the question."
+- `src/pages/BrainstormWorkspace.tsx` -- Remove the `showWelcomeIntro` state (line 113), remove `setShowWelcomeIntro(true)` from `generateFirstQuestion` (line 310), and remove any welcome block rendering in the interview card UI.
+
+### A2. Show Brainstorm Assistant Always (Not Just When Locked)
+
+Remove the `{isLocked && (...)}` wrapper (line 1318) around the `FloatingChatWidget` so it renders unconditionally -- during active brainstorming and after completion/scrapping.
+
+### A3. Give Assistant Editing Capabilities When Active
+
+When the brainstorm is active (not locked), the assistant gains three tools: `create_note`, `update_description`, and `update_bullets`. When locked, it remains read-only (no tools).
+
+**File: `supabase/functions/brainstorm-chat/index.ts` (chat_query mode)**
+- Accept an optional `is_locked` boolean in the request body
+- When `is_locked` is false (active), pass three tools to the AI:
+  - `create_note` -- existing tool, creates research notes
+  - `update_description` -- takes `{ description: string }`, signals the frontend to update the compiled description
+  - `update_bullets` -- takes `{ bullets: string }`, signals the frontend to update the bullet breakdown
+- When `is_locked` is true, pass no tools (read-only mode)
+- Update the system prompt to explain capabilities based on lock state:
+  - Active: "You can answer questions, create research notes, and update the compiled description and bullet breakdown when asked."
+  - Locked: "You can answer questions about this brainstorm's content and help explore ideas."
+
+**File: `src/pages/BrainstormWorkspace.tsx`**
+- Pass `is_locked: isLocked` in the `handleChatSubmit` request body
+- Handle `update_description` actions: call `setDescription(action.description)`, save to DB via `supabase.from("brainstorms").update(...)`, push undo entry, invalidate queries, show toast
+- Handle `update_bullets` actions: same pattern as above for `setBullets`
+- Keep existing `create_note` action handling
+- Update the initial welcome message in `queryChatHistory` to reflect the dual-mode nature:
+  - Active: "I'm your brainstorm assistant. I can answer questions, help you dig deeper, create research notes, and update the description and bullet breakdown."
+  - Locked: "I'm your brainstorm assistant. I can answer questions about this brainstorm's content and help you explore ideas."
+
+### A4. Update Welcome Message Based on Lock State
+
+Since the widget is now always visible, the initial `queryChatHistory` welcome message (lines 118-119 and 135-136) should be set dynamically based on `isLocked`. Use a `useEffect` that watches `isLocked` and `brainstorm` to set the appropriate welcome message on first load.
 
 ---
 
-## 2. Auto-Focus Chat Input After Sending a Message
+## Part B: Campaign GTM Interview Overhaul
 
-After the user sends a message in any AI assistant (floating chat widget), the textarea should automatically re-focus so they can keep typing without clicking.
+### B1. Database Migration
 
-**File: `src/components/FloatingChatWidget.tsx`**
-- Add a `useRef` for the textarea element
-- Add a `useEffect` that watches `isThinking` -- when it transitions from `true` to `false`, focus the textarea
-- This handles all three workspaces (Brainstorm, Project, Campaign) since they all use this same widget
+Add columns to `campaigns` table:
+- `interview_completed` (boolean, default false) -- gate flag for showing interview vs dashboard
+- `chat_history` (jsonb, default '[]') -- stores the GTM interview Q&A
+- `playbook` (text, default '') -- the generated Campaign Playbook markdown
 
-The brainstorm interview textarea already has auto-focus (line 662 of BrainstormWorkspace.tsx), so no change needed there.
+Create new `campaign_tasks` table:
+- `id` (uuid, PK, default gen_random_uuid())
+- `campaign_id` (uuid, not null)
+- `user_id` (uuid, not null)
+- `title` (text, not null, default '')
+- `description` (text, default '')
+- `status_column` (text, default 'asset_creation') -- Kanban column name
+- `completed` (boolean, default false)
+- `sort_order` (integer, default 0)
+- `created_at` (timestamptz, default now())
 
----
+RLS policies on `campaign_tasks`: standard user-owns-row pattern (SELECT, INSERT, UPDATE, DELETE where `auth.uid() = user_id`).
 
-## 3. Click-Outside Auto-Save for Editable Text Fields
+### B2. New Edge Function: `campaign-chat`
 
-Currently the `EditableMarkdown` component requires clicking a "Done" button to save. Instead, clicking anywhere outside the editor should auto-save and revert to display mode. Only one field should be editable at a time.
+Create `supabase/functions/campaign-chat/index.ts` with three modes:
 
-**File: `src/components/EditableMarkdown.tsx`**
-- Add a `useRef` for the editor wrapper div
-- Add a `useEffect` with a `mousedown` event listener on `document` that checks if the click target is outside the editor ref
-- When a click-outside is detected, run the same save logic as `handleDone` (convert HTML to markdown, call `onChange`, set `editing` to false, call `onSave`)
-- Remove the "Done" button since saving is now automatic on click-outside
-- The "only one field editable at a time" behavior is naturally achieved: when field A is in edit mode and the user clicks on field B (which is outside field A), the click-outside handler saves field A first. Then field B's `onClick` fires and enters edit mode.
+**Mode: `generate_question`**
+- System prompt: Act as a Go-To-Market Strategist. Review inherited project/brainstorm context (compiled description, tags, category, whether there are CAD/STL files or GitHub repos). Ask targeted questions about:
+  - Product type (physical hardware run, 3D-printed product, digital asset, software)
+  - Business structure (LLC, hobby piece)
+  - Fulfillment method (in-house, 3PL, dropshipper, digital delivery)
+  - Target audience and pricing
+- Returns `{ question }`
+
+**Mode: `submit_answer`**
+- Processes user's answer against interview context
+- Returns `{ next_question }` (and optionally `clarification` if user asks a question back)
+
+**Mode: `forge_playbook`**
+- Takes the full interview chat history + project context
+- Returns structured JSON:
+```text
+{
+  "playbook": "markdown strategy covering IP protection, target audience, pricing, marketing copy, distribution",
+  "sales_model": "B2C" (or other recommended model),
+  "primary_channel": "Etsy" (or other recommended channel),
+  "tasks": [
+    { "title": "...", "status_column": "asset_creation", "description": "..." },
+    ...4-6 tasks total
+  ]
+}
+```
+
+Register in `supabase/config.toml`:
+```text
+[functions.campaign-chat]
+verify_jwt = false
+```
+
+### B3. Rewrite CampaignWorkspace.tsx -- Two-State UI
+
+**State 1: GTM Interview (interview_completed = false)**
+- Hide the existing dashboard (metrics, distribution, links)
+- Show a focused, centered flashcard Q&A component (same pattern as brainstorm interview):
+  - Project context summary at top (title, category, tags from linked project)
+  - Sequential AI questions about business model, fulfillment, audience
+  - Chat history displayed as Q&A cards
+  - After 3+ exchanges, show a prominent "Forge Campaign Playbook" button
+- On "Forge Campaign Playbook" click:
+  - Call `campaign-chat` with mode `forge_playbook`
+  - Save returned `playbook` to the campaign
+  - Set `sales_model` and `primary_channel` from the response
+  - Create `campaign_tasks` rows from the returned tasks array
+  - Set `interview_completed = true`
+  - Save `chat_history` to the campaign
+
+**State 2: Dashboard (interview_completed = true)**
+- Remove the floating "Campaign Assistant" chat widget
+- Add a "Campaign Playbook" section using `EditableMarkdown`, showing the generated playbook (editable like execution strategy in projects)
+- Keep existing metrics row, distribution strategy dropdowns, and campaign links
+- Add a Kanban-style task board below, showing `campaign_tasks` grouped by `status_column`:
+  - Columns: Asset Creation, Pre-Launch, Active Campaign, Fulfillment, Evergreen
+  - Tasks can be toggled complete, title edited inline, or deleted
+  - Manual "Add Task" button to add tasks to any column
+
+### B4. No Changes Needed to ProjectWorkspace Launch
+
+The existing `launchCampaign` mutation creates campaigns with default values. Since `interview_completed` defaults to `false`, newly promoted campaigns will automatically enter the GTM interview gate.
 
 ---
 
@@ -49,6 +145,10 @@ Currently the `EditableMarkdown` component requires clicking a "Done" button to 
 
 | File | Changes |
 |---|---|
-| `src/pages/BrainstormWorkspace.tsx` | In `deleteBrainstorm` mutation: reset linked idea status to `"new"`, invalidate ideas cache |
-| `src/components/FloatingChatWidget.tsx` | Add textarea ref; auto-focus textarea when `isThinking` goes from true to false |
-| `src/components/EditableMarkdown.tsx` | Add click-outside detection to auto-save and exit edit mode; remove "Done" button |
+| `supabase/functions/brainstorm-chat/index.ts` | Update `generate_question` prompt to blend welcome into first question; add `update_description` and `update_bullets` tools to `chat_query` mode (conditionally based on `is_locked`); remove tools when locked |
+| `src/pages/BrainstormWorkspace.tsx` | Remove `showWelcomeIntro` state/UI; show FloatingChatWidget unconditionally; handle `update_description`/`update_bullets` actions; pass `is_locked` to edge function; dynamic welcome message |
+| **New:** `supabase/functions/campaign-chat/index.ts` | GTM interview edge function with `generate_question`, `submit_answer`, and `forge_playbook` modes |
+| `supabase/config.toml` | Add `[functions.campaign-chat]` entry |
+| `src/pages/CampaignWorkspace.tsx` | Major rewrite: two-state UI with GTM interview gate and auto-populated dashboard with playbook + Kanban task board |
+| **DB Migration** | Add `interview_completed`, `chat_history`, `playbook` columns to `campaigns`; create `campaign_tasks` table with RLS |
+
