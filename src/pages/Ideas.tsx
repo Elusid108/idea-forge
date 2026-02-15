@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { Plus, Lightbulb, Grid3X3, List, Mic, MicOff, Loader2, Brain, ChevronDown, ChevronRight, ChevronLeft, Ban, FolderOpen } from "lucide-react";
+import { Plus, Lightbulb, Grid3X3, List, Mic, MicOff, Loader2, Brain, ChevronDown, ChevronRight, ChevronLeft, Ban, FolderOpen, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
@@ -161,54 +161,55 @@ function IdeaDetailModal({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-2xl max-h-[85vh] overflow-y-auto">
-        <DialogHeader>
-          <div className="flex items-center gap-2">
-            {onPrev && (
-              <Button variant="ghost" size="icon" className="h-7 w-7 shrink-0" disabled={!hasPrev} onClick={onPrev}>
-                <ChevronLeft className="h-4 w-4" />
-              </Button>
+      <DialogContent className="sm:max-w-2xl h-[85vh] flex flex-col p-0 gap-0 [&>button]:hidden">
+        {/* Frozen Header */}
+        <div className="flex items-center gap-2 px-6 pt-6 pb-3 shrink-0">
+          {onPrev && (
+            <Button variant="ghost" size="icon" className="h-7 w-7 shrink-0" onClick={onPrev}>
+              <ChevronLeft className="h-4 w-4" />
+            </Button>
+          )}
+          <DialogTitle className="flex-1 text-lg font-semibold leading-none tracking-tight">{idea.title || "Idea Details"}</DialogTitle>
+          {onNext && (
+            <Button variant="ghost" size="icon" className="h-7 w-7 shrink-0" onClick={onNext}>
+              <ChevronRight className="h-4 w-4" />
+            </Button>
+          )}
+          <Button variant="ghost" size="icon" className="h-7 w-7 shrink-0 ml-4" onClick={() => onOpenChange(false)}>
+            <X className="h-4 w-4" />
+          </Button>
+        </div>
+        <DialogDescription className="sr-only">View idea details, delete, or start a brainstorm</DialogDescription>
+
+        {/* Scrollable Body */}
+        <div className="flex-1 overflow-y-auto px-6 space-y-4">
+          <div className="flex items-center gap-2 flex-wrap">
+            <p className="text-xs text-muted-foreground">
+              Created {format(new Date(idea.created_at), "MMM d, yyyy 'at' h:mm a")}
+            </p>
+            {idea.category && (
+              <Badge className={`text-xs border ${categoryClass}`}>{idea.category}</Badge>
             )}
-            <DialogTitle className="flex-1">{idea.title || "Idea Details"}</DialogTitle>
-            {onNext && (
-              <Button variant="ghost" size="icon" className="h-7 w-7 shrink-0" disabled={!hasNext} onClick={onNext}>
-                <ChevronRight className="h-4 w-4" />
-              </Button>
+            {linkedBrainstorm && (
+              <Badge
+                variant="outline"
+                className="text-xs gap-1 cursor-pointer hover:bg-accent transition-colors"
+                onClick={() => { onOpenChange(false); navigate(`/brainstorms/${linkedBrainstorm.id}`); }}
+              >
+                <Brain className="h-3 w-3" /> Linked Brainstorm
+              </Badge>
+            )}
+            {linkedProject && (
+              <Badge
+                variant="outline"
+                className="text-xs gap-1 cursor-pointer hover:bg-accent transition-colors"
+                onClick={() => { onOpenChange(false); navigate(`/projects/${linkedProject.id}`); }}
+              >
+                <FolderOpen className="h-3 w-3" /> Linked Project
+              </Badge>
             )}
           </div>
-          <DialogDescription className="sr-only">View idea details, delete, or start a brainstorm</DialogDescription>
-        </DialogHeader>
 
-        {/* Timestamp + badges */}
-        <div className="flex items-center gap-2 flex-wrap">
-          <p className="text-xs text-muted-foreground">
-            Created {format(new Date(idea.created_at), "MMM d, yyyy 'at' h:mm a")}
-          </p>
-          {idea.category && (
-            <Badge className={`text-xs border ${categoryClass}`}>{idea.category}</Badge>
-          )}
-          {linkedBrainstorm && (
-            <Badge
-              variant="outline"
-              className="text-xs gap-1 cursor-pointer hover:bg-accent transition-colors"
-              onClick={() => { onOpenChange(false); navigate(`/brainstorms/${linkedBrainstorm.id}`); }}
-            >
-              <Brain className="h-3 w-3" /> Linked Brainstorm
-            </Badge>
-          )}
-          {linkedProject && (
-            <Badge
-              variant="outline"
-              className="text-xs gap-1 cursor-pointer hover:bg-accent transition-colors"
-              onClick={() => { onOpenChange(false); navigate(`/projects/${linkedProject.id}`); }}
-            >
-              <FolderOpen className="h-3 w-3" /> Linked Project
-            </Badge>
-          )}
-        </div>
-
-        <div className="space-y-4">
-          {/* Raw Dump */}
           <div>
             <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-1">Raw Dump</p>
             <div className="rounded-lg bg-muted/50 p-3 text-sm text-muted-foreground whitespace-pre-wrap">
@@ -216,7 +217,6 @@ function IdeaDetailModal({
             </div>
           </div>
 
-          {/* Summary */}
           {idea.processed_summary && (
             <div>
               <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-1">Summary</p>
@@ -224,7 +224,6 @@ function IdeaDetailModal({
             </div>
           )}
 
-          {/* Key Features */}
           {idea.key_features && (
             <div>
               <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-1">Key Features</p>
@@ -234,9 +233,8 @@ function IdeaDetailModal({
             </div>
           )}
 
-          {/* Tags */}
           {idea.tags && idea.tags.length > 0 && (
-            <div className="flex flex-wrap gap-1">
+            <div className="flex flex-wrap gap-1 pb-4">
               {idea.tags.map((tag: string) => (
                 <Badge key={tag} variant="secondary" className="text-xs">{tag}</Badge>
               ))}
@@ -244,9 +242,9 @@ function IdeaDetailModal({
           )}
         </div>
 
+        {/* Frozen Footer */}
         <Separator />
-
-        <DialogFooter>
+        <div className="flex items-center justify-end gap-2 px-6 py-4 shrink-0">
           {!isBrainstorming && (
             <AlertDialog>
               <AlertDialogTrigger asChild>
@@ -279,7 +277,7 @@ function IdeaDetailModal({
             <Brain className="h-4 w-4" />
             {isBrainstorming ? "Brainstorming…" : isStarting ? "Starting…" : "Start Brainstorm"}
           </Button>
-        </DialogFooter>
+        </div>
       </DialogContent>
     </Dialog>
   );
@@ -463,8 +461,9 @@ export default function IdeasPage() {
   const freshStatuses = ["new", "processing", "processed"];
   const freshIdeas = ideas.filter((i: any) => freshStatuses.includes(i.status));
   const currentFreshIndex = currentIdea ? freshIdeas.findIndex((i: any) => i.id === currentIdea.id) : -1;
-  const hasPrev = currentFreshIndex > 0;
-  const hasNext = currentFreshIndex >= 0 && currentFreshIndex < freshIdeas.length - 1;
+  const canNav = freshIdeas.length > 1;
+  const hasPrev = canNav;
+  const hasNext = canNav;
   const isFreshIdea = currentFreshIndex >= 0;
 
   return (
@@ -572,10 +571,11 @@ export default function IdeasPage() {
             onSuccess: () => {
               // Auto-advance to next fresh idea when scrapping
               if (isScrapping && isFreshIdea) {
-                if (hasNext) {
-                  setSelectedIdea(freshIdeas[currentFreshIndex + 1]);
-                } else if (hasPrev) {
-                  setSelectedIdea(freshIdeas[currentFreshIndex - 1]);
+                // After scrap, freshIdeas will shrink. Navigate to next or wrap.
+                const remaining = freshIdeas.filter((_: any, i: number) => i !== currentFreshIndex);
+                if (remaining.length > 0) {
+                  const nextIdx = currentFreshIndex >= remaining.length ? 0 : currentFreshIndex;
+                  setSelectedIdea(remaining[nextIdx]);
                 } else {
                   setSelectedIdea(null);
                 }
@@ -586,8 +586,14 @@ export default function IdeasPage() {
         isDeleting={deleteIdea.isPending}
         isStarting={startBrainstorm.isPending}
         isScrapping={scrapIdea.isPending}
-        onPrev={isFreshIdea ? () => hasPrev && setSelectedIdea(freshIdeas[currentFreshIndex - 1]) : undefined}
-        onNext={isFreshIdea ? () => hasNext && setSelectedIdea(freshIdeas[currentFreshIndex + 1]) : undefined}
+        onPrev={isFreshIdea ? () => {
+          const prev = currentFreshIndex <= 0 ? freshIdeas.length - 1 : currentFreshIndex - 1;
+          setSelectedIdea(freshIdeas[prev]);
+        } : undefined}
+        onNext={isFreshIdea ? () => {
+          const next = currentFreshIndex >= freshIdeas.length - 1 ? 0 : currentFreshIndex + 1;
+          setSelectedIdea(freshIdeas[next]);
+        } : undefined}
         hasPrev={hasPrev}
         hasNext={hasNext}
       />

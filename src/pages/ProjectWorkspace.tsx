@@ -1,9 +1,9 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import {
   ArrowLeft, Link as LinkIcon, Image, Film, StickyNote, X, Pencil,
   Grid3X3, List, ChevronDown, ChevronRight, ArrowUpDown, Trash2,
-  Plus, Lightbulb, Brain, FileText, FolderOpen,
+  Plus, Lightbulb, Brain, FileText, FolderOpen, Github, Star, GitFork, AlertCircle, GitCommit,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -25,7 +25,7 @@ import EditableMarkdown from "@/components/EditableMarkdown";
 import ReferenceViewer, { getVideoThumbnail } from "@/components/ReferenceViewer";
 import RichTextNoteEditor from "@/components/RichTextNoteEditor";
 import ReactMarkdown from "react-markdown";
-import { format } from "date-fns";
+import { format, formatDistanceToNow } from "date-fns";
 
 type RefType = "link" | "image" | "video" | "note" | "file";
 type SortMode = "az" | "za" | "newest" | "oldest";
@@ -53,6 +53,12 @@ const CATEGORY_COLORS: Record<string, string> = {
 };
 
 const STATUS_OPTIONS = ["planning", "in_progress", "testing", "done"];
+
+function parseGitHubUrl(url: string): { owner: string; repo: string } | null {
+  const match = url.match(/github\.com\/([^/]+)\/([^/]+)/);
+  if (!match) return null;
+  return { owner: match[1], repo: match[2].replace(/\.git$/, "") };
+}
 const STATUS_LABELS: Record<string, string> = {
   planning: "Planning", in_progress: "In Progress", testing: "Testing", done: "Done",
 };
@@ -144,6 +150,42 @@ export default function ProjectWorkspace() {
       setGithubUrl(project.github_repo_url || "");
     }
   }, [project]);
+
+  const githubParsed = useMemo(() => parseGitHubUrl(githubUrl), [githubUrl]);
+
+  const { data: githubData } = useQuery({
+    queryKey: ["github-repo", githubParsed?.owner, githubParsed?.repo],
+    queryFn: async () => {
+      const { owner, repo } = githubParsed!;
+      const base = `https://api.github.com/repos/${owner}/${repo}`;
+      const [repoRes, commitsRes] = await Promise.all([
+        fetch(base),
+        fetch(`${base}/commits?per_page=3`),
+      ]);
+      if (!repoRes.ok) throw new Error("Repo not found");
+      const repoData = await repoRes.json();
+      const commitsData = commitsRes.ok ? await commitsRes.json() : [];
+      return { repo: repoData, commits: commitsData };
+    },
+    enabled: !!githubParsed,
+    staleTime: 5 * 60 * 1000,
+    retry: false,
+  });
+
+  const [showReadme, setShowReadme] = useState(false);
+  const { data: readmeContent } = useQuery({
+    queryKey: ["github-readme", githubParsed?.owner, githubParsed?.repo],
+    queryFn: async () => {
+      const { owner, repo } = githubParsed!;
+      const mainRes = await fetch(`https://raw.githubusercontent.com/${owner}/${repo}/main/README.md`);
+      if (mainRes.ok) return mainRes.text();
+      const masterRes = await fetch(`https://raw.githubusercontent.com/${owner}/${repo}/master/README.md`);
+      if (masterRes.ok) return masterRes.text();
+      return null;
+    },
+    enabled: !!githubParsed && showReadme,
+    staleTime: 5 * 60 * 1000,
+  });
 
   const updateProject = useMutation({
     mutationFn: async (fields: Record<string, any>) => {
@@ -659,6 +701,77 @@ export default function ProjectWorkspace() {
               className="text-sm"
             />
           </div>
+
+          {/* GitHub Activity Widget */}
+          {githubData && (
+            <Card className="border-border/50 bg-card/50">
+              <CardContent className="p-4 space-y-3">
+                <div className="flex items-center gap-2">
+                  <Github className="h-4 w-4 text-muted-foreground" />
+                  <a
+                    href={githubUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-sm font-semibold hover:text-primary transition-colors truncate"
+                  >
+                    {githubData.repo.full_name}
+                  </a>
+                </div>
+                {githubData.repo.description && (
+                  <p className="text-xs text-muted-foreground">{githubData.repo.description}</p>
+                )}
+                <div className="flex items-center gap-2 flex-wrap">
+                  <Badge variant="secondary" className="text-xs gap-1">
+                    <Star className="h-3 w-3" /> {githubData.repo.stargazers_count}
+                  </Badge>
+                  <Badge variant="secondary" className="text-xs gap-1">
+                    <GitFork className="h-3 w-3" /> {githubData.repo.forks_count}
+                  </Badge>
+                  <Badge variant="secondary" className="text-xs gap-1">
+                    <AlertCircle className="h-3 w-3" /> {githubData.repo.open_issues_count} issues
+                  </Badge>
+                </div>
+                {githubData.commits.length > 0 && (
+                  <div>
+                    <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-1.5">Recent Commits</p>
+                    <div className="space-y-1.5">
+                      {githubData.commits.map((c: any) => (
+                        <div key={c.sha} className="flex items-start gap-2 text-xs">
+                          <GitCommit className="h-3 w-3 text-muted-foreground shrink-0 mt-0.5" />
+                          <div className="min-w-0 flex-1">
+                            <p className="truncate">{c.commit.message.split("\n")[0]}</p>
+                            <p className="text-muted-foreground/60">
+                              {formatDistanceToNow(new Date(c.commit.author.date), { addSuffix: true })}
+                            </p>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+                <Collapsible open={showReadme} onOpenChange={setShowReadme}>
+                  <CollapsibleTrigger className="flex items-center gap-1 text-xs text-muted-foreground hover:text-primary transition-colors">
+                    {showReadme ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
+                    README
+                  </CollapsibleTrigger>
+                  <CollapsibleContent className="mt-2">
+                    {readmeContent ? (
+                      <div className="rounded-lg bg-muted/30 border border-border/30 p-3 max-h-[400px] overflow-y-auto">
+                        <div className="prose prose-invert prose-sm max-w-none [&_ul]:list-disc [&_ol]:list-decimal [&_ul]:pl-5 [&_ol]:pl-5 [&_li]:my-0.5 [&_p]:my-1.5">
+                          <ReactMarkdown>{readmeContent}</ReactMarkdown>
+                        </div>
+                      </div>
+                    ) : (
+                      <p className="text-xs text-muted-foreground/60 italic">Loading README…</p>
+                    )}
+                  </CollapsibleContent>
+                </Collapsible>
+              </CardContent>
+            </Card>
+          )}
+          {githubParsed && !githubData && (
+            <p className="text-xs text-muted-foreground/60 italic">Could not fetch repository data</p>
+          )}
         </div>
       </div>
 
@@ -741,6 +854,14 @@ export default function ProjectWorkspace() {
             </DialogHeader>
 
             <div className="space-y-4">
+              <div className="flex items-center gap-2 flex-wrap">
+                <p className="text-xs text-muted-foreground">
+                  Created {format(new Date(linkedIdeaData.created_at), "MMM d, yyyy 'at' h:mm a")}
+                </p>
+                {linkedIdeaData.category && (
+                  <Badge className={`text-xs border ${CATEGORY_COLORS[linkedIdeaData.category] || "bg-secondary text-secondary-foreground"}`}>{linkedIdeaData.category}</Badge>
+                )}
+              </div>
               <div>
                 <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-1">Raw Dump</p>
                 <div className="rounded-lg bg-muted/50 p-3 text-sm text-muted-foreground whitespace-pre-wrap">

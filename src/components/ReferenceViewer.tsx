@@ -60,6 +60,9 @@ export default function ReferenceViewer({ reference, open, onOpenChange }: Refer
                 className="max-w-full max-h-[80vh] object-contain"
               />
             </div>
+            {reference.description && (
+              <p className="text-sm text-gray-400 text-center mt-3 px-4">{reference.description}</p>
+            )}
           </div>
         </DialogContent>
       </Dialog>
@@ -98,6 +101,9 @@ export default function ReferenceViewer({ reference, open, onOpenChange }: Refer
                 <video src={url} controls autoPlay className="w-full h-full rounded" />
               )}
             </div>
+            {reference.description && (
+              <p className="text-sm text-gray-400 text-center mt-3 px-4">{reference.description}</p>
+            )}
           </div>
         </DialogContent>
       </Dialog>

@@ -138,7 +138,7 @@ export default function BrainstormWorkspace() {
     queryFn: async () => {
       const { data, error } = await supabase
         .from("brainstorms")
-        .select("*, ideas(raw_dump, processed_summary, title, key_features, tags, category)")
+        .select("*, ideas(raw_dump, processed_summary, title, key_features, tags, category, created_at)")
         .eq("id", id!)
         .single();
       if (error) throw error;
@@ -1111,16 +1111,19 @@ export default function BrainstormWorkspace() {
         <Dialog open={showLinkedIdea} onOpenChange={setShowLinkedIdea}>
           <DialogContent className="sm:max-w-2xl max-h-[85vh] overflow-y-auto">
             <DialogHeader>
-              <div className="space-y-2">
-                {linkedIdea.category && (
-                  <Badge className={`text-xs border ${linkedCategoryClass}`}>{linkedIdea.category}</Badge>
-                )}
-                <DialogTitle>{linkedIdea.title || "Linked Idea"}</DialogTitle>
-              </div>
+              <DialogTitle>{linkedIdea.title || "Linked Idea"}</DialogTitle>
               <DialogDescription className="sr-only">View linked idea details</DialogDescription>
             </DialogHeader>
 
             <div className="space-y-4">
+              <div className="flex items-center gap-2 flex-wrap">
+                <p className="text-xs text-muted-foreground">
+                  Created {linkedIdea.created_at ? format(new Date(linkedIdea.created_at), "MMM d, yyyy 'at' h:mm a") : "—"}
+                </p>
+                {linkedIdea.category && (
+                  <Badge className={`text-xs border ${linkedCategoryClass}`}>{linkedIdea.category}</Badge>
+                )}
+              </div>
               <div>
                 <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-1">Raw Dump</p>
                 <div className="rounded-lg bg-muted/50 p-3 text-sm text-muted-foreground whitespace-pre-wrap">
