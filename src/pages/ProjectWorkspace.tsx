@@ -73,6 +73,7 @@ export default function ProjectWorkspace() {
   const [editingRef, setEditingRef] = useState<any>(null);
   const [refForm, setRefForm] = useState({ title: "", url: "", description: "" });
   const [refFile, setRefFile] = useState<File | null>(null);
+  const [showLinkedIdea, setShowLinkedIdea] = useState(false);
   const [refViewMode, setRefViewMode] = useState<"grid" | "list">(
     () => (localStorage.getItem("ref-view-mode") as "grid" | "list") || "grid"
   );
@@ -297,6 +298,21 @@ export default function ProjectWorkspace() {
   const linkedBrainstorm = (project as any)?.brainstorms;
   const linkedIdeaId = linkedBrainstorm?.idea_id;
 
+  // Fetch linked idea data for overlay popup
+  const { data: linkedIdeaData } = useQuery({
+    queryKey: ["linked-idea-for-project", linkedIdeaId],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("ideas")
+        .select("*")
+        .eq("id", linkedIdeaId!)
+        .single();
+      if (error) throw error;
+      return data;
+    },
+    enabled: !!linkedIdeaId,
+  });
+
   if (isLoading) {
     return <div className="flex items-center justify-center py-20"><Skeleton className="h-8 w-8" /></div>;
   }
@@ -380,7 +396,7 @@ export default function ProjectWorkspace() {
           <Badge
             variant="outline"
             className="text-xs gap-1 cursor-pointer hover:bg-accent transition-colors"
-            onClick={() => navigate(`/ideas?open=${linkedIdeaId}`)}
+            onClick={() => setShowLinkedIdea(true)}
           >
             <Lightbulb className="h-3 w-3" /> Linked Idea
           </Badge>
@@ -402,17 +418,19 @@ export default function ProjectWorkspace() {
       <div className="grid grid-cols-1 lg:grid-cols-5 gap-6">
         {/* Left column */}
         <div className="lg:col-span-3 space-y-6">
-          {/* Compiled Description */}
-          <div>
-            <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-1">Description</p>
-            <EditableMarkdown
-              value={description}
-              onChange={setDescription}
-              onSave={() => updateProject.mutate({ compiled_description: description })}
-              placeholder="Project description…"
-              minHeight="100px"
-            />
-          </div>
+          {/* Compiled Description - only show if no linked brainstorm */}
+          {!brainstormId && (
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-1">Description</p>
+              <EditableMarkdown
+                value={description}
+                onChange={setDescription}
+                onSave={() => updateProject.mutate({ compiled_description: description })}
+                placeholder="Project description…"
+                minHeight="100px"
+              />
+            </div>
+          )}
 
           {/* Resources */}
           <div className="space-y-4">
@@ -599,7 +617,11 @@ export default function ProjectWorkspace() {
                         const Icon = REF_ICONS[ref.type] || StickyNote;
                         const iconColor = REF_ICON_COLORS[ref.type] || "text-muted-foreground";
                         return (
-                          <div key={ref.id} className="flex items-center gap-2 p-1.5 rounded border border-border/30 bg-card/30 text-xs">
+                          <div
+                            key={ref.id}
+                            className="flex items-center gap-2 p-1.5 rounded border border-border/30 bg-card/30 text-xs cursor-pointer hover:border-primary/30 transition-colors"
+                            onClick={() => handleRefClick(ref)}
+                          >
                             <Icon className={`h-3.5 w-3.5 ${iconColor} shrink-0`} />
                             <span className="truncate">{ref.title}</span>
                           </div>
@@ -612,17 +634,19 @@ export default function ProjectWorkspace() {
             </Collapsible>
           )}
 
-          {/* Bullet Breakdown */}
-          <div>
-            <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-1">Bullet Breakdown</p>
-            <EditableMarkdown
-              value={bullets}
-              onChange={setBullets}
-              onSave={() => updateProject.mutate({ bullet_breakdown: bullets })}
-              placeholder="- Key point 1&#10;- Key point 2"
-              minHeight="80px"
-            />
-          </div>
+          {/* Bullet Breakdown - only show if no linked brainstorm */}
+          {!brainstormId && (
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-1">Bullet Breakdown</p>
+              <EditableMarkdown
+                value={bullets}
+                onChange={setBullets}
+                onSave={() => updateProject.mutate({ bullet_breakdown: bullets })}
+                placeholder="- Key point 1&#10;- Key point 2"
+                minHeight="80px"
+              />
+            </div>
+          )}
 
           {/* GitHub URL */}
           <div>
@@ -706,6 +730,55 @@ export default function ProjectWorkspace() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* Linked Idea Overlay Dialog */}
+      {linkedIdeaData && (
+        <Dialog open={showLinkedIdea} onOpenChange={setShowLinkedIdea}>
+          <DialogContent className="sm:max-w-2xl max-h-[85vh] overflow-y-auto">
+            <DialogHeader>
+              <DialogTitle>{linkedIdeaData.title || "Linked Idea"}</DialogTitle>
+              <DialogDescription className="sr-only">View linked idea details</DialogDescription>
+            </DialogHeader>
+
+            <div className="space-y-4">
+              <div>
+                <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-1">Raw Dump</p>
+                <div className="rounded-lg bg-muted/50 p-3 text-sm text-muted-foreground whitespace-pre-wrap">
+                  {linkedIdeaData.raw_dump}
+                </div>
+              </div>
+
+              {linkedIdeaData.processed_summary && (
+                <div>
+                  <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-1">Summary</p>
+                  <p className="text-sm leading-relaxed">{linkedIdeaData.processed_summary}</p>
+                </div>
+              )}
+
+              {linkedIdeaData.key_features && (
+                <div>
+                  <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-1">Key Features</p>
+                  <div className="text-sm text-muted-foreground">
+                    <div dangerouslySetInnerHTML={{ __html: linkedIdeaData.key_features.replace(/^- /gm, "• ").replace(/\n/g, "<br/>") }} />
+                  </div>
+                </div>
+              )}
+
+              {linkedIdeaData.tags && linkedIdeaData.tags.length > 0 && (
+                <div className="flex flex-wrap gap-1">
+                  {linkedIdeaData.tags.map((tag: string) => (
+                    <Badge key={tag} variant="secondary" className="text-xs">{tag}</Badge>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            <DialogFooter>
+              <Button variant="ghost" onClick={() => setShowLinkedIdea(false)}>Close</Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+      )}
     </div>
   );
 }

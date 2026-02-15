@@ -25,6 +25,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import EditableMarkdown from "@/components/EditableMarkdown";
 import ReferenceViewer, { getVideoThumbnail } from "@/components/ReferenceViewer";
 import RichTextNoteEditor from "@/components/RichTextNoteEditor";
+import ReactMarkdown from "react-markdown";
 import { useUndoRedo } from "@/hooks/useUndoRedo";
 import { format } from "date-fns";
 
@@ -254,14 +255,19 @@ export default function BrainstormWorkspace() {
 
   const chatHistory: ChatMsg[] = (brainstorm?.chat_history as ChatMsg[]) || [];
 
-  const getContext = () => ({
-    title: brainstorm?.title || "",
-    idea_raw: (brainstorm as any)?.ideas?.raw_dump || "",
-    idea_summary: (brainstorm as any)?.ideas?.processed_summary || "",
-    references: references.map((r: any) => `[${r.type}] ${r.title}: ${r.description || r.url}`).join("\n"),
-    tags: (brainstorm as any)?.tags || [],
-    category: (brainstorm as any)?.category || "",
-  });
+  const getContext = () => {
+    const notes = references.filter((r: any) => r.type === "note");
+    const otherRefs = references.filter((r: any) => r.type !== "note");
+    return {
+      title: brainstorm?.title || "",
+      idea_raw: (brainstorm as any)?.ideas?.raw_dump || "",
+      idea_summary: (brainstorm as any)?.ideas?.processed_summary || "",
+      notes: notes.map((r: any) => `${r.title}: ${r.description || ""}`).join("\n"),
+      references: otherRefs.map((r: any) => `[${r.type}] ${r.title}: ${r.description || r.url}`).join("\n"),
+      tags: (brainstorm as any)?.tags || [],
+      category: (brainstorm as any)?.category || "",
+    };
+  };
 
   const generateFirstQuestion = async () => {
     setIsThinking(true);
@@ -377,19 +383,7 @@ export default function BrainstormWorkspace() {
         .single();
       if (error) throw error;
 
-      if (references.length > 0) {
-        const refCopies = references.map((r: any) => ({
-          project_id: data.id,
-          user_id: user!.id,
-          type: r.type,
-          title: r.title,
-          url: r.url || "",
-          description: r.description || "",
-          thumbnail_url: r.thumbnail_url || "",
-          sort_order: r.sort_order,
-        }));
-        await supabase.from("project_references").insert(refCopies);
-      }
+      // Brainstorm references are viewable in the Brainstorm Callout - no need to copy
 
       await supabase.from("brainstorms").update({ status: "completed" }).eq("id", id!);
       return data;
@@ -564,33 +558,47 @@ export default function BrainstormWorkspace() {
       });
       if (error) throw error;
 
-      const { updated_description, updated_bullets, updated_tags, next_question } = data;
+      const { updated_description, updated_bullets, updated_tags, next_question, clarification } = data;
 
-      setDescription(updated_description);
-      setBullets(updated_bullets);
-      setCurrentQuestion(next_question);
-      setAnswer("");
+      // If AI returned a clarification (user asked a question / was uncertain)
+      if (clarification && !updated_description) {
+        const assistantMsg: ChatMsg = {
+          role: "assistant",
+          content: clarification,
+        };
+        const finalHistory = [...newHistory, assistantMsg];
+        setCurrentQuestion(next_question);
+        setAnswer("");
 
-      const assistantMsg: ChatMsg = {
-        role: "assistant",
-        content: `Updated description and bullets. Next question: ${next_question}`,
-      };
-      const finalHistory = [...newHistory, assistantMsg];
+        await supabase.from("brainstorms").update({ chat_history: finalHistory }).eq("id", id!);
+        queryClient.invalidateQueries({ queryKey: ["brainstorm", id] });
+      } else {
+        setDescription(updated_description);
+        setBullets(updated_bullets);
+        setCurrentQuestion(next_question);
+        setAnswer("");
 
-      const updateFields: Record<string, any> = {
-        compiled_description: updated_description,
-        bullet_breakdown: updated_bullets,
-        chat_history: finalHistory,
-      };
-      if (updated_tags && Array.isArray(updated_tags)) {
-        updateFields.tags = updated_tags;
+        const assistantMsg: ChatMsg = {
+          role: "assistant",
+          content: `Updated description and bullets. Next question: ${next_question}`,
+        };
+        const finalHistory = [...newHistory, assistantMsg];
+
+        const updateFields: Record<string, any> = {
+          compiled_description: updated_description,
+          bullet_breakdown: updated_bullets,
+          chat_history: finalHistory,
+        };
+        if (updated_tags && Array.isArray(updated_tags)) {
+          updateFields.tags = updated_tags;
+        }
+        if (data.updated_category) {
+          updateFields.category = data.updated_category;
+        }
+
+        await supabase.from("brainstorms").update(updateFields).eq("id", id!);
+        queryClient.invalidateQueries({ queryKey: ["brainstorm", id] });
       }
-      if (data.updated_category) {
-        updateFields.category = data.updated_category;
-      }
-
-      await supabase.from("brainstorms").update(updateFields).eq("id", id!);
-      queryClient.invalidateQueries({ queryKey: ["brainstorm", id] });
     } catch (e: any) {
       toast.error("Failed: " + e.message);
     } finally {
@@ -813,7 +821,11 @@ export default function BrainstormWorkspace() {
                             </div>
                           )}
                           <div className={`rounded-lg px-3 py-2 text-sm max-w-[80%] ${msg.role === "user" ? "bg-primary text-primary-foreground" : "bg-muted"}`}>
-                            {msg.content}
+                            {msg.role === "assistant" ? (
+                              <div className="prose prose-invert prose-sm max-w-none [&_ul]:list-disc [&_ol]:list-decimal [&_ul]:pl-5 [&_ol]:pl-5 [&_li]:my-0.5 [&_p]:my-1.5">
+                                <ReactMarkdown>{msg.content}</ReactMarkdown>
+                              </div>
+                            ) : msg.content}
                           </div>
                         </div>
                       ))}
