@@ -1,141 +1,74 @@
 
 
-# Rich Text Keyboard Shortcuts, AI Interview Improvements, Idea Navigation, Project Page Cleanup, and Clickable Brainstorm References
+# Ideas Popup Layout, Linked Idea Consistency, Video/Image Captions, and GitHub Integration Widget
 
-This plan covers 9 changes across the application.
-
----
-
-## 1. Linked Idea Badge on Project Page Opens Overlay Popup
-
-**Problem**: Clicking "Linked Idea" on the project page navigates to `/ideas?open=${linkedIdeaId}`. On brainstorms, it opens an inline overlay dialog. The project page should match the brainstorm behavior.
-
-**Fix in `src/pages/ProjectWorkspace.tsx`**:
-- Add a `showLinkedIdea` state and a linked idea query (fetch the idea data by `linkedIdeaId`).
-- Replace the `navigate` onClick on the "Linked Idea" badge with `setShowLinkedIdea(true)`.
-- Add the same `Dialog` overlay used in `BrainstormWorkspace.tsx` (lines 1097-1148) showing Raw Dump, Summary, Key Features, and Tags.
+This plan covers 5 distinct areas of work.
 
 ---
 
-## 2. Rich Text Editor Keyboard Shortcuts and Sidebar Fix
+## 1. Ideas Detail Popup: Fixed Header/Footer with Scrollable Body
 
-**Problem**: The `RichTextNoteEditor` uses a plain textarea with toolbar buttons but no keyboard shortcuts. Ctrl+B hides the app sidebar instead of bolding text.
+**Problem**: The popup resizes based on content, the X and next button are too close together, and navigation doesn't wrap around.
 
-**Fix in `src/components/RichTextNoteEditor.tsx`**:
-- Add an `onKeyDown` handler to the `Textarea` that intercepts:
-  - `Ctrl+B` / `Cmd+B` -- bold
-  - `Ctrl+I` / `Cmd+I` -- italic
-  - `Ctrl+U` / `Cmd+U` -- underline
-  - `Ctrl+Shift+X` -- strikethrough (standard shortcut)
-  - `Ctrl+Shift+7` -- numbered list
-  - `Ctrl+Shift+8` -- bullet list
-  - `Tab` -- indent (insert `  ` prefix)
-  - `Shift+Tab` -- un-indent (remove leading `  `)
-- All these shortcuts call `e.preventDefault()` and `e.stopPropagation()` to prevent the sidebar toggle or other default browser behavior.
-- Add an `IndentDecrease` icon button and a "dedent" action to the toolbar for Shift+Tab.
+**Changes in `src/pages/Ideas.tsx` (`IdeaDetailModal`)**:
+
+- **Fixed size**: Set `DialogContent` to a fixed height (e.g., `h-[85vh]`) instead of `max-h-[85vh]`, and use `flex flex-col` layout.
+- **Frozen header**: Title row with nav arrows stays pinned at the top. Move the X button higher by removing the default DialogContent close button (`[&>button]:hidden`) and placing a custom one in the top-right corner with more spacing from the nav arrow.
+- **Scrollable body**: The middle section (timestamp, badges, raw dump, summary, key features, tags) goes in a `flex-1 overflow-y-auto` container.
+- **Frozen footer**: Delete, Scrap, Start Brainstorm buttons stay pinned at the bottom.
+- **Wrap-around navigation**: Change `hasPrev`/`hasNext` to always be true (when there's more than 1 fresh idea). When at the end, wrap to index 0; when at the beginning, wrap to last index.
 
 ---
 
-## 3. AI Interview Uses Notes as Context
+## 2. Linked Idea Overlay: Consistent Layout with Ideas Page
 
-**Problem**: The `getContext()` function in `BrainstormWorkspace.tsx` builds context from references using `title` and `description/url`. Notes contain richer content in the `description` field that should be more prominently included.
+**Problem**: When clicking "Linked Idea" from a Project or Brainstorm page, the overlay shows a different layout than the Ideas page popup (category badge is above title vs. to the right of timestamp).
 
-**Fix in `src/pages/BrainstormWorkspace.tsx`**:
-- Update `getContext()` to separate notes from other references and include note content more prominently:
-```typescript
-const getContext = () => {
-  const notes = references.filter((r: any) => r.type === "note");
-  const otherRefs = references.filter((r: any) => r.type !== "note");
-  return {
-    title: brainstorm?.title || "",
-    idea_raw: (brainstorm as any)?.ideas?.raw_dump || "",
-    idea_summary: (brainstorm as any)?.ideas?.processed_summary || "",
-    notes: notes.map((r: any) => `${r.title}: ${r.description || ""}`).join("\n"),
-    references: otherRefs.map((r: any) => `[${r.type}] ${r.title}: ${r.description || r.url}`).join("\n"),
-    tags: (brainstorm as any)?.tags || [],
-    category: (brainstorm as any)?.category || "",
-  };
-};
-```
-- Update the edge function `brainstorm-chat/index.ts` system prompts to include a `Notes` section from `context.notes`.
+**Changes**:
+
+- **`src/pages/BrainstormWorkspace.tsx`** (Linked Idea Dialog, lines 1109-1160): Restructure to show title first, then timestamp + category badge inline (matching the Ideas page layout: `Created {date} [Category Badge]`). Add `linkedIdea.created_at` to the query if not already fetched.
+
+- **`src/pages/ProjectWorkspace.tsx`** (Linked Idea Overlay Dialog, lines 734-781): Same restructure -- title first, then timestamp + category badge inline below it.
 
 ---
 
-## 4. AI Interview Supports Questions/Clarification/Uncertainty
+## 3. Video/Image Captions in Reference Viewer
 
-**Problem**: Currently the AI interview only accepts direct answers. The user wants to ask for clarification, say "I'm not sure", or ask about benefits before deciding.
+**Problem**: When a video or image has a description, it's not shown when viewing the content.
 
-**Fix in `supabase/functions/brainstorm-chat/index.ts`**:
-- Update the `submit_answer` system prompt to instruct the AI: "If the user's answer is a question, request for clarification, or expresses uncertainty (e.g. 'I'm not sure', 'what do you think?', 'can you explain?'), do NOT update the description or bullets. Instead, respond helpfully to their question and then re-ask the same or a refined version of the original question."
-- Add an additional tool response option: when the AI detects a question/uncertainty, it returns a `clarification` field instead of updated content. The existing `process_answer` tool schema gets an optional `clarification` field.
-- Update `handleSubmitAnswer` in `BrainstormWorkspace.tsx`: if the response contains a `clarification` field instead of `updated_description`, display it as a follow-up message without updating the description/bullets. Set `currentQuestion` to `next_question` (which may be the same question re-asked).
+**Changes in `src/components/ReferenceViewer.tsx`**:
 
----
-
-## 5. AI Assistant (Informant Mode) Renders Rich Text
-
-**Problem**: The chatbot responses in locked/informant mode render as raw text (visible markdown syntax like `**bold**`).
-
-**Fix in `src/pages/BrainstormWorkspace.tsx`**:
-- Import `ReactMarkdown` (already imported in ProjectWorkspace but not in BrainstormWorkspace).
-- In the chat message rendering (line 815), wrap assistant messages with `ReactMarkdown`:
-```tsx
-<div className={`rounded-lg px-3 py-2 text-sm max-w-[80%] ${msg.role === "user" ? "bg-primary text-primary-foreground" : "bg-muted"}`}>
-  {msg.role === "assistant" ? (
-    <div className="prose prose-invert prose-sm max-w-none [&_ul]:list-disc [&_ol]:list-decimal [&_ul]:pl-5 [&_ol]:pl-5 [&_li]:my-0.5 [&_p]:my-1.5">
-      <ReactMarkdown>{msg.content}</ReactMarkdown>
-    </div>
-  ) : msg.content}
-</div>
-```
+- **Image viewer**: After the `<img>` tag, if `reference.description` exists, render a caption below: `<p className="text-sm text-gray-400 text-center mt-3 px-4">{reference.description}</p>`
+- **Video viewer**: After the `aspect-video` div, if `reference.description` exists, render the same caption style below the video player.
 
 ---
 
-## 6. Next/Back Arrow Buttons for Ideas Popup
+## 4. GitHub Integration Widget ("Code Pulse")
 
-**Problem**: The Idea detail popup has no navigation between ideas. User wants next/back arrows to navigate through Fresh Ideas only, and scrapping an idea auto-advances to the next.
+**Changes in `src/pages/ProjectWorkspace.tsx`**:
 
-**Fix in `src/pages/Ideas.tsx`**:
-- Compute a `freshIdeas` list (status in `["new", "processing", "processed"]`) sorted by `created_at` desc.
-- Pass the current index within `freshIdeas` to `IdeaDetailModal`.
-- Add left/right arrow buttons (`ChevronLeft`, `ChevronRight`) to the modal header.
-- "Next" advances to the next fresh idea; "Back" goes to the previous.
-- Disable at boundaries (first/last).
-- When scrapping, auto-advance to the next fresh idea (or close if none remain).
+### 4a. Parse GitHub URL
+Create a helper function `parseGitHubUrl(url: string)` that extracts `owner` and `repo` from URLs like `https://github.com/username/repo-name`.
 
----
+### 4b. Fetch GitHub Data
+Add a `useQuery` hook that fires when `githubUrl` contains a valid GitHub repo URL:
+- Fetch repo details from `https://api.github.com/repos/{owner}/{repo}` (stars, forks, open issues count, description)
+- Fetch latest 3 commits from `https://api.github.com/repos/{owner}/{repo}/commits?per_page=3`
+- Fetch open issues from `https://api.github.com/repos/{owner}/{repo}/issues?state=open&per_page=5`
+- All unauthenticated (public repos only)
 
-## 7. Remove Description and Bullet Breakdown from Project Page (Outside Brainstorm Callout)
+### 4c. GitHub Activity Card UI
+Place the widget in the **right column**, below the GitHub Repository input field. Only render when valid repo data is fetched.
 
-**Problem**: With the Brainstorm callout now containing description and bullet breakdown, the standalone Description and Bullet Breakdown sections are redundant for projects promoted from brainstorms. For directly created projects, these are still useful.
+Layout:
+- **Header**: GitHub icon + repo name (clickable link to repo)
+- **Stats Row**: Badges/pills for Stars, Forks, Open Issues counts
+- **Recent Commits**: Compact list of last 3 commit messages with relative timestamps (using `date-fns` `formatDistanceToNow`)
+- **README Tab**: A collapsible section that fetches `https://raw.githubusercontent.com/{owner}/{repo}/main/README.md` (or `master` as fallback) and renders it with `ReactMarkdown` + prose styling
 
-**Clarification needed**: The user said "remove Description and Bullet Breakdown outside of that collapsed section." This means:
-- For projects WITH a linked brainstorm: remove the standalone Description (left column) and Bullet Breakdown (right column) since they duplicate the callout.
-- For projects WITHOUT a linked brainstorm: keep them as-is (since there's no callout).
-
-**Fix in `src/pages/ProjectWorkspace.tsx`**:
-- Conditionally render the Description section: only show if there is NO `brainstorm_id`.
-- Conditionally render the Bullet Breakdown section: only show if there is NO `brainstorm_id`.
-
----
-
-## 8. Brainstorm Callout References Are Clickable
-
-**Problem**: References inside the Brainstorm callout on the project page are just static text rows. They should be clickable to open images/videos/notes in the viewer and links in a new tab.
-
-**Fix in `src/pages/ProjectWorkspace.tsx`**:
-- Make each brainstorm reference row clickable with the same `handleRefClick` logic (links open externally, notes/images/videos open the `ReferenceViewer`).
-- Add `cursor-pointer hover:border-primary/30` styling to the rows.
-
----
-
-## 9. Resources Section Is Independent from Brainstorm References
-
-**Problem**: When promoting a brainstorm to a project, references are copied into `project_references`. The user wants Resources to be a separate, empty list for new project-specific uploads, not a copy of brainstorm references.
-
-**Fix in `src/pages/BrainstormWorkspace.tsx`** (promote mutation):
-- Remove the code that copies `brainstorm_references` into `project_references` (lines 380-392). The brainstorm references are already viewable in the Brainstorm Callout section.
-- Resources start empty on new projects.
+### 4d. Error Handling
+- If the repo is private or doesn't exist, show a subtle "Could not fetch repository data" message
+- Rate limiting: GitHub allows 60 req/hr unauthenticated. Add `staleTime: 5 * 60 * 1000` to avoid re-fetching on every render
 
 ---
 
@@ -143,9 +76,10 @@ const getContext = () => {
 
 | File | Changes |
 |---|---|
-| `src/components/RichTextNoteEditor.tsx` | Add keyboard shortcuts (Ctrl+B/I/U, Ctrl+Shift+X, Tab/Shift+Tab, Ctrl+Shift+7/8); add dedent action |
-| `src/pages/BrainstormWorkspace.tsx` | Notes in AI context; handle clarification responses; render assistant messages with ReactMarkdown; remove reference copying on promote |
-| `supabase/functions/brainstorm-chat/index.ts` | Add notes to system prompts; support clarification/uncertainty in submit_answer; add optional `clarification` field |
-| `src/pages/ProjectWorkspace.tsx` | Linked Idea overlay popup; clickable brainstorm callout references; conditionally hide Description/Bullets when brainstorm exists |
-| `src/pages/Ideas.tsx` | Next/back navigation arrows in detail modal; auto-advance on scrap |
+| `src/pages/Ideas.tsx` | Fixed-size popup with frozen header/footer, scrollable body, wrap-around navigation, more spacing between X and nav arrow |
+| `src/pages/BrainstormWorkspace.tsx` | Linked Idea overlay: move category badge below title, inline with timestamp |
+| `src/pages/ProjectWorkspace.tsx` | Linked Idea overlay: same layout fix; GitHub widget with repo stats, commits, and README |
+| `src/components/ReferenceViewer.tsx` | Add description captions below images and videos |
+
+No database migration needed.
 
