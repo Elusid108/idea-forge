@@ -1,85 +1,176 @@
 
 
-# Ideas Popup Layout, Linked Idea Consistency, Video/Image Captions, and GitHub Integration Widget
+# Brainstorm Page Reorder, WYSIWYG Notes, Sidebar Filtering, GitHub UX, Tasks, Expenses, and Execution Strategy
 
-This plan covers 5 distinct areas of work.
-
----
-
-## 1. Ideas Detail Popup: Fixed Header/Footer with Scrollable Body
-
-**Problem**: The popup resizes based on content, the X and next button are too close together, and navigation doesn't wrap around.
-
-**Changes in `src/pages/Ideas.tsx` (`IdeaDetailModal`)**:
-
-- **Fixed size**: Set `DialogContent` to a fixed height (e.g., `h-[85vh]`) instead of `max-h-[85vh]`, and use `flex flex-col` layout.
-- **Frozen header**: Title row with nav arrows stays pinned at the top. Move the X button higher by removing the default DialogContent close button (`[&>button]:hidden`) and placing a custom one in the top-right corner with more spacing from the nav arrow.
-- **Scrollable body**: The middle section (timestamp, badges, raw dump, summary, key features, tags) goes in a `flex-1 overflow-y-auto` container.
-- **Frozen footer**: Delete, Scrap, Start Brainstorm buttons stay pinned at the bottom.
-- **Wrap-around navigation**: Change `hasPrev`/`hasNext` to always be true (when there's more than 1 fresh idea). When at the end, wrap to index 0; when at the beginning, wrap to last index.
+This plan covers 8 areas of work across multiple files, including 2 new database tables.
 
 ---
 
-## 2. Linked Idea Overlay: Consistent Layout with Ideas Page
+## 1. Brainstorms Dashboard: Reorder Groups and Rename "Scrap" to "Scrapped"
 
-**Problem**: When clicking "Linked Idea" from a Project or Brainstorm page, the overlay shows a different layout than the Ideas page popup (category badge is above title vs. to the right of timestamp).
+**File**: `src/pages/Brainstorms.tsx`
 
-**Changes**:
+Change the `BRAINSTORM_GROUPS` array order so "Complete" comes before "Scrapped", and rename the label:
 
-- **`src/pages/BrainstormWorkspace.tsx`** (Linked Idea Dialog, lines 1109-1160): Restructure to show title first, then timestamp + category badge inline (matching the Ideas page layout: `Created {date} [Category Badge]`). Add `linkedIdea.created_at` to the query if not already fetched.
-
-- **`src/pages/ProjectWorkspace.tsx`** (Linked Idea Overlay Dialog, lines 734-781): Same restructure -- title first, then timestamp + category badge inline below it.
-
----
-
-## 3. Video/Image Captions in Reference Viewer
-
-**Problem**: When a video or image has a description, it's not shown when viewing the content.
-
-**Changes in `src/components/ReferenceViewer.tsx`**:
-
-- **Image viewer**: After the `<img>` tag, if `reference.description` exists, render a caption below: `<p className="text-sm text-gray-400 text-center mt-3 px-4">{reference.description}</p>`
-- **Video viewer**: After the `aspect-video` div, if `reference.description` exists, render the same caption style below the video player.
+```
+Active -> Backburner -> Complete -> Scrapped
+```
 
 ---
 
-## 4. GitHub Integration Widget ("Code Pulse")
+## 2. WYSIWYG Rich Text Note Editor
 
-**Changes in `src/pages/ProjectWorkspace.tsx`**:
+**Problem**: The current `RichTextNoteEditor` uses a plain `<Textarea>` that shows raw markdown/HTML (e.g., `<u>text</u>`). The user wants it to function like Windows Sticky Notes -- true rich text editing.
 
-### 4a. Parse GitHub URL
-Create a helper function `parseGitHubUrl(url: string)` that extracts `owner` and `repo` from URLs like `https://github.com/username/repo-name`.
+**Approach**: Replace the `<Textarea>` with a `contentEditable` div that renders formatting in real-time. The toolbar actions will use `document.execCommand` for bold, italic, underline, strikethrough, and list operations. The underlying value stored remains HTML (which `ReactMarkdown` or `dangerouslySetInnerHTML` can render). Keyboard shortcuts (`Ctrl+B`, `Ctrl+I`, `Ctrl+U`, `Ctrl+Shift+X`, `Tab`, `Shift+Tab`) will call `e.preventDefault()` and `e.stopPropagation()` to prevent sidebar toggling.
 
-### 4b. Fetch GitHub Data
-Add a `useQuery` hook that fires when `githubUrl` contains a valid GitHub repo URL:
-- Fetch repo details from `https://api.github.com/repos/{owner}/{repo}` (stars, forks, open issues count, description)
-- Fetch latest 3 commits from `https://api.github.com/repos/{owner}/{repo}/commits?per_page=3`
-- Fetch open issues from `https://api.github.com/repos/{owner}/{repo}/issues?state=open&per_page=5`
-- All unauthenticated (public repos only)
+**File**: `src/components/RichTextNoteEditor.tsx` -- full rewrite to use `contentEditable` div instead of `<Textarea>`.
 
-### 4c. GitHub Activity Card UI
-Place the widget in the **right column**, below the GitHub Repository input field. Only render when valid repo data is fetched.
-
-Layout:
-- **Header**: GitHub icon + repo name (clickable link to repo)
-- **Stats Row**: Badges/pills for Stars, Forks, Open Issues counts
-- **Recent Commits**: Compact list of last 3 commit messages with relative timestamps (using `date-fns` `formatDistanceToNow`)
-- **README Tab**: A collapsible section that fetches `https://raw.githubusercontent.com/{owner}/{repo}/main/README.md` (or `master` as fallback) and renders it with `ReactMarkdown` + prose styling
-
-### 4d. Error Handling
-- If the repo is private or doesn't exist, show a subtle "Could not fetch repository data" message
-- Rate limiting: GitHub allows 60 req/hr unauthenticated. Add `staleTime: 5 * 60 * 1000` to avoid re-fetching on every render
+**Rendering impact**: The `ReferenceViewer` and `EditableMarkdown` components already render note descriptions. They will need to render HTML content using `dangerouslySetInnerHTML` instead of `ReactMarkdown` for notes created with the new editor. A check will be added: if the content contains HTML tags, render as HTML; otherwise fall back to ReactMarkdown.
 
 ---
 
-## Summary of All File Changes
+## 3. Sidebar: Filter Out Inactive Items from Nested Lists
+
+**Problem**: Scrapped/completed brainstorms, brainstorming/scrapped ideas, and completed projects all show in the sidebar nested list.
+
+**File**: `src/components/AppSidebar.tsx`
+
+Update `useSectionItems` to add status filters per table:
+- **Ideas**: exclude `status IN ('brainstorming', 'scrapped')`
+- **Brainstorms**: exclude `status IN ('completed', 'scrapped')`
+- **Projects**: exclude `status = 'done'`
+
+Add `.not("status", "in", ...)` filters to each query.
+
+---
+
+## 4. GitHub Repo URL: Click-to-Edit and GitHub Pages Link
+
+**File**: `src/pages/ProjectWorkspace.tsx`
+
+**Click-to-edit**: Add an `editingGithub` state. When not editing, display the URL as text (clickable link). When clicked, switch to the input field. On blur/Enter, save and switch back.
+
+**GitHub Pages detection**: The GitHub API response (`githubData.repo`) includes a `has_pages` boolean and `homepage` field. If `has_pages` is true or `homepage` exists, display a "View Site" link badge next to the repo name in the GitHub widget. The homepage URL is typically `https://{owner}.github.io/{repo}` but the API's `homepage` field is more reliable.
+
+---
+
+## 5. Project Tasks Section (New Database Table + UI)
+
+### Database Migration
+
+Create a `project_tasks` table:
+
+```sql
+CREATE TABLE public.project_tasks (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  project_id UUID NOT NULL REFERENCES public.projects(id) ON DELETE CASCADE,
+  user_id UUID NOT NULL,
+  title TEXT NOT NULL DEFAULT '',
+  description TEXT DEFAULT '',
+  priority TEXT NOT NULL DEFAULT 'medium',
+  due_date DATE,
+  completed BOOLEAN NOT NULL DEFAULT false,
+  sort_order INTEGER NOT NULL DEFAULT 0,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+ALTER TABLE public.project_tasks ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "Users can view own tasks" ON public.project_tasks FOR SELECT USING (auth.uid() = user_id);
+CREATE POLICY "Users can insert own tasks" ON public.project_tasks FOR INSERT WITH CHECK (auth.uid() = user_id);
+CREATE POLICY "Users can update own tasks" ON public.project_tasks FOR UPDATE USING (auth.uid() = user_id);
+CREATE POLICY "Users can delete own tasks" ON public.project_tasks FOR DELETE USING (auth.uid() = user_id);
+```
+
+### UI in `src/pages/ProjectWorkspace.tsx`
+
+Place a "Tasks" section above "Resources" in the left column:
+- Task list with checkboxes, priority badge (Low/Medium/High/Critical with color coding), due date, and title
+- Completed tasks show with strikethrough and muted styling
+- "+ Add Task" button opens a dialog with fields: Title, Description (textarea), Priority (select), Due Date (date input)
+- Tasks can be edited (click to open edit dialog) and deleted
+- Query: `useQuery` on `project_tasks` filtered by `project_id`
+
+---
+
+## 6. Project Expense Tracker (New Database Table + UI)
+
+### Database Migration
+
+Create a `project_expenses` table:
+
+```sql
+CREATE TABLE public.project_expenses (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  project_id UUID NOT NULL REFERENCES public.projects(id) ON DELETE CASCADE,
+  user_id UUID NOT NULL,
+  title TEXT NOT NULL DEFAULT '',
+  description TEXT DEFAULT '',
+  amount NUMERIC(10,2) NOT NULL DEFAULT 0,
+  category TEXT DEFAULT 'General',
+  receipt_url TEXT DEFAULT '',
+  date DATE DEFAULT CURRENT_DATE,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+ALTER TABLE public.project_expenses ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "Users can view own expenses" ON public.project_expenses FOR SELECT USING (auth.uid() = user_id);
+CREATE POLICY "Users can insert own expenses" ON public.project_expenses FOR INSERT WITH CHECK (auth.uid() = user_id);
+CREATE POLICY "Users can update own expenses" ON public.project_expenses FOR UPDATE USING (auth.uid() = user_id);
+CREATE POLICY "Users can delete own expenses" ON public.project_expenses FOR DELETE USING (auth.uid() = user_id);
+```
+
+### UI in `src/pages/ProjectWorkspace.tsx`
+
+Place an "Expenses" section below "Resources" in the left column:
+- Running total displayed in the section header
+- Each expense row shows: date, title, amount, category badge, and receipt icon (if receipt attached)
+- "+ Add Expense" button opens a dialog with: Title, Amount, Category (select), Date, Description, Receipt upload (image/PDF to `project-assets` bucket)
+- Clicking a receipt thumbnail opens it in a new tab
+- Expenses can be edited and deleted
+
+---
+
+## 7. AI-Generated Execution Strategy
+
+### Database
+
+Add an `execution_strategy` text column to the `projects` table:
+
+```sql
+ALTER TABLE public.projects ADD COLUMN IF NOT EXISTS execution_strategy TEXT DEFAULT '';
+```
+
+### Auto-Generation on Promote
+
+In `BrainstormWorkspace.tsx`, after the promote-to-project mutation succeeds, invoke a backend function (or inline AI call) to generate an execution strategy based on the brainstorm's description, bullets, tags, and category. Store the result in `execution_strategy`.
+
+### Backend Function
+
+Create `supabase/functions/generate-strategy/index.ts` that takes the project context and returns a structured execution strategy using the Lovable AI (e.g., `google/gemini-2.5-flash`).
+
+### UI in `src/pages/ProjectWorkspace.tsx`
+
+Place "Execution Strategy" section above "Tasks" in the left column:
+- Rendered as `EditableMarkdown` so it can be viewed and edited
+- For manually created projects (no brainstorm), the field is empty and editable -- the user fills it out manually
+- For promoted projects, it's auto-populated but still editable
+
+---
+
+## 8. Summary of All File Changes
 
 | File | Changes |
 |---|---|
-| `src/pages/Ideas.tsx` | Fixed-size popup with frozen header/footer, scrollable body, wrap-around navigation, more spacing between X and nav arrow |
-| `src/pages/BrainstormWorkspace.tsx` | Linked Idea overlay: move category badge below title, inline with timestamp |
-| `src/pages/ProjectWorkspace.tsx` | Linked Idea overlay: same layout fix; GitHub widget with repo stats, commits, and README |
-| `src/components/ReferenceViewer.tsx` | Add description captions below images and videos |
-
-No database migration needed.
+| `src/pages/Brainstorms.tsx` | Reorder groups: Complete before Scrapped; rename "Scrap" to "Scrapped" |
+| `src/components/RichTextNoteEditor.tsx` | Full rewrite to WYSIWYG using `contentEditable` div with `execCommand` |
+| `src/components/AppSidebar.tsx` | Add status filters to `useSectionItems` queries per table |
+| `src/pages/ProjectWorkspace.tsx` | Click-to-edit GitHub URL; GitHub Pages link; Tasks section; Expenses section; Execution Strategy section |
+| `src/pages/BrainstormWorkspace.tsx` | Trigger strategy generation on promote-to-project |
+| `src/components/ReferenceViewer.tsx` | Support HTML content rendering for notes |
+| `supabase/functions/generate-strategy/index.ts` | New edge function for AI execution strategy generation |
+| Database migration | Create `project_tasks` and `project_expenses` tables; add `execution_strategy` column to `projects` |
 
