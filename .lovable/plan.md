@@ -1,125 +1,146 @@
 
-# AI Question Persistence, Reference Viewer Border, Timestamps, New Project Button, Idea Groups, Brainstorm Groups, and Remove General Notes
 
-## 1. Fix AI Interview Question Not Updating Between Brainstorms
+# Rich Text Notes, Badge Relocation, Scrapped Lock, Linked Badges, Colored Icons, Brainstorm Callout, and Project Resources
 
-**Problem**: `questionLoaded` is a simple boolean state that gets set to `true` on first load but never resets when navigating to a different brainstorm (the `id` param changes but the component may not remount).
+This plan covers 9 distinct changes across the application.
 
-**Fix in `src/pages/BrainstormWorkspace.tsx`**:
-- Store the last loaded brainstorm ID in a ref. When `id` changes, reset `questionLoaded` to `false` and clear `currentQuestion`.
-- Check the brainstorm's `chat_history` -- if the last assistant message contains a "Next question:", extract it and use that instead of generating a new one. This way previously generated questions are "remembered".
-- Add `id` to the useEffect dependency array and reset state when it changes:
+---
 
-```typescript
-const lastLoadedIdRef = useRef<string | null>(null);
+## 1. Rich Text Editor for Notes
 
-useEffect(() => {
-  if (id && id !== lastLoadedIdRef.current) {
-    lastLoadedIdRef.current = id;
-    setQuestionLoaded(false);
-    setCurrentQuestion("");
-    setAnswer("");
-  }
-}, [id]);
+**Current**: Notes use a plain `Textarea` for description input when adding/editing references.
+
+**Change**: Replace the note description input with a basic rich text editor supporting bold, italic, underline, strikethrough, bullet lists, numbered lists, and indentation.
+
+**Approach**: Use a lightweight approach without adding a heavy dependency -- build a toolbar above the `Textarea` that inserts markdown syntax (bold = `**text**`, bullets = `- item`, numbered = `1. item`, etc.). The note content is already rendered via `ReactMarkdown` in `EditableMarkdown`, so markdown-based formatting will display correctly. The toolbar buttons will wrap selected text or insert formatting at cursor position.
+
+**Files**: Create `src/components/RichTextNoteEditor.tsx`. Update the Add/Edit reference dialogs in `BrainstormWorkspace.tsx` and `ProjectWorkspace.tsx` to use it when the ref type is "note".
+
+---
+
+## 2. Move Category and Linked Badges to Right of Timestamp
+
+**Current (Brainstorm Workspace)**: Category badge and "Linked Idea" badge are in the title bar (line 682-694). Timestamp is on a separate line below (line 748-750).
+
+**Change**: Move category badge and linked badges out of the title bar row. Place them inline to the right of the timestamp line:
+```
+Created Feb 14, 2026 at 4:07 PM  [Hardware/Electronics]  [Linked Idea]
 ```
 
-- In `generateFirstQuestion`, check if the last chat_history entry has a next_question embedded. If so, use it instead of calling the API.
+**Current (Project Workspace)**: Category badge is in the title bar (line 294-296). Timestamp on line 331-333.
+
+**Change**: Same pattern -- move category badge to the right of the timestamp. Add "Linked Brainstorm" and "Linked Idea" badges there too (see section 4).
+
+**Current (Idea Detail Modal)**: Category badge is above the title (line 125-127). Timestamp on line 133-135.
+
+**Change**: Move category badge to the right of the timestamp. Add "Linked Brainstorm" badge there too (see section 4).
+
+**Files**: `BrainstormWorkspace.tsx`, `ProjectWorkspace.tsx`, `Ideas.tsx`
 
 ---
 
-## 2. Reference Viewer: Move Close Button Outside Content (Border Layout)
+## 3. Scrapped Brainstorms Become Read-Only with AI Assistant
 
-**Problem**: The built-in DialogContent close button overlays the image/video content, interfering with YouTube player controls.
+**Current**: `isCompleted` (line 163) controls read-only mode and switches AI from interview to chatbot. Only `status === "completed"` triggers this.
 
-**Fix in `src/components/ReferenceViewer.tsx`**:
-- For image and video viewers, add padding to the top of DialogContent so the close button sits in a "border" area above the content rather than overlapping it.
-- Change `p-0` to `p-0 pt-10` (or similar) to create space for the close button.
-- Position the close button in that top border area using the existing `[&>button]` selector with adjusted positioning: `[&>button]:top-2 [&>button]:right-2`.
+**Change**: Create an `isLocked` variable that is `true` when `status === "completed"` OR `status === "scrapped"`. Use `isLocked` everywhere `isCompleted` is currently used for:
+- Making fields read-only
+- Switching AI from interview to assistant chatbot
+- Hiding edit/delete/promote buttons
 
-This creates a visual border/header strip where the X lives, keeping it out of the way of video controls.
+When un-scrapped (moved back to active/backburner), `isLocked` becomes false and the page restores to editable with the AI interview.
 
----
-
-## 3. Timestamps for Ideas, Brainstorms, and Projects
-
-**What**: Show `created_at` date/time on the detail views and tiles/cards.
-
-**Changes**:
-- `src/pages/Ideas.tsx`: Add a small timestamp line on the IdeaCard and IdeaDetailModal showing `created_at` formatted with `date-fns`.
-- `src/pages/Brainstorms.tsx`: Add a timestamp line on brainstorm cards.
-- `src/pages/Projects.tsx`: Add a timestamp line on project cards.
-- `src/pages/BrainstormWorkspace.tsx`: Show created date in the title bar area.
-- `src/pages/ProjectWorkspace.tsx`: Show created date in the title bar area.
-
-No database migration needed -- `created_at` already exists on all three tables.
+**File**: `BrainstormWorkspace.tsx`
 
 ---
 
-## 4. "+ New Project" Button
+## 4. Linked Brainstorm and Linked Project Badges
 
-**File: `src/pages/Projects.tsx`**:
-- Add a `+ New Project` button next to the view toggle buttons.
-- On click, insert a new project with default name "Untitled Project" and navigate to `/projects/{id}`.
-- Uses the same mutation pattern as the brainstorms page `createBrainstorm`.
+### 4a. Projects: "Linked Brainstorm" Badge
+The `projects` table already has `brainstorm_id`. Update the project query to join the brainstorm: `select("*, brainstorms(id, title, idea_id)")`. If `brainstorm_id` exists, show a "Linked Brainstorm" badge next to the timestamp. Clicking it navigates to `/brainstorms/{brainstorm_id}`.
 
----
+If that brainstorm also has an `idea_id`, show a "Linked Idea" badge to the LEFT of "Linked Brainstorm". Clicking navigates to Ideas page and opens the idea modal.
 
-## 5. Ideas Page: Collapsible Groups (Fresh / Brainstorming / Scrapped)
+### 4b. Brainstorms: "Linked Project" Badge
+Query projects to find if any project references this brainstorm: `select("id, name").eq("brainstorm_id", id).is("deleted_at", null)`. If found, show a "Linked Project" badge to the right of "Linked Idea" (if present). Clicking navigates to `/projects/{project_id}`.
 
-**Database change**: The `ideas` table already has a `status` field. Currently used values are `new`, `processing`, `processed`, `brainstorming`. We will add `scrapped` as a new status value (no migration needed, it's a text field).
+### 4c. Ideas: "Linked Brainstorm" and "Linked Project" Badges
+In the Idea Detail Modal, query brainstorms for `idea_id = idea.id`. If found, show "Linked Brainstorm" badge. If that brainstorm also has a linked project (query projects for `brainstorm_id`), show "Linked Project" badge too. Both are clickable navigation links.
 
-**File: `src/pages/Ideas.tsx`**:
-- Group ideas into 3 collapsible sections:
-  - **Fresh Ideas**: status is `new`, `processing`, or `processed`
-  - **Brainstorming**: status is `brainstorming`
-  - **Scrapped**: status is `scrapped`
-- Each group is a `Collapsible` section, defaulting to expanded.
-- Collapse state persisted in `localStorage`.
-
-**Scrap button**: In the `IdeaDetailModal`:
-- Rename the "Close" button to "Scrap" with a gray background (`variant="secondary"`).
-- On click: if idea status is `scrapped`, revert to `processed` (un-scrap). If not scrapped, set status to `scrapped`.
-- The button label toggles: "Scrap" / "Un-scrap".
-- On tiles, scrapped ideas show a "Scrapped" badge (gray) instead of category.
-
-**"Start Brainstorm" remains available** for scrapped ideas.
+**Files**: `ProjectWorkspace.tsx`, `BrainstormWorkspace.tsx`, `Ideas.tsx`
 
 ---
 
-## 6. Brainstorms Page: Collapsible Groups (Active / Backburner / Scrap / Complete)
+## 5. Colored Reference Type Icons
 
-**Database change**: The `brainstorms` table has a `status` field (text). Current values: `active`, `completed`. We need to support `backburner` and `scrapped` as additional values (no migration needed, it's a text field).
+**Current**: All ref icons use `text-muted-foreground` (gray).
 
-**File: `src/pages/Brainstorms.tsx`**:
-- Group brainstorms into 4 collapsible sections:
-  - **Active** (default): status is `active`
-  - **Backburner**: status is `backburner`
-  - **Scrap**: status is `scrapped`
-  - **Complete**: status is `completed`
-- Each group is collapsible, defaulting expanded, with persistent collapse state.
+**Change**: Assign distinct colors:
+- Notes (StickyNote): `text-yellow-400`
+- Links (LinkIcon): `text-blue-400`
+- Images (Image): `text-emerald-400`
+- Videos (Film): `text-red-400`
 
-**Status management**: A way to change status is needed. Add a small dropdown or context action on the brainstorm workspace to set status to active/backburner/scrapped. Complete is set automatically on promotion.
+Apply these colors in the collapsible group headers AND on each reference card/row icon in both `BrainstormWorkspace.tsx` and `ProjectWorkspace.tsx`.
 
-**File: `src/pages/BrainstormWorkspace.tsx`**:
-- Add a status selector (dropdown) in the title bar to switch between Active, Backburner, and Scrap. Complete remains set only via promotion.
+**Files**: `BrainstormWorkspace.tsx`, `ProjectWorkspace.tsx`
 
 ---
 
-## 7. Remove General Notes from ProjectWorkspace
+## 6. Brainstorm Callout on Project Page (Right Column)
 
-**File: `src/pages/ProjectWorkspace.tsx`**:
-- Remove the "General Notes" section (lines 350-360) entirely since it duplicates the Description field.
-- Remove the `notes` state variable and its associated `setNotes` usage.
+**Current**: Right column has Tags, then Bullet Breakdown.
+
+**Change**: Below Tags, add a collapsible "Brainstorm" callout section (default: collapsed). Only shown when the project has a `brainstorm_id`. Contents (all read-only):
+1. Compiled Description from the brainstorm
+2. Bullet Breakdown from the brainstorm
+3. References from `brainstorm_references` table
+
+This requires fetching the brainstorm data and its references. Query: `brainstorms(compiled_description, bullet_breakdown)` joined in the project query, plus a separate query for `brainstorm_references` filtered by `brainstorm_id`.
+
+Collapse state persisted in `localStorage`.
+
+Below the Brainstorm callout: GitHub Repository field (moved from left column to right column, under the callout).
+
+**File**: `ProjectWorkspace.tsx`
 
 ---
 
-## Summary of All Changes
+## 7. Project Left Column: "Resources" Instead of "References"
+
+**Current**: Left column has Description, GitHub URL, and References.
+
+**Change**: 
+- Rename "References" to "Resources" on the project page.
+- Add a 5th resource type: "file" (for uploading system files, config files, .bat, .stl, .patch, text files, etc.).
+- Resource type order: Notes, Links, Images, Videos, Files.
+- The "Add" popover gets a "File" option with a file upload input (any file type).
+- Files are uploaded to the `brainstorm-references` storage bucket (reuse existing bucket) under a project subfolder.
+- Move GitHub URL from the left column to the right column (under the Brainstorm callout).
+
+**Database**: No migration needed. The `project_references` table `type` field is text, so `"file"` works. The `url` field stores the storage URL.
+
+**Files**: `ProjectWorkspace.tsx`
+
+---
+
+## 8. File Icon for Resources
+
+Add `FileText` from lucide-react as the icon for the "file" type.
+Color: `text-orange-400`
+
+**File**: `ProjectWorkspace.tsx`
+
+---
+
+## Summary of All File Changes
 
 | File | Changes |
 |---|---|
-| `src/pages/BrainstormWorkspace.tsx` | Fix question persistence on brainstorm switch; add status selector dropdown (Active/Backburner/Scrap) |
-| `src/components/ReferenceViewer.tsx` | Add padding/border layout so close button is outside content area |
-| `src/pages/Ideas.tsx` | Collapsible groups (Fresh/Brainstorming/Scrapped); Scrap/Un-scrap button; timestamps on cards |
-| `src/pages/Brainstorms.tsx` | Collapsible groups (Active/Backburner/Scrap/Complete); timestamps on cards |
-| `src/pages/Projects.tsx` | Add "+ New Project" button; timestamps on cards |
-| `src/pages/ProjectWorkspace.tsx` | Remove General Notes section; add created date display |
+| `src/components/RichTextNoteEditor.tsx` (new) | Markdown toolbar component for note editing |
+| `src/pages/BrainstormWorkspace.tsx` | Move badges to timestamp row; `isLocked` for scrapped+completed; colored ref icons; "Linked Project" badge; use rich text editor for notes |
+| `src/pages/ProjectWorkspace.tsx` | Move badges to timestamp row; "Linked Brainstorm" + "Linked Idea" badges; brainstorm callout in right column; rename References to Resources; add "file" type; move GitHub to right column; colored icons; use rich text editor for notes |
+| `src/pages/Ideas.tsx` | Move category badge to timestamp row; "Linked Brainstorm" + "Linked Project" badges in detail modal |
+
+No database migration is needed -- all type fields are text and the storage bucket already exists.
+
