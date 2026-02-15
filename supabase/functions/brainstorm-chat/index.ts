@@ -11,7 +11,7 @@ serve(async (req) => {
 
   try {
     const body = await req.json();
-    const { mode, compiled_description, bullet_breakdown, chat_history, context, answer, question } = body;
+    const { mode, compiled_description, bullet_breakdown, chat_history, context, answer, question, is_locked } = body;
 
     if (!mode || !["generate_question", "submit_answer", "chat_query"].includes(mode)) {
       return new Response(JSON.stringify({ error: "mode must be 'generate_question', 'submit_answer', or 'chat_query'" }), {
@@ -23,12 +23,20 @@ serve(async (req) => {
     const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY");
     if (!LOVABLE_API_KEY) throw new Error("LOVABLE_API_KEY not configured");
 
-    // --- chat_query mode (post-promotion read-only Q&A) ---
+    // --- chat_query mode ---
     if (mode === "chat_query") {
       const ctx = context || {};
-      const systemPrompt = `You are a helpful assistant for a brainstorm project. You answer questions about the brainstorm content below and can create notes to compile research, book lists, resource lists, etc. Format your responses using markdown for readability (use bold, lists, headers as appropriate).
+      const isActive = !is_locked;
+      
+      const capabilitiesText = isActive
+        ? `You can answer questions about the brainstorm content, help explore ideas, create research notes, and update the compiled description and bullet breakdown when asked.
 
-IMPORTANT: When the user asks for resources, research, book recommendations, or notes, FIRST ask them how extensive they want the list to be (e.g., "Would you like a quick list of 3-5 top resources, or a comprehensive list of 15-30?"). Only generate after they specify.
+When the user asks for resources, research, book recommendations, or notes, FIRST ask them how extensive they want the list to be (e.g., "Would you like a quick list of 3-5 top resources, or a comprehensive list of 15-30?"). Only generate after they specify.
+
+You can use the update_description tool to refine or rewrite the compiled description when the user asks. You can use the update_bullets tool to refine or add to the bullet breakdown. You can use the create_note tool to compile research, book lists, resource lists, etc.`
+        : `You can answer questions about this brainstorm's content and help explore ideas. Format your responses using markdown for readability (use bold, lists, headers as appropriate).`;
+
+      const systemPrompt = `You are a helpful brainstorm assistant. ${capabilitiesText}
 
 Brainstorm content:
 - Title: ${ctx.title || "Untitled"}
@@ -40,28 +48,69 @@ Brainstorm content:
 - Raw idea dump: ${ctx.idea_raw || "N/A"}
 - AI-processed summary: ${ctx.idea_summary || "N/A"}`;
 
-      const tools = [
-        {
-          type: "function",
-          function: {
-            name: "create_note",
-            description: "Create a new note/reference for the brainstorm. Use this to compile research, book lists, resource lists, etc.",
-            parameters: {
-              type: "object",
-              properties: {
-                title: { type: "string", description: "Note title" },
-                content: { type: "string", description: "Note content in HTML format. Use <ul><li> for lists, <b> for bold, etc." },
+      // Build tools conditionally based on lock state
+      const tools: any[] = [];
+      if (isActive) {
+        tools.push(
+          {
+            type: "function",
+            function: {
+              name: "create_note",
+              description: "Create a new note/reference for the brainstorm. Use this to compile research, book lists, resource lists, etc.",
+              parameters: {
+                type: "object",
+                properties: {
+                  title: { type: "string", description: "Note title" },
+                  content: { type: "string", description: "Note content in HTML format. Use <ul><li> for lists, <b> for bold, etc." },
+                },
+                required: ["title", "content"],
               },
-              required: ["title", "content"],
             },
           },
-        },
-      ];
+          {
+            type: "function",
+            function: {
+              name: "update_description",
+              description: "Update the brainstorm's compiled description. Use when the user asks to refine, rewrite, or add to the description.",
+              parameters: {
+                type: "object",
+                properties: {
+                  description: { type: "string", description: "The updated compiled description in markdown format." },
+                },
+                required: ["description"],
+              },
+            },
+          },
+          {
+            type: "function",
+            function: {
+              name: "update_bullets",
+              description: "Update the brainstorm's bullet breakdown. Use when the user asks to refine, add, or reorganize the bullet points.",
+              parameters: {
+                type: "object",
+                properties: {
+                  bullets: { type: "string", description: "The updated bullet breakdown in markdown list format." },
+                },
+                required: ["bullets"],
+              },
+            },
+          }
+        );
+      }
 
       const messages: any[] = [
         { role: "system", content: systemPrompt },
         ...(chat_history || []).map((m: any) => ({ role: m.role, content: m.content })),
       ];
+
+      const aiBody: any = {
+        model: "google/gemini-3-flash-preview",
+        messages,
+        max_tokens: 4000,
+      };
+      if (tools.length > 0) {
+        aiBody.tools = tools;
+      }
 
       const response = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
         method: "POST",
@@ -69,12 +118,7 @@ Brainstorm content:
           Authorization: `Bearer ${LOVABLE_API_KEY}`,
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({
-          model: "google/gemini-3-flash-preview",
-          messages,
-          tools,
-          max_tokens: 4000,
-        }),
+        body: JSON.stringify(aiBody),
       });
 
       if (!response.ok) {
@@ -90,7 +134,6 @@ Brainstorm content:
       const msg = data.choices?.[0]?.message;
       const answerText = msg?.content || "";
       
-      // Extract tool calls (note creation)
       const toolCalls = msg?.tool_calls || [];
       const actions: any[] = [];
       for (const tc of toolCalls) {
@@ -107,6 +150,8 @@ Brainstorm content:
 
     // --- generate_question and submit_answer modes ---
     const systemPrompt = `You are a structured project interviewer. You help makers refine their ideas by asking one critical question at a time. You build up a comprehensive project description incrementally.
+
+IMPORTANT: For the FIRST question (when chat history is empty), blend a brief, friendly introduction into the question itself. Start with something like "Let's flesh out this idea of yours." then seamlessly transition into your question. Do NOT separate the intro from the question -- it should read as one natural message.
 
 Current project context:
 - Title: ${context?.title || "Untitled"}

@@ -110,14 +110,12 @@ export default function BrainstormWorkspace() {
   const [answer, setAnswer] = useState("");
   const [isThinking, setIsThinking] = useState(false);
   const [questionLoaded, setQuestionLoaded] = useState(false);
-  const [showWelcomeIntro, setShowWelcomeIntro] = useState(false);
+  // showWelcomeIntro removed -- welcome is now blended into first AI question
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const lastLoadedIdRef = useRef<string | null>(null);
 
   // Chatbot state (post-promotion or scrapped)
-  const [queryChatHistory, setQueryChatHistory] = useState<ChatMsg[]>([
-    { role: "assistant", content: "👋 I'm your brainstorm assistant. I can answer questions about this brainstorm's content, help you explore ideas, and **create research notes** with book lists, resource compilations, and more. What would you like to know?" }
-  ]);
+  const [queryChatHistory, setQueryChatHistory] = useState<ChatMsg[]>([]);
   const [chatInput, setChatInput] = useState("");
   const [isChatThinking, setIsChatThinking] = useState(false);
   const chatScrollRef = useRef<HTMLDivElement>(null);
@@ -132,9 +130,7 @@ export default function BrainstormWorkspace() {
       setQuestionLoaded(false);
       setCurrentQuestion("");
       setAnswer("");
-      setQueryChatHistory([
-        { role: "assistant", content: "👋 I'm your brainstorm assistant. I can answer questions about this brainstorm's content, help you explore ideas, and **create research notes** with book lists, resource compilations, and more. What would you like to know?" }
-      ]);
+      setQueryChatHistory([]);
       setChatInput("");
     }
   }, [id]);
@@ -211,6 +207,16 @@ export default function BrainstormWorkspace() {
   const isCompleted = brainstorm?.status === "completed";
   const isScrapped = brainstorm?.status === "scrapped";
   const isLocked = isCompleted || isScrapped;
+
+  // Dynamic welcome message for the assistant based on lock state
+  useEffect(() => {
+    if (brainstorm && queryChatHistory.length === 0) {
+      const welcomeMsg: ChatMsg = isLocked
+        ? { role: "assistant", content: "👋 I'm your brainstorm assistant. I can answer questions about this brainstorm's content and help you explore ideas. What would you like to know?" }
+        : { role: "assistant", content: "👋 I'm your brainstorm assistant. I can answer questions, help you dig deeper into ideas, **create research notes**, and **update the description and bullet breakdown**. What would you like to explore?" };
+      setQueryChatHistory([welcomeMsg]);
+    }
+  }, [brainstorm, isLocked]);
 
   // --- Undo/Redo ---
   const handleRevert = useCallback(async (fieldName: string, value: string | null, metadata: any) => {
@@ -306,9 +312,6 @@ export default function BrainstormWorkspace() {
       });
       if (error) throw error;
       setCurrentQuestion(data.question);
-      if (chatHistory.length === 0) {
-        setShowWelcomeIntro(true);
-      }
     } catch (e: any) {
       toast.error("Failed to generate question: " + e.message);
     } finally {
@@ -690,6 +693,7 @@ export default function BrainstormWorkspace() {
         body: {
           mode: "chat_query",
           chat_history: newHistory,
+          is_locked: isLocked,
           context: {
             ...getContext(),
             compiled_description: description,
@@ -700,7 +704,7 @@ export default function BrainstormWorkspace() {
       });
       if (error) throw error;
 
-      // Process note creation actions
+      // Process actions
       let createdNoteId: string | null = null;
       let createdNoteTitle: string | null = null;
       if (data.actions && data.actions.length > 0) {
@@ -718,6 +722,20 @@ export default function BrainstormWorkspace() {
             createdNoteTitle = action.title;
             queryClient.invalidateQueries({ queryKey: ["brainstorm-refs", id] });
             toast.success(`Note created: ${action.title}`);
+          } else if (action.action === "update_description" && action.description) {
+            const oldVal = description;
+            setDescription(action.description);
+            pushEntry("compiled_description", oldVal, action.description);
+            await supabase.from("brainstorms").update({ compiled_description: action.description }).eq("id", id!);
+            queryClient.invalidateQueries({ queryKey: ["brainstorm", id] });
+            toast.success("Description updated");
+          } else if (action.action === "update_bullets" && action.bullets) {
+            const oldVal = bullets;
+            setBullets(action.bullets);
+            pushEntry("bullet_breakdown", oldVal, action.bullets);
+            await supabase.from("brainstorms").update({ bullet_breakdown: action.bullets }).eq("id", id!);
+            queryClient.invalidateQueries({ queryKey: ["brainstorm", id] });
+            toast.success("Bullet breakdown updated");
           }
         }
       }
@@ -908,16 +926,6 @@ export default function BrainstormWorkspace() {
                   </div>
                 ) : currentQuestion ? (
                   <>
-                    {showWelcomeIntro && chatHistory.length === 0 && (
-                      <div className="flex items-start gap-2 mb-3">
-                        <div className="h-6 w-6 rounded-full bg-primary/10 flex items-center justify-center shrink-0 mt-0.5">
-                          <Bot className="h-3 w-3 text-primary" />
-                        </div>
-                        <p className="text-sm text-muted-foreground leading-relaxed">
-                          👋 Hi! I'm here to help you flesh out your idea by asking you questions. I'll add what we discuss into the compiled description and bullet breakdown, I'll generate tags, and I can generate notes to help keep track of the things we come up with.
-                        </p>
-                      </div>
-                    )}
                     <div className="flex items-start gap-2">
                       <div className="h-6 w-6 rounded-full bg-primary/10 flex items-center justify-center shrink-0 mt-0.5">
                         <Bot className="h-3 w-3 text-primary" />
@@ -1314,50 +1322,48 @@ export default function BrainstormWorkspace() {
         </DialogContent>
       </Dialog>
 
-      {/* Floating Chat Widget for locked brainstorms */}
-      {isLocked && (
-        <FloatingChatWidget
-          storageKey="chat-widget-brainstorm"
-          title="Brainstorm Assistant"
-          chatHistory={queryChatHistory}
-          chatInput={chatInput}
-          onInputChange={setChatInput}
-          onSubmit={handleChatSubmit}
-          isThinking={isChatThinking}
-          placeholder="Ask questions about this brainstorm's content…"
-          onKeyDown={handleChatKeyDown}
-          renderMessage={(msg, i) => (
-            <div key={i} className={`flex items-start gap-2 ${msg.role === "user" ? "justify-end" : ""}`}>
-              {msg.role === "assistant" && (
-                <div className="h-6 w-6 rounded-full bg-primary/10 flex items-center justify-center shrink-0 mt-0.5">
-                  <Bot className="h-3 w-3 text-primary" />
-                </div>
-              )}
-              <div className={`rounded-lg px-3 py-2 text-sm max-w-[80%] ${msg.role === "user" ? "bg-primary text-primary-foreground" : "bg-muted"}`}>
-                {msg.role === "assistant" ? (
-                  <div>
-                    <div className="prose prose-invert prose-sm max-w-none [&_ul]:list-disc [&_ol]:list-decimal [&_ul]:pl-5 [&_ol]:pl-5 [&_li]:my-0.5 [&_p]:my-1.5">
-                      <ReactMarkdown components={markdownComponents}>{msg.content}</ReactMarkdown>
-                    </div>
-                    {msg.noteId && (
-                      <button
-                        className="mt-2 inline-flex items-center gap-1.5 text-xs px-2.5 py-1 rounded-full bg-yellow-500/20 text-yellow-400 border border-yellow-500/30 hover:bg-yellow-500/30 transition-colors"
-                        onClick={() => {
-                          const note = references.find((r: any) => r.id === msg.noteId);
-                          if (note) setViewingRef(note);
-                        }}
-                      >
-                        <StickyNote className="h-3 w-3" />
-                        View: {msg.noteTitle}
-                      </button>
-                    )}
-                  </div>
-                ) : msg.content}
+      {/* Floating Chat Widget -- always visible */}
+      <FloatingChatWidget
+        storageKey="chat-widget-brainstorm"
+        title="Brainstorm Assistant"
+        chatHistory={queryChatHistory}
+        chatInput={chatInput}
+        onInputChange={setChatInput}
+        onSubmit={handleChatSubmit}
+        isThinking={isChatThinking}
+        placeholder="Ask questions about this brainstorm…"
+        onKeyDown={handleChatKeyDown}
+        renderMessage={(msg, i) => (
+          <div key={i} className={`flex items-start gap-2 ${msg.role === "user" ? "justify-end" : ""}`}>
+            {msg.role === "assistant" && (
+              <div className="h-6 w-6 rounded-full bg-primary/10 flex items-center justify-center shrink-0 mt-0.5">
+                <Bot className="h-3 w-3 text-primary" />
               </div>
+            )}
+            <div className={`rounded-lg px-3 py-2 text-sm max-w-[80%] ${msg.role === "user" ? "bg-primary text-primary-foreground" : "bg-muted"}`}>
+              {msg.role === "assistant" ? (
+                <div>
+                  <div className="prose prose-invert prose-sm max-w-none [&_ul]:list-disc [&_ol]:list-decimal [&_ul]:pl-5 [&_ol]:pl-5 [&_li]:my-0.5 [&_p]:my-1.5">
+                    <ReactMarkdown components={markdownComponents}>{msg.content}</ReactMarkdown>
+                  </div>
+                  {msg.noteId && (
+                    <button
+                      className="mt-2 inline-flex items-center gap-1.5 text-xs px-2.5 py-1 rounded-full bg-yellow-500/20 text-yellow-400 border border-yellow-500/30 hover:bg-yellow-500/30 transition-colors"
+                      onClick={() => {
+                        const note = references.find((r: any) => r.id === msg.noteId);
+                        if (note) setViewingRef(note);
+                      }}
+                    >
+                      <StickyNote className="h-3 w-3" />
+                      View: {msg.noteTitle}
+                    </button>
+                  )}
+                </div>
+              ) : msg.content}
             </div>
-          )}
-        />
-      )}
+          </div>
+        )}
+      />
     </div>
   );
 }

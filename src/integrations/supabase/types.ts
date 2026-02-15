@@ -161,13 +161,60 @@ export type Database = {
           },
         ]
       }
+      campaign_tasks: {
+        Row: {
+          campaign_id: string
+          completed: boolean
+          created_at: string
+          description: string | null
+          id: string
+          sort_order: number
+          status_column: string
+          title: string
+          user_id: string
+        }
+        Insert: {
+          campaign_id: string
+          completed?: boolean
+          created_at?: string
+          description?: string | null
+          id?: string
+          sort_order?: number
+          status_column?: string
+          title?: string
+          user_id: string
+        }
+        Update: {
+          campaign_id?: string
+          completed?: boolean
+          created_at?: string
+          description?: string | null
+          id?: string
+          sort_order?: number
+          status_column?: string
+          title?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "campaign_tasks_campaign_id_fkey"
+            columns: ["campaign_id"]
+            isOneToOne: false
+            referencedRelation: "campaigns"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       campaigns: {
         Row: {
           category: string | null
+          chat_history: Json | null
           created_at: string
           deleted_at: string | null
           id: string
+          interview_completed: boolean
           marketing_links: Json
+          playbook: string | null
           primary_channel: string
           project_id: string
           revenue: number
@@ -182,10 +229,13 @@ export type Database = {
         }
         Insert: {
           category?: string | null
+          chat_history?: Json | null
           created_at?: string
           deleted_at?: string | null
           id?: string
+          interview_completed?: boolean
           marketing_links?: Json
+          playbook?: string | null
           primary_channel?: string
           project_id: string
           revenue?: number
@@ -200,10 +250,13 @@ export type Database = {
         }
         Update: {
           category?: string | null
+          chat_history?: Json | null
           created_at?: string
           deleted_at?: string | null
           id?: string
+          interview_completed?: boolean
           marketing_links?: Json
+          playbook?: string | null
           primary_channel?: string
           project_id?: string
           revenue?: number

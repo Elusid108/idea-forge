@@ -14,3 +14,6 @@ verify_jwt = false
 
 [functions.project-chat]
 verify_jwt = false
+
+[functions.campaign-chat]
+verify_jwt = false
