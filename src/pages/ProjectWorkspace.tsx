@@ -3,6 +3,7 @@ import { useParams, useNavigate } from "react-router-dom";
 import {
   ArrowLeft, Link as LinkIcon, Image, Film, StickyNote, X, Pencil,
   Grid3X3, List, ChevronDown, ChevronRight, ArrowUpDown, Trash2,
+  Plus, Lightbulb, Brain, FileText, FolderOpen,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -16,21 +17,29 @@ import { Separator } from "@/components/ui/separator";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
-import { Plus } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import EditableMarkdown from "@/components/EditableMarkdown";
 import ReferenceViewer, { getVideoThumbnail } from "@/components/ReferenceViewer";
+import RichTextNoteEditor from "@/components/RichTextNoteEditor";
+import ReactMarkdown from "react-markdown";
 import { format } from "date-fns";
 
-type RefType = "link" | "image" | "video" | "note";
+type RefType = "link" | "image" | "video" | "note" | "file";
 type SortMode = "az" | "za" | "newest" | "oldest";
 
-const REF_ICONS: Record<string, any> = { link: LinkIcon, image: Image, video: Film, note: StickyNote };
-const REF_TYPE_ORDER: RefType[] = ["note", "link", "image", "video"];
-const REF_TYPE_LABELS: Record<string, string> = { note: "Notes", link: "Links", image: "Images", video: "Videos" };
+const REF_ICONS: Record<string, any> = { link: LinkIcon, image: Image, video: Film, note: StickyNote, file: FileText };
+const REF_ICON_COLORS: Record<string, string> = {
+  note: "text-yellow-400",
+  link: "text-blue-400",
+  image: "text-emerald-400",
+  video: "text-red-400",
+  file: "text-orange-400",
+};
+const REF_TYPE_ORDER: RefType[] = ["note", "link", "image", "video", "file"];
+const REF_TYPE_LABELS: Record<string, string> = { note: "Notes", link: "Links", image: "Images", video: "Videos", file: "Files" };
 
 const CATEGORY_COLORS: Record<string, string> = {
   "Product": "bg-blue-500/20 text-blue-400 border-blue-500/30",
@@ -76,11 +85,20 @@ export default function ProjectWorkspace() {
       return saved ? new Set(JSON.parse(saved)) : new Set();
     } catch { return new Set(); }
   });
+  const [brainstormCalloutOpen, setBrainstormCalloutOpen] = useState<boolean>(() => {
+    try {
+      return localStorage.getItem(`proj-brainstorm-callout-${id}`) === "true";
+    } catch { return false; }
+  });
 
   const { data: project, isLoading } = useQuery({
     queryKey: ["project", id],
     queryFn: async () => {
-      const { data, error } = await supabase.from("projects").select("*").eq("id", id!).single();
+      const { data, error } = await supabase
+        .from("projects")
+        .select("*, brainstorms(id, title, idea_id, compiled_description, bullet_breakdown)")
+        .eq("id", id!)
+        .single();
       if (error) throw error;
       return data;
     },
@@ -99,6 +117,22 @@ export default function ProjectWorkspace() {
       return data;
     },
     enabled: !!id,
+  });
+
+  // Fetch brainstorm references if project has brainstorm_id
+  const brainstormId = project?.brainstorm_id;
+  const { data: brainstormRefs = [] } = useQuery({
+    queryKey: ["brainstorm-refs-for-project", brainstormId],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("brainstorm_references")
+        .select("*")
+        .eq("brainstorm_id", brainstormId!)
+        .order("sort_order");
+      if (error) throw error;
+      return data;
+    },
+    enabled: !!brainstormId,
   });
 
   useEffect(() => {
@@ -187,6 +221,8 @@ export default function ProjectWorkspace() {
     if (ref.type === "link" && ref.url) {
       const url = ref.url.match(/^https?:\/\//) ? ref.url : `https://${ref.url}`;
       window.open(url, "_blank", "noopener,noreferrer");
+    } else if (ref.type === "file" && ref.url) {
+      window.open(ref.url, "_blank", "noopener,noreferrer");
     } else if (ref.type === "note" || ref.type === "image" || ref.type === "video") {
       setViewingRef(ref);
     }
@@ -198,12 +234,18 @@ export default function ProjectWorkspace() {
   };
 
   const handleAddRef = async () => {
-    if (addRefType === "image" && refFile) {
+    if ((addRefType === "image" || addRefType === "file") && refFile) {
       const path = `${user!.id}/${id}/${Date.now()}-${refFile.name}`;
       const { error: uploadError } = await supabase.storage.from("brainstorm-references").upload(path, refFile);
       if (uploadError) { toast.error("Upload failed: " + uploadError.message); return; }
       const { data: urlData } = supabase.storage.from("brainstorm-references").getPublicUrl(path);
-      addReference.mutate({ type: "image", title: refForm.title || refFile.name, url: urlData.publicUrl, description: refForm.description, thumbnail_url: urlData.publicUrl });
+      addReference.mutate({
+        type: addRefType,
+        title: refForm.title || refFile.name,
+        url: urlData.publicUrl,
+        description: refForm.description,
+        thumbnail_url: addRefType === "image" ? urlData.publicUrl : undefined,
+      });
     } else if (addRefType === "link" || addRefType === "video") {
       let thumbnail_url: string | null = null;
       if (addRefType === "video" && refForm.url) thumbnail_url = getVideoThumbnail(refForm.url);
@@ -252,6 +294,9 @@ export default function ProjectWorkspace() {
   const projectTags: string[] = (project as any)?.tags || [];
   const categoryBadgeClass = projectCategory ? CATEGORY_COLORS[projectCategory] || "bg-secondary text-secondary-foreground" : "";
 
+  const linkedBrainstorm = (project as any)?.brainstorms;
+  const linkedIdeaId = linkedBrainstorm?.idea_id;
+
   if (isLoading) {
     return <div className="flex items-center justify-center py-20"><Skeleton className="h-8 w-8" /></div>;
   }
@@ -291,10 +336,6 @@ export default function ProjectWorkspace() {
           </h1>
         )}
 
-        {projectCategory && (
-          <Badge className={`text-xs border ${categoryBadgeClass}`}>{projectCategory}</Badge>
-        )}
-
         <Select value={project.status} onValueChange={(val) => updateProject.mutate({ status: val })}>
           <SelectTrigger className="w-[140px] h-8 text-xs">
             <SelectValue />
@@ -327,10 +368,33 @@ export default function ProjectWorkspace() {
         </div>
       </div>
 
-      {/* Created date */}
-      <p className="text-xs text-muted-foreground">
-        Created {format(new Date(project.created_at), "MMM d, yyyy 'at' h:mm a")}
-      </p>
+      {/* Created date + badges */}
+      <div className="flex items-center gap-2 flex-wrap">
+        <p className="text-xs text-muted-foreground">
+          Created {format(new Date(project.created_at), "MMM d, yyyy 'at' h:mm a")}
+        </p>
+        {projectCategory && (
+          <Badge className={`text-xs border ${categoryBadgeClass}`}>{projectCategory}</Badge>
+        )}
+        {linkedIdeaId && (
+          <Badge
+            variant="outline"
+            className="text-xs gap-1 cursor-pointer hover:bg-accent transition-colors"
+            onClick={() => navigate(`/ideas?open=${linkedIdeaId}`)}
+          >
+            <Lightbulb className="h-3 w-3" /> Linked Idea
+          </Badge>
+        )}
+        {linkedBrainstorm && (
+          <Badge
+            variant="outline"
+            className="text-xs gap-1 cursor-pointer hover:bg-accent transition-colors"
+            onClick={() => navigate(`/brainstorms/${linkedBrainstorm.id}`)}
+          >
+            <Brain className="h-3 w-3" /> Linked Brainstorm
+          </Badge>
+        )}
+      </div>
 
       <Separator />
 
@@ -350,22 +414,10 @@ export default function ProjectWorkspace() {
             />
           </div>
 
-          {/* GitHub URL */}
-          <div>
-            <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-1">GitHub Repository</p>
-            <Input
-              value={githubUrl}
-              onChange={(e) => setGithubUrl(e.target.value)}
-              onBlur={() => updateProject.mutate({ github_repo_url: githubUrl })}
-              placeholder="https://github.com/…"
-              className="text-sm"
-            />
-          </div>
-
-          {/* References */}
+          {/* Resources */}
           <div className="space-y-4">
             <div className="flex items-center justify-between flex-wrap gap-2">
-              <h2 className="text-lg font-semibold">References</h2>
+              <h2 className="text-lg font-semibold">Resources</h2>
               <div className="flex items-center gap-1">
                 <Select value={refSortMode} onValueChange={handleRefSortChange}>
                   <SelectTrigger className="h-8 w-[130px] text-xs">
@@ -392,11 +444,12 @@ export default function ProjectWorkspace() {
                     </Button>
                   </PopoverTrigger>
                   <PopoverContent className="w-44 p-1" align="end">
-                    {(["link", "image", "video", "note"] as RefType[]).map((type) => {
+                    {(["note", "link", "image", "video", "file"] as RefType[]).map((type) => {
                       const Icon = REF_ICONS[type];
+                      const iconColor = REF_ICON_COLORS[type];
                       return (
                         <button key={type} onClick={() => setAddRefType(type)} className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-sm hover:bg-accent capitalize">
-                          <Icon className="h-4 w-4" /> {type}
+                          <Icon className={`h-4 w-4 ${iconColor}`} /> {type}
                         </button>
                       );
                     })}
@@ -408,18 +461,19 @@ export default function ProjectWorkspace() {
             {references.length === 0 ? (
               <div className="flex flex-col items-center justify-center rounded-xl border border-dashed border-border py-12">
                 <StickyNote className="mb-3 h-8 w-8 text-muted-foreground/50" />
-                <p className="text-sm text-muted-foreground">No references yet</p>
+                <p className="text-sm text-muted-foreground">No resources yet</p>
               </div>
             ) : (
               <div className="space-y-3">
                 {groupedRefs.map((group) => {
                   const GroupIcon = REF_ICONS[group.type] || StickyNote;
+                  const groupIconColor = REF_ICON_COLORS[group.type] || "text-muted-foreground";
                   const isGroupCollapsed = collapsedGroups.has(group.type);
                   return (
                     <Collapsible key={group.type} open={!isGroupCollapsed} onOpenChange={() => toggleGroupCollapse(group.type)}>
                       <CollapsibleTrigger className="flex items-center gap-2 w-full text-left py-1 hover:text-primary transition-colors">
                         {isGroupCollapsed ? <ChevronRight className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
-                        <GroupIcon className="h-3.5 w-3.5 text-muted-foreground" />
+                        <GroupIcon className={`h-3.5 w-3.5 ${groupIconColor}`} />
                         <span className="text-sm font-medium">{group.label}</span>
                         <Badge variant="secondary" className="text-[10px] ml-1">{group.items.length}</Badge>
                       </CollapsibleTrigger>
@@ -427,12 +481,13 @@ export default function ProjectWorkspace() {
                         <div className={refViewMode === "grid" ? "grid grid-cols-1 gap-3 sm:grid-cols-2" : "space-y-2"}>
                           {group.items.map((ref: any) => {
                             const Icon = REF_ICONS[ref.type] || StickyNote;
+                            const iconColor = REF_ICON_COLORS[ref.type] || "text-muted-foreground";
                             const thumbnail = getRefThumbnail(ref);
 
                             if (refViewMode === "list") {
                               return (
                                 <div key={ref.id} className="flex items-center gap-3 p-2 rounded-lg border border-border/50 bg-card/50 cursor-pointer hover:border-primary/30 transition-colors" onClick={() => handleRefClick(ref)}>
-                                  <Icon className="h-4 w-4 text-muted-foreground shrink-0" />
+                                  <Icon className={`h-4 w-4 ${iconColor} shrink-0`} />
                                   <span className="text-sm font-medium truncate flex-1">{ref.title}</span>
                                   <div className="flex items-center gap-0.5 shrink-0">
                                     <Button variant="ghost" size="icon" className="h-6 w-6 text-muted-foreground hover:text-primary" onClick={(e) => { e.stopPropagation(); handleEditRef(ref); }}>
@@ -456,7 +511,7 @@ export default function ProjectWorkspace() {
                                       </div>
                                     ) : (
                                       <div className="h-12 w-16 rounded bg-muted/50 flex items-center justify-center shrink-0">
-                                        <Icon className="h-5 w-5 text-muted-foreground/50" />
+                                        <Icon className={`h-5 w-5 ${iconColor}/50`} />
                                       </div>
                                     )}
                                     <div className="flex-1 min-w-0">
@@ -501,6 +556,63 @@ export default function ProjectWorkspace() {
             )}
           </div>
 
+          {/* Brainstorm Callout */}
+          {linkedBrainstorm && (
+            <Collapsible
+              open={brainstormCalloutOpen}
+              onOpenChange={(open) => {
+                setBrainstormCalloutOpen(open);
+                localStorage.setItem(`proj-brainstorm-callout-${id}`, String(open));
+              }}
+            >
+              <CollapsibleTrigger className="flex items-center gap-2 w-full text-left py-1 hover:text-primary transition-colors">
+                {brainstormCalloutOpen ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" />}
+                <Brain className="h-3.5 w-3.5 text-primary" />
+                <span className="text-xs font-semibold uppercase tracking-wider">Brainstorm</span>
+              </CollapsibleTrigger>
+              <CollapsibleContent className="mt-2 space-y-4">
+                {linkedBrainstorm.compiled_description && (
+                  <div>
+                    <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-1">Description</p>
+                    <div className="rounded-lg bg-zinc-900/50 border border-white/5 p-4">
+                      <div className="prose prose-invert prose-sm max-w-none leading-relaxed text-gray-300 [&_ul]:list-disc [&_ol]:list-decimal [&_ul]:pl-5 [&_ol]:pl-5 [&_li]:my-0.5 [&_p]:my-1.5">
+                        <ReactMarkdown>{linkedBrainstorm.compiled_description}</ReactMarkdown>
+                      </div>
+                    </div>
+                  </div>
+                )}
+                {linkedBrainstorm.bullet_breakdown && (
+                  <div>
+                    <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-1">Bullet Breakdown</p>
+                    <div className="rounded-lg bg-zinc-900/50 border border-white/5 p-4">
+                      <div className="prose prose-invert prose-sm max-w-none leading-relaxed text-gray-300 [&_ul]:list-disc [&_ol]:list-decimal [&_ul]:pl-5 [&_ol]:pl-5 [&_li]:my-0.5 [&_p]:my-1.5">
+                        <ReactMarkdown>{linkedBrainstorm.bullet_breakdown}</ReactMarkdown>
+                      </div>
+                    </div>
+                  </div>
+                )}
+                {brainstormRefs.length > 0 && (
+                  <div>
+                    <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-1">References</p>
+                    <div className="space-y-1.5">
+                      {brainstormRefs.map((ref: any) => {
+                        const Icon = REF_ICONS[ref.type] || StickyNote;
+                        const iconColor = REF_ICON_COLORS[ref.type] || "text-muted-foreground";
+                        return (
+                          <div key={ref.id} className="flex items-center gap-2 p-1.5 rounded border border-border/30 bg-card/30 text-xs">
+                            <Icon className={`h-3.5 w-3.5 ${iconColor} shrink-0`} />
+                            <span className="truncate">{ref.title}</span>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+              </CollapsibleContent>
+            </Collapsible>
+          )}
+
+          {/* Bullet Breakdown */}
           <div>
             <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-1">Bullet Breakdown</p>
             <EditableMarkdown
@@ -511,50 +623,80 @@ export default function ProjectWorkspace() {
               minHeight="80px"
             />
           </div>
+
+          {/* GitHub URL */}
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-1">GitHub Repository</p>
+            <Input
+              value={githubUrl}
+              onChange={(e) => setGithubUrl(e.target.value)}
+              onBlur={() => updateProject.mutate({ github_repo_url: githubUrl })}
+              placeholder="https://github.com/…"
+              className="text-sm"
+            />
+          </div>
         </div>
       </div>
 
       {/* Reference Viewer */}
       <ReferenceViewer reference={viewingRef} open={!!viewingRef} onOpenChange={(open) => { if (!open) setViewingRef(null); }} />
 
-      {/* Add Reference Dialog */}
+      {/* Add Resource Dialog */}
       <Dialog open={!!addRefType} onOpenChange={(open) => { if (!open) { setAddRefType(null); setRefForm({ title: "", url: "", description: "" }); setRefFile(null); } }}>
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
             <DialogTitle className="capitalize">Add {addRefType}</DialogTitle>
-            <DialogDescription className="sr-only">Add a new reference</DialogDescription>
+            <DialogDescription className="sr-only">Add a new resource</DialogDescription>
           </DialogHeader>
           <div className="space-y-3">
             <Input placeholder="Title" value={refForm.title} onChange={(e) => setRefForm(p => ({ ...p, title: e.target.value }))} />
             {addRefType === "image" ? (
               <Input type="file" accept="image/*" onChange={(e) => setRefFile(e.target.files?.[0] || null)} />
+            ) : addRefType === "file" ? (
+              <Input type="file" onChange={(e) => setRefFile(e.target.files?.[0] || null)} />
             ) : addRefType !== "note" ? (
               <Input placeholder="URL" value={refForm.url} onChange={(e) => setRefForm(p => ({ ...p, url: e.target.value }))} />
             ) : null}
-            <Textarea placeholder="Description (optional)" value={refForm.description} onChange={(e) => setRefForm(p => ({ ...p, description: e.target.value }))} className="resize-none" />
+            {addRefType === "note" ? (
+              <RichTextNoteEditor
+                value={refForm.description}
+                onChange={(val) => setRefForm(p => ({ ...p, description: val }))}
+                placeholder="Write your note…"
+              />
+            ) : (
+              <Textarea placeholder="Description (optional)" value={refForm.description} onChange={(e) => setRefForm(p => ({ ...p, description: e.target.value }))} className="resize-none" />
+            )}
           </div>
           <DialogFooter>
             <Button variant="ghost" onClick={() => setAddRefType(null)}>Cancel</Button>
             <Button onClick={handleAddRef} disabled={!refForm.title.trim() || addReference.isPending}>
-              {addReference.isPending ? "Adding…" : "Add Reference"}
+              {addReference.isPending ? "Adding…" : "Add Resource"}
             </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
 
-      {/* Edit Reference Dialog */}
+      {/* Edit Resource Dialog */}
       <Dialog open={!!editingRef} onOpenChange={(open) => { if (!open) { setEditingRef(null); setRefForm({ title: "", url: "", description: "" }); } }}>
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
-            <DialogTitle>Edit Reference</DialogTitle>
-            <DialogDescription className="sr-only">Edit an existing reference</DialogDescription>
+            <DialogTitle>Edit Resource</DialogTitle>
+            <DialogDescription className="sr-only">Edit an existing resource</DialogDescription>
           </DialogHeader>
           <div className="space-y-3">
             <Input placeholder="Title" value={refForm.title} onChange={(e) => setRefForm(p => ({ ...p, title: e.target.value }))} />
-            {editingRef?.type !== "note" && editingRef?.type !== "image" && (
+            {editingRef?.type !== "note" && editingRef?.type !== "image" && editingRef?.type !== "file" && (
               <Input placeholder="URL" value={refForm.url} onChange={(e) => setRefForm(p => ({ ...p, url: e.target.value }))} />
             )}
-            <Textarea placeholder="Description (optional)" value={refForm.description} onChange={(e) => setRefForm(p => ({ ...p, description: e.target.value }))} className="resize-none" />
+            {editingRef?.type === "note" ? (
+              <RichTextNoteEditor
+                value={refForm.description}
+                onChange={(val) => setRefForm(p => ({ ...p, description: val }))}
+                placeholder="Write your note…"
+              />
+            ) : (
+              <Textarea placeholder="Description (optional)" value={refForm.description} onChange={(e) => setRefForm(p => ({ ...p, description: e.target.value }))} className="resize-none" />
+            )}
           </div>
           <DialogFooter>
             <Button variant="ghost" onClick={() => setEditingRef(null)}>Cancel</Button>

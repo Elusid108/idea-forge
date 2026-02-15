@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { Plus, Lightbulb, Grid3X3, List, Mic, MicOff, Loader2, Brain, ChevronDown, ChevronRight, Ban } from "lucide-react";
+import { Plus, Lightbulb, Grid3X3, List, Mic, MicOff, Loader2, Brain, ChevronDown, ChevronRight, Ban, FolderOpen } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
@@ -112,27 +112,80 @@ function IdeaDetailModal({
   isStarting: boolean;
   isScrapping: boolean;
 }) {
+  const navigate = useNavigate();
+
+  const categoryClass = idea ? (CATEGORY_COLORS[idea.category] || "bg-secondary text-secondary-foreground") : "";
+  const isBrainstorming = idea?.status === "brainstorming";
+  const isScrapped = idea?.status === "scrapped";
+
+  // Query linked brainstorm and project
+  const { data: linkedBrainstorm } = useQuery({
+    queryKey: ["idea-linked-brainstorm", idea?.id],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("brainstorms")
+        .select("id, title")
+        .eq("idea_id", idea!.id)
+        .is("deleted_at", null)
+        .maybeSingle();
+      if (error) throw error;
+      return data;
+    },
+    enabled: !!idea?.id,
+  });
+
+  const { data: linkedProject } = useQuery({
+    queryKey: ["idea-linked-project", linkedBrainstorm?.id],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("projects")
+        .select("id, name")
+        .eq("brainstorm_id", linkedBrainstorm!.id)
+        .is("deleted_at", null)
+        .maybeSingle();
+      if (error) throw error;
+      return data;
+    },
+    enabled: !!linkedBrainstorm?.id,
+  });
+
   if (!idea) return null;
-  const categoryClass = CATEGORY_COLORS[idea.category] || "bg-secondary text-secondary-foreground";
-  const isBrainstorming = idea.status === "brainstorming";
-  const isScrapped = idea.status === "scrapped";
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-2xl max-h-[85vh] overflow-y-auto">
         <DialogHeader>
-          <div className="space-y-2">
-            {idea.category && (
-              <Badge className={`text-xs border ${categoryClass}`}>{idea.category}</Badge>
-            )}
-            <DialogTitle>{idea.title || "Idea Details"}</DialogTitle>
-          </div>
+          <DialogTitle>{idea.title || "Idea Details"}</DialogTitle>
           <DialogDescription className="sr-only">View idea details, delete, or start a brainstorm</DialogDescription>
         </DialogHeader>
 
-        <p className="text-xs text-muted-foreground">
-          Created {format(new Date(idea.created_at), "MMM d, yyyy 'at' h:mm a")}
-        </p>
+        {/* Timestamp + badges */}
+        <div className="flex items-center gap-2 flex-wrap">
+          <p className="text-xs text-muted-foreground">
+            Created {format(new Date(idea.created_at), "MMM d, yyyy 'at' h:mm a")}
+          </p>
+          {idea.category && (
+            <Badge className={`text-xs border ${categoryClass}`}>{idea.category}</Badge>
+          )}
+          {linkedBrainstorm && (
+            <Badge
+              variant="outline"
+              className="text-xs gap-1 cursor-pointer hover:bg-accent transition-colors"
+              onClick={() => { onOpenChange(false); navigate(`/brainstorms/${linkedBrainstorm.id}`); }}
+            >
+              <Brain className="h-3 w-3" /> Linked Brainstorm
+            </Badge>
+          )}
+          {linkedProject && (
+            <Badge
+              variant="outline"
+              className="text-xs gap-1 cursor-pointer hover:bg-accent transition-colors"
+              onClick={() => { onOpenChange(false); navigate(`/projects/${linkedProject.id}`); }}
+            >
+              <FolderOpen className="h-3 w-3" /> Linked Project
+            </Badge>
+          )}
+        </div>
 
         <div className="space-y-4">
           {/* Raw Dump */}
