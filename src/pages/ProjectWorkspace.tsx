@@ -233,6 +233,16 @@ export default function ProjectWorkspace() {
     }
   }, [project]);
 
+  // Auto-refresh when strategy is being generated in the background
+  useEffect(() => {
+    if (!executionStrategy && brainstormId) {
+      const interval = setInterval(() => {
+        queryClient.invalidateQueries({ queryKey: ["project", id] });
+      }, 3000);
+      return () => clearInterval(interval);
+    }
+  }, [executionStrategy, brainstormId, id, queryClient]);
+
   const githubParsed = useMemo(() => parseGitHubUrl(githubUrl), [githubUrl]);
 
   const { data: githubData } = useQuery({
@@ -845,13 +855,25 @@ export default function ProjectWorkspace() {
           {/* Execution Strategy */}
           <div>
             <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-1">Execution Strategy</p>
-            <EditableMarkdown
-              value={executionStrategy}
-              onChange={setExecutionStrategy}
-              onSave={() => updateProject.mutate({ execution_strategy: executionStrategy } as any)}
-              placeholder={brainstormId ? "Generating strategy…" : "Plan your execution strategy here…"}
-              minHeight="80px"
-            />
+            {!executionStrategy && brainstormId ? (
+              <Card className="border-dashed border-2 border-primary/30 bg-primary/5">
+                <CardContent className="flex flex-col items-center justify-center py-8 gap-3">
+                  <Loader2 className="h-8 w-8 text-primary animate-spin" />
+                  <div className="text-center">
+                    <p className="font-semibold text-sm">Generating Execution Strategy…</p>
+                    <p className="text-xs text-muted-foreground mt-1">Your strategy is being created based on your brainstorm</p>
+                  </div>
+                </CardContent>
+              </Card>
+            ) : (
+              <EditableMarkdown
+                value={executionStrategy}
+                onChange={setExecutionStrategy}
+                onSave={() => updateProject.mutate({ execution_strategy: executionStrategy } as any)}
+                placeholder="Plan your execution strategy here…"
+                minHeight="80px"
+              />
+            )}
           </div>
 
           {/* Project AI Chatbot - now floating */}

@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, ReactNode } from "react";
-import { Bot, Send, Minus, Maximize2, X, Loader2 } from "lucide-react";
+import { Bot, Send, X, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -31,7 +31,7 @@ export default function FloatingChatWidget({
   placeholder,
   onKeyDown,
 }: FloatingChatWidgetProps) {
-  const [state, setState] = useState<WidgetState>("collapsed");
+  const [state, setState] = useState<WidgetState>("expanded");
   const scrollRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -52,29 +52,6 @@ export default function FloatingChatWidget({
     );
   }
 
-  if (state === "minimized") {
-    return (
-      <div className="fixed bottom-4 right-4 z-50 w-[300px] rounded-t-lg bg-card border border-border shadow-xl">
-        <div
-          className="flex items-center justify-between px-3 py-2 cursor-pointer rounded-t-lg bg-primary/10 border-b border-border"
-          onClick={() => setState("expanded")}
-        >
-          <div className="flex items-center gap-2">
-            <Bot className="h-3.5 w-3.5 text-primary" />
-            <span className="text-sm font-medium">{title}</span>
-          </div>
-          <div className="flex items-center gap-0.5">
-            <Button variant="ghost" size="icon" className="h-6 w-6" onClick={(e) => { e.stopPropagation(); setState("expanded"); }}>
-              <Maximize2 className="h-3 w-3" />
-            </Button>
-            <Button variant="ghost" size="icon" className="h-6 w-6" onClick={(e) => { e.stopPropagation(); setState("collapsed"); }}>
-              <X className="h-3 w-3" />
-            </Button>
-          </div>
-        </div>
-      </div>
-    );
-  }
 
   return (
     <div className="fixed bottom-4 right-4 z-50 w-[400px] max-h-[500px] flex flex-col rounded-lg bg-card border border-border shadow-xl">
@@ -84,14 +61,9 @@ export default function FloatingChatWidget({
           <Bot className="h-3.5 w-3.5 text-primary" />
           <span className="text-sm font-medium">{title}</span>
         </div>
-        <div className="flex items-center gap-0.5">
-          <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => setState("minimized")}>
-            <Minus className="h-3 w-3" />
-          </Button>
-          <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => setState("collapsed")}>
-            <X className="h-3 w-3" />
-          </Button>
-        </div>
+        <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => setState("collapsed")}>
+          <X className="h-3 w-3" />
+        </Button>
       </div>
 
       {/* Messages */}
