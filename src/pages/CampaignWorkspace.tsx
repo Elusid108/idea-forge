@@ -2,7 +2,7 @@ import { useState, useEffect } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import {
   ArrowLeft, Trash2, ExternalLink, Plus, X, Pencil, DollarSign, ShoppingCart, Target, Rocket,
-  FolderOpen, Brain, Lightbulb, Megaphone,
+  FolderOpen, Brain, Lightbulb, Megaphone, Bot,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -18,6 +18,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import FloatingChatWidget from "@/components/FloatingChatWidget";
+import ReactMarkdown from "react-markdown";
 import { format } from "date-fns";
 
 const STATUS_OPTIONS = ["asset_creation", "pre_launch", "active_campaign", "fulfillment", "evergreen"];
@@ -57,6 +58,7 @@ export default function CampaignWorkspace() {
   const [metricDraft, setMetricDraft] = useState("");
   const [showAddLink, setShowAddLink] = useState(false);
   const [linkForm, setLinkForm] = useState({ label: "", url: "" });
+  const [showLinkedIdea, setShowLinkedIdea] = useState(false);
 
   // Chat states
   const [chatHistory, setChatHistory] = useState<{ role: "user" | "assistant"; content: string }[]>([]);
@@ -108,13 +110,13 @@ export default function CampaignWorkspace() {
     enabled: !!linkedProject?.brainstorm_id,
   });
 
-  // Linked idea (through brainstorm)
+  // Linked idea (through brainstorm) - full data for overlay
   const { data: linkedIdea } = useQuery({
     queryKey: ["campaign-linked-idea", linkedBrainstorm?.idea_id],
     queryFn: async () => {
       const { data, error } = await supabase
         .from("ideas")
-        .select("id, title")
+        .select("*")
         .eq("id", linkedBrainstorm!.idea_id!)
         .is("deleted_at", null)
         .maybeSingle();
@@ -346,9 +348,9 @@ export default function CampaignWorkspace() {
           <Badge
             variant="outline"
             className="text-xs gap-1 cursor-pointer hover:bg-accent transition-colors"
-            onClick={() => navigate(`/ideas`)}
+            onClick={() => setShowLinkedIdea(true)}
           >
-            <Lightbulb className="h-3 w-3" /> Linked Idea
+            <Lightbulb className="h-3 w-3 text-yellow-400" /> Linked Idea
           </Badge>
         )}
         {linkedBrainstorm && (
@@ -357,7 +359,7 @@ export default function CampaignWorkspace() {
             className="text-xs gap-1 cursor-pointer hover:bg-accent transition-colors"
             onClick={() => navigate(`/brainstorms/${linkedBrainstorm.id}`)}
           >
-            <Brain className="h-3 w-3" /> Linked Brainstorm
+            <Brain className="h-3 w-3 text-pink-400" /> Linked Brainstorm
           </Badge>
         )}
         {linkedProject && (
@@ -366,7 +368,7 @@ export default function CampaignWorkspace() {
             className="text-xs gap-1 cursor-pointer hover:bg-accent transition-colors"
             onClick={() => navigate(`/projects/${linkedProject.id}`)}
           >
-            <FolderOpen className="h-3 w-3" /> Linked Project
+            <FolderOpen className="h-3 w-3 text-blue-400" /> Linked Project
           </Badge>
         )}
       </div>
@@ -529,9 +531,73 @@ export default function CampaignWorkspace() {
         title="Campaign Assistant"
         placeholder="Ask about your campaign…"
         renderMessage={(msg, i) => (
-          <p key={i} className="text-sm whitespace-pre-wrap">{msg.content}</p>
+          <div key={i} className={`flex items-start gap-2 ${msg.role === "user" ? "justify-end" : ""}`}>
+            {msg.role === "assistant" && (
+              <div className="h-6 w-6 rounded-full bg-primary/10 flex items-center justify-center shrink-0 mt-0.5">
+                <Bot className="h-3 w-3 text-primary" />
+              </div>
+            )}
+            <div className={`rounded-lg px-3 py-2 text-sm max-w-[80%] ${msg.role === "user" ? "bg-primary text-primary-foreground" : "bg-muted"}`}>
+              {msg.role === "assistant" ? (
+                <div className="prose prose-invert prose-sm max-w-none [&_ul]:list-disc [&_ol]:list-decimal [&_ul]:pl-5 [&_ol]:pl-5 [&_li]:my-0.5 [&_p]:my-1.5">
+                  <ReactMarkdown>{msg.content}</ReactMarkdown>
+                </div>
+              ) : msg.content}
+            </div>
+          </div>
         )}
       />
+
+      {/* Linked Idea Overlay */}
+      {linkedIdea && (
+        <Dialog open={showLinkedIdea} onOpenChange={setShowLinkedIdea}>
+          <DialogContent className="sm:max-w-2xl">
+            <DialogHeader>
+              <DialogTitle>{linkedIdea.title || "Linked Idea"}</DialogTitle>
+            </DialogHeader>
+            <div className="space-y-4">
+              <div className="flex items-center gap-2 flex-wrap">
+                <p className="text-xs text-muted-foreground">
+                  Created {format(new Date(linkedIdea.created_at), "MMM d, yyyy 'at' h:mm a")}
+                </p>
+                {linkedIdea.category && (
+                  <Badge className={`text-xs border ${CATEGORY_COLORS[linkedIdea.category] || "bg-secondary text-secondary-foreground"}`}>{linkedIdea.category}</Badge>
+                )}
+              </div>
+              <div>
+                <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-1">Raw Dump</p>
+                <div className="rounded-lg bg-muted/50 p-3 text-sm text-muted-foreground whitespace-pre-wrap">
+                  {linkedIdea.raw_dump}
+                </div>
+              </div>
+              {linkedIdea.processed_summary && (
+                <div>
+                  <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-1">Summary</p>
+                  <p className="text-sm leading-relaxed">{linkedIdea.processed_summary}</p>
+                </div>
+              )}
+              {linkedIdea.key_features && (
+                <div>
+                  <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-1">Key Features</p>
+                  <div className="text-sm text-muted-foreground">
+                    <div dangerouslySetInnerHTML={{ __html: linkedIdea.key_features.replace(/^- /gm, "• ").replace(/\n/g, "<br/>") }} />
+                  </div>
+                </div>
+              )}
+              {linkedIdea.tags && linkedIdea.tags.length > 0 && (
+                <div className="flex flex-wrap gap-1">
+                  {linkedIdea.tags.map((tag: string) => (
+                    <Badge key={tag} variant="secondary" className="text-xs">{tag}</Badge>
+                  ))}
+                </div>
+              )}
+            </div>
+            <DialogFooter>
+              <Button variant="ghost" onClick={() => setShowLinkedIdea(false)}>Close</Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+      )}
     </div>
   );
 }

@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { Plus, Lightbulb, Grid3X3, List, Mic, MicOff, Loader2, Brain, ChevronDown, ChevronRight, ChevronLeft, Ban, FolderOpen, X, Megaphone } from "lucide-react";
+import { Plus, Lightbulb, Grid3X3, List, Mic, MicOff, Loader2, Brain, ChevronDown, ChevronRight, ChevronLeft, Ban, FolderOpen, X, Megaphone, ArrowUpDown } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
@@ -9,6 +9,7 @@ import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, 
 import { Textarea } from "@/components/ui/textarea";
 import { Separator } from "@/components/ui/separator";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useAuth } from "@/contexts/AuthContext";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
@@ -211,7 +212,7 @@ function IdeaDetailModal({
                 className="text-xs gap-1 cursor-pointer hover:bg-accent transition-colors"
                 onClick={() => { onOpenChange(false); navigate(`/brainstorms/${linkedBrainstorm.id}`); }}
               >
-                <Brain className="h-3 w-3" /> Linked Brainstorm
+                <Brain className="h-3 w-3 text-pink-400" /> Linked Brainstorm
               </Badge>
             )}
             {linkedProject && (
@@ -220,7 +221,7 @@ function IdeaDetailModal({
                 className="text-xs gap-1 cursor-pointer hover:bg-accent transition-colors"
                 onClick={() => { onOpenChange(false); navigate(`/projects/${linkedProject.id}`); }}
               >
-                <FolderOpen className="h-3 w-3" /> Linked Project
+                <FolderOpen className="h-3 w-3 text-blue-400" /> Linked Project
               </Badge>
             )}
             {linkedCampaign && (
@@ -229,7 +230,7 @@ function IdeaDetailModal({
                 className="text-xs gap-1 cursor-pointer hover:bg-accent transition-colors"
                 onClick={() => { onOpenChange(false); navigate(`/campaigns/${linkedCampaign.id}`); }}
               >
-                <Megaphone className="h-3 w-3" /> Linked Campaign
+                <Megaphone className="h-3 w-3 text-orange-400" /> Linked Campaign
               </Badge>
             )}
           </div>
@@ -330,6 +331,25 @@ export default function IdeasPage() {
       return saved ? new Set(JSON.parse(saved)) : new Set();
     } catch { return new Set(); }
   });
+  const [sortMode, setSortMode] = useState<string>(
+    () => localStorage.getItem("ideas-sort-mode") || "newest"
+  );
+
+  const handleSortChange = (val: string) => {
+    setSortMode(val);
+    localStorage.setItem("ideas-sort-mode", val);
+  };
+
+  const sortItems = (items: any[]) => {
+    const sorted = [...items];
+    switch (sortMode) {
+      case "category": return sorted.sort((a, b) => (a.category || "").localeCompare(b.category || ""));
+      case "newest": return sorted.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+      case "alpha": return sorted.sort((a, b) => (a.title || "").localeCompare(b.title || ""));
+      case "recent": return sorted.sort((a, b) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime());
+      default: return sorted;
+    }
+  };
 
   const toggleGroupCollapse = (key: string) => {
     setCollapsedGroups(prev => {
@@ -504,6 +524,18 @@ export default function IdeasPage() {
           <Button variant="ghost" size="icon" onClick={() => toggleView("list")} className={viewMode === "list" ? "text-primary" : ""}>
             <List className="h-4 w-4" />
           </Button>
+          <Select value={sortMode} onValueChange={handleSortChange}>
+            <SelectTrigger className="w-[150px] h-9 text-xs">
+              <ArrowUpDown className="h-3 w-3 mr-1" />
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="newest">Created Date</SelectItem>
+              <SelectItem value="recent">Recently Edited</SelectItem>
+              <SelectItem value="alpha">Alphabetical</SelectItem>
+              <SelectItem value="category">Category</SelectItem>
+            </SelectContent>
+          </Select>
           <Button onClick={() => setDumpOpen(true)} className="gap-2">
             <Plus className="h-4 w-4" /> Dump Idea
           </Button>
@@ -523,7 +555,7 @@ export default function IdeasPage() {
       ) : (
         <div className="space-y-4">
           {IDEA_GROUPS.map(group => {
-            const groupIdeas = ideas.filter((i: any) => group.statuses.includes(i.status));
+            const groupIdeas = sortItems(ideas.filter((i: any) => group.statuses.includes(i.status)));
             if (groupIdeas.length === 0) return null;
             const isCollapsed = collapsedGroups.has(group.key);
             return (

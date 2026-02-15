@@ -822,7 +822,7 @@ export default function BrainstormWorkspace() {
             className="text-xs gap-1 cursor-pointer hover:bg-accent transition-colors"
             onClick={() => setShowLinkedIdea(true)}
           >
-            <Lightbulb className="h-3 w-3" /> Linked Idea
+            <Lightbulb className="h-3 w-3 text-yellow-400" /> Linked Idea
           </Badge>
         )}
         {linkedProject && (
@@ -831,7 +831,7 @@ export default function BrainstormWorkspace() {
             className="text-xs gap-1 cursor-pointer hover:bg-accent transition-colors"
             onClick={() => navigate(`/projects/${linkedProject.id}`)}
           >
-            <FolderOpen className="h-3 w-3" /> Linked Project
+            <FolderOpen className="h-3 w-3 text-blue-400" /> Linked Project
           </Badge>
         )}
         {linkedCampaign && (
@@ -840,7 +840,7 @@ export default function BrainstormWorkspace() {
             className="text-xs gap-1 cursor-pointer hover:bg-accent transition-colors"
             onClick={() => navigate(`/campaigns/${linkedCampaign.id}`)}
           >
-            <Megaphone className="h-3 w-3" /> Linked Campaign
+            <Megaphone className="h-3 w-3 text-orange-400" /> Linked Campaign
           </Badge>
         )}
       </div>

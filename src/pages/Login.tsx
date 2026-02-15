@@ -33,7 +33,7 @@ export default function LoginPage() {
             <Zap className="h-6 w-6 text-primary" />
           </div>
           <CardTitle className="text-2xl font-bold">Welcome back</CardTitle>
-          <CardDescription>Sign in to your Brainstormer account</CardDescription>
+          <CardDescription>Sign in to your IdeaForge.AI account</CardDescription>
         </CardHeader>
         <form onSubmit={handleLogin}>
           <CardContent className="space-y-4">
