@@ -63,7 +63,10 @@ serve(async (req) => {
   try {
     const { messages, context } = await req.json();
 
+    const today = new Date().toISOString().split('T')[0];
     const systemPrompt = `You are a project execution assistant. Your job is to help the user turn their brainstormed project into reality.
+
+TODAY'S DATE: ${today}. NEVER use dates in the past. All due dates MUST be on or after ${today}.
 
 PROJECT CONTEXT:
 Title: ${context.title || "Untitled"}
@@ -80,6 +83,21 @@ YOUR CAPABILITIES:
 - Add tasks to the project task list (including subtasks under existing tasks using parent_task_id)
 - Create notes to compile research, book lists, resource recommendations, etc.
 
+TASK CREATION GUIDELINES:
+- Think carefully about the BEST plan of attack. Consider dependencies -- what needs to happen before what.
+- Create PARENT TASKS for major phases/milestones (e.g. "Research Phase", "Design Phase", "Implementation Phase").
+- Create SUBTASKS under each parent for the specific work items. Use parent_task_id to link them.
+- Each task and subtask should have its own realistic due_date.
+- When given a timeline (e.g. "3 months"), calculate the actual end date from today (${today}).
+- Distribute tasks across the FULL timeline with varied, realistic dates (not all on the same day).
+- Use different days of the month -- spread work naturally across weeks.
+- Set priorities thoughtfully: critical for blockers, high for important milestones, medium for regular work, low for nice-to-haves.
+
+TIMELINE & DUE DATES:
+- If the user provides a timeline, distribute task due dates realistically across that timeframe.
+- If the user hasn't stated a timeline or deadline, ASK them what their timeline is before creating tasks with dates.
+- If the user doesn't provide a timeline after being asked, order tasks by logical sequence of operations without due dates.
+
 GUIDELINES:
 - Be specific and actionable. Don't give vague advice.
 - When recommending books, include title, author, and publication year.
@@ -88,14 +106,7 @@ GUIDELINES:
 - Use the add_task tool to break work into concrete steps.
 - You can create subtasks by providing a parent_task_id matching an existing task ID from the Current Tasks list.
 - Use the update_strategy tool when the user wants to modify the execution plan.
-- Always respond with helpful context even when using tools.
-
-TIMELINE & DUE DATES:
-- When creating tasks, set due_date based on estimated time to complete and the user's desired timeline.
-- If the user hasn't stated a timeline or deadline, ASK them what their timeline is before creating tasks with dates.
-- If the user doesn't provide a timeline after being asked, order tasks by logical sequence of operations without due dates.
-- When the user provides a timeline, distribute task due dates appropriately across the timeframe.`;
-
+- Always respond with helpful context even when using tools.`;
     const apiKey = Deno.env.get("LOVABLE_API_KEY");
     const response = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
       method: "POST",
@@ -110,7 +121,7 @@ TIMELINE & DUE DATES:
           ...messages,
         ],
         tools,
-        max_tokens: 2000,
+        max_tokens: 4000,
       }),
     });
 

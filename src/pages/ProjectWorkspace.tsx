@@ -1,5 +1,7 @@
 import { useState, useEffect, useMemo, useRef } from "react";
 import { useParams, useNavigate } from "react-router-dom";
+import { Progress } from "@/components/ui/progress";
+import FloatingChatWidget from "@/components/FloatingChatWidget";
 import {
   ArrowLeft, Link as LinkIcon, Image, Film, StickyNote, X, Pencil,
   Grid3X3, List, ChevronDown, ChevronRight, ArrowUpDown, Trash2,
@@ -447,6 +449,11 @@ export default function ProjectWorkspace() {
     setRefForm({ title: ref.title, url: ref.url || "", description: ref.description || "" });
   };
 
+  const ensureHttps = (url: string) => {
+    if (!url) return url;
+    return url.match(/^https?:\/\//) ? url : `https://${url}`;
+  };
+
   const handleAddRef = async () => {
     if ((addRefType === "image" || addRefType === "file") && refFile) {
       const path = `${user!.id}/${id}/${Date.now()}-${refFile.name}`;
@@ -461,9 +468,10 @@ export default function ProjectWorkspace() {
         thumbnail_url: addRefType === "image" ? urlData.publicUrl : undefined,
       });
     } else if (addRefType === "link" || addRefType === "video") {
+      const url = addRefType === "link" ? ensureHttps(refForm.url) : refForm.url;
       let thumbnail_url: string | null = null;
       if (addRefType === "video" && refForm.url) thumbnail_url = getVideoThumbnail(refForm.url);
-      addReference.mutate({ type: addRefType, title: refForm.title, url: refForm.url, description: refForm.description, thumbnail_url: thumbnail_url || undefined });
+      addReference.mutate({ type: addRefType, title: refForm.title, url, description: refForm.description, thumbnail_url: thumbnail_url || undefined });
     } else {
       addReference.mutate({ type: addRefType!, title: refForm.title, url: refForm.url, description: refForm.description });
     }
@@ -846,85 +854,7 @@ export default function ProjectWorkspace() {
             />
           </div>
 
-          {/* Project AI Chatbot */}
-          <div>
-            <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-2">Project Assistant</p>
-            <Card className="border-border bg-muted/30">
-              <CardContent className="p-4 space-y-3">
-                <div ref={chatScrollRef} className="max-h-64 overflow-y-auto space-y-3">
-                  {chatHistory.length === 0 && (
-                    <div className="flex flex-col items-center justify-center py-4 text-center">
-                      <Bot className="h-8 w-8 text-muted-foreground/50 mb-2" />
-                      <p className="text-xs text-muted-foreground">Ask for help planning, finding resources, adding tasks, or refining your strategy…</p>
-                    </div>
-                  )}
-                  {chatHistory.map((msg, i) => (
-                    <div key={i} className={`flex items-start gap-2 ${msg.role === "user" ? "justify-end" : ""}`}>
-                      {msg.role === "assistant" && (
-                        <div className="h-6 w-6 rounded-full bg-primary/10 flex items-center justify-center shrink-0 mt-0.5">
-                          <Bot className="h-3 w-3 text-primary" />
-                        </div>
-                      )}
-                      <div className={`rounded-lg px-3 py-2 text-sm max-w-[80%] ${msg.role === "user" ? "bg-primary text-primary-foreground" : "bg-muted"}`}>
-                        {msg.role === "assistant" ? (
-                          <div>
-                            <div className="prose prose-invert prose-sm max-w-none [&_ul]:list-disc [&_ol]:list-decimal [&_ul]:pl-5 [&_ol]:pl-5 [&_li]:my-0.5 [&_p]:my-1.5">
-                              <ReactMarkdown>{msg.content}</ReactMarkdown>
-                            </div>
-                            {msg.noteId && (
-                              <button
-                                className="mt-2 inline-flex items-center gap-1.5 text-xs px-2.5 py-1 rounded-full bg-yellow-500/20 text-yellow-400 border border-yellow-500/30 hover:bg-yellow-500/30 transition-colors"
-                                onClick={() => {
-                                  const note = references.find((r: any) => r.id === msg.noteId);
-                                  if (note) setViewingRef(note);
-                                  else queryClient.invalidateQueries({ queryKey: ["project-refs", id] }).then(() => {
-                                    // Try again after refresh
-                                    setTimeout(() => {
-                                      const freshNote = references.find((r: any) => r.id === msg.noteId);
-                                      if (freshNote) setViewingRef(freshNote);
-                                    }, 500);
-                                  });
-                                }}
-                              >
-                                <StickyNote className="h-3 w-3" />
-                                View: {msg.noteTitle}
-                              </button>
-                            )}
-                          </div>
-                        ) : msg.content}
-                      </div>
-                    </div>
-                  ))}
-                  {isChatThinking && (
-                    <div className="flex items-start gap-2">
-                      <div className="h-6 w-6 rounded-full bg-primary/10 flex items-center justify-center shrink-0">
-                        <Bot className="h-3 w-3 text-primary" />
-                      </div>
-                      <Skeleton className="h-8 w-40 rounded-lg" />
-                    </div>
-                  )}
-                </div>
-                <div className="flex gap-2">
-                  <Textarea
-                    value={chatInput}
-                    onChange={(e) => setChatInput(e.target.value)}
-                    onKeyDown={handleChatKeyDown}
-                    placeholder="Ask about your project… (Enter to send)"
-                    className="min-h-[60px] resize-none text-sm flex-1"
-                    disabled={isChatThinking}
-                  />
-                  <Button
-                    onClick={handleChatSubmit}
-                    disabled={!chatInput.trim() || isChatThinking}
-                    size="icon"
-                    className="shrink-0 self-end"
-                  >
-                    {isChatThinking ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
-                  </Button>
-                </div>
-              </CardContent>
-            </Card>
-          </div>
+          {/* Project AI Chatbot - now floating */}
 
           {/* Tasks Section */}
           <div className="space-y-3">
@@ -940,6 +870,12 @@ export default function ProjectWorkspace() {
                 <Plus className="h-3 w-3" /> Add Task
               </Button>
             </div>
+            {tasks.length > 0 && (
+              <div className="flex items-center gap-3">
+                <Progress value={tasks.length > 0 ? (completedTasks.length / tasks.length) * 100 : 0} className="h-2 flex-1" />
+                <span className="text-xs text-muted-foreground whitespace-nowrap">{Math.round((completedTasks.length / tasks.length) * 100)}%</span>
+              </div>
+            )}
 
             {tasks.length === 0 ? (
               <div className="flex flex-col items-center justify-center rounded-xl border border-dashed border-border py-8">
@@ -1367,7 +1303,11 @@ export default function ProjectWorkspace() {
           </div>
           <DialogFooter>
             <Button variant="ghost" onClick={() => setEditingRef(null)}>Cancel</Button>
-            <Button onClick={() => updateReference.mutate({ refId: editingRef.id, fields: { title: refForm.title, url: refForm.url, description: refForm.description } })} disabled={!refForm.title.trim() || updateReference.isPending}>
+            <Button onClick={() => {
+              const fields: Record<string, any> = { title: refForm.title, url: refForm.url, description: refForm.description };
+              if (editingRef.type === "link") fields.url = ensureHttps(refForm.url);
+              updateReference.mutate({ refId: editingRef.id, fields });
+            }} disabled={!refForm.title.trim() || updateReference.isPending}>
               {updateReference.isPending ? "Saving…" : "Save Changes"}
             </Button>
           </DialogFooter>
@@ -1425,6 +1365,16 @@ export default function ProjectWorkspace() {
             </div>
           )}
           <DialogFooter>
+            <Button
+              variant={viewingTask?.completed ? "secondary" : "default"}
+              onClick={() => {
+                toggleTaskComplete.mutate({ taskId: viewingTask.id, completed: !viewingTask.completed });
+                setViewingTask({ ...viewingTask, completed: !viewingTask.completed });
+              }}
+            >
+              <CheckSquare className="h-3 w-3 mr-1" />
+              {viewingTask?.completed ? "Mark Active" : "Mark Complete"}
+            </Button>
             <Button variant="ghost" onClick={() => {
               setViewingTask(null);
               if (viewingTask) {
@@ -1602,6 +1552,48 @@ export default function ProjectWorkspace() {
           </DialogContent>
         </Dialog>
       )}
+
+      {/* Floating Chat Widget */}
+      <FloatingChatWidget
+        title="Project Assistant"
+        chatHistory={chatHistory}
+        chatInput={chatInput}
+        onInputChange={setChatInput}
+        onSubmit={handleChatSubmit}
+        isThinking={isChatThinking}
+        placeholder="Ask for help planning, finding resources, adding tasks, or refining your strategy…"
+        onKeyDown={handleChatKeyDown}
+        renderMessage={(msg, i) => (
+          <div key={i} className={`flex items-start gap-2 ${msg.role === "user" ? "justify-end" : ""}`}>
+            {msg.role === "assistant" && (
+              <div className="h-6 w-6 rounded-full bg-primary/10 flex items-center justify-center shrink-0 mt-0.5">
+                <Bot className="h-3 w-3 text-primary" />
+              </div>
+            )}
+            <div className={`rounded-lg px-3 py-2 text-sm max-w-[80%] ${msg.role === "user" ? "bg-primary text-primary-foreground" : "bg-muted"}`}>
+              {msg.role === "assistant" ? (
+                <div>
+                  <div className="prose prose-invert prose-sm max-w-none [&_ul]:list-disc [&_ol]:list-decimal [&_ul]:pl-5 [&_ol]:pl-5 [&_li]:my-0.5 [&_p]:my-1.5">
+                    <ReactMarkdown>{msg.content}</ReactMarkdown>
+                  </div>
+                  {msg.noteId && (
+                    <button
+                      className="mt-2 inline-flex items-center gap-1.5 text-xs px-2.5 py-1 rounded-full bg-yellow-500/20 text-yellow-400 border border-yellow-500/30 hover:bg-yellow-500/30 transition-colors"
+                      onClick={() => {
+                        const note = references.find((r: any) => r.id === msg.noteId);
+                        if (note) setViewingRef(note);
+                      }}
+                    >
+                      <StickyNote className="h-3 w-3" />
+                      View: {msg.noteTitle}
+                    </button>
+                  )}
+                </div>
+              ) : msg.content}
+            </div>
+          </div>
+        )}
+      />
     </div>
   );
 }
