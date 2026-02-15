@@ -1,4 +1,4 @@
-import { Trash2, RotateCcw, XCircle, Lightbulb, Brain, Wrench, ChevronRight } from "lucide-react";
+import { Trash2, RotateCcw, XCircle, Lightbulb, Brain, Wrench, Megaphone, ChevronRight } from "lucide-react";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from "@/components/ui/alert-dialog";
 import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
@@ -112,6 +112,15 @@ export default function TrashPage() {
     },
   });
 
+  const { data: campaigns = [], isLoading: loadingCampaigns } = useQuery({
+    queryKey: ["trash-campaigns"],
+    queryFn: async () => {
+      const { data, error } = await (supabase.from("campaigns" as any).select("*") as any).not("deleted_at", "is", null).order("deleted_at", { ascending: false });
+      if (error) throw error;
+      return data as any[];
+    },
+  });
+
   const restore = (table: string, queryKey: string) =>
     useMutation({
       mutationFn: async (id: string) => {
@@ -120,7 +129,7 @@ export default function TrashPage() {
       },
       onSuccess: () => {
         queryClient.invalidateQueries({ queryKey: [queryKey] });
-        queryClient.invalidateQueries({ queryKey: [table === "ideas" ? "ideas" : table === "brainstorms" ? "brainstorms" : "projects"] });
+        queryClient.invalidateQueries({ queryKey: [table === "ideas" ? "ideas" : table === "brainstorms" ? "brainstorms" : table === "projects" ? "projects" : "campaigns"] });
         toast.success("Restored!");
       },
       onError: (e: Error) => toast.error(e.message),
@@ -129,6 +138,13 @@ export default function TrashPage() {
   const permanentDelete = (table: string, queryKey: string) =>
     useMutation({
       mutationFn: async (id: string) => {
+        if (table === "campaigns") {
+          // Unlink the project when permanently deleting a campaign
+          const campaign = campaigns.find((c: any) => c.id === id);
+          if (campaign?.project_id) {
+            await supabase.from("projects").update({ campaign_id: null } as any).eq("id", campaign.project_id);
+          }
+        }
         const { error } = await supabase.from(table as any).delete().eq("id", id);
         if (error) throw error;
       },
@@ -145,6 +161,8 @@ export default function TrashPage() {
   const deleteBrainstorm = permanentDelete("brainstorms", "trash-brainstorms");
   const restoreProject = restore("projects", "trash-projects");
   const deleteProject = permanentDelete("projects", "trash-projects");
+  const restoreCampaign = restore("campaigns", "trash-campaigns");
+  const deleteCampaign = permanentDelete("campaigns", "trash-campaigns");
 
   return (
     <div className="space-y-6">
@@ -159,6 +177,7 @@ export default function TrashPage() {
         <TrashSection title="Ideas" icon={Lightbulb} items={ideas} isLoading={loadingIdeas} onRestore={(id) => restoreIdea.mutate(id)} onDelete={(id) => deleteIdea.mutate(id)} labelKey="title" />
         <TrashSection title="Brainstorms" icon={Brain} items={brainstorms} isLoading={loadingBrainstorms} onRestore={(id) => restoreBrainstorm.mutate(id)} onDelete={(id) => deleteBrainstorm.mutate(id)} labelKey="title" />
         <TrashSection title="Projects" icon={Wrench} items={projects} isLoading={loadingProjects} onRestore={(id) => restoreProject.mutate(id)} onDelete={(id) => deleteProject.mutate(id)} labelKey="name" />
+        <TrashSection title="Campaigns" icon={Megaphone} items={campaigns} isLoading={loadingCampaigns} onRestore={(id) => restoreCampaign.mutate(id)} onDelete={(id) => deleteCampaign.mutate(id)} labelKey="title" />
       </div>
     </div>
   );

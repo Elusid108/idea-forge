@@ -21,6 +21,7 @@ const sections = [
   { label: "Ideas", href: "/ideas", emoji: "💡", table: "ideas" as const },
   { label: "Brainstorms", href: "/brainstorms", emoji: "🧠", table: "brainstorms" as const },
   { label: "Projects", href: "/projects", emoji: "🔧", table: "projects" as const },
+  { label: "Campaigns", href: "/campaigns", emoji: "📣", table: "campaigns" as const },
 ];
 
 const SIDEBAR_EXCLUDED_STATUSES: Record<string, string[]> = {
@@ -29,15 +30,15 @@ const SIDEBAR_EXCLUDED_STATUSES: Record<string, string[]> = {
   projects: ["done"],
 };
 
-function useSectionItems(table: "ideas" | "brainstorms" | "projects", enabled: boolean) {
+function useSectionItems(table: "ideas" | "brainstorms" | "projects" | "campaigns", enabled: boolean) {
   return useQuery({
     queryKey: ["sidebar-items", table],
     queryFn: async () => {
       const nameCol = table === "projects" ? "name" : "title";
       const excluded = SIDEBAR_EXCLUDED_STATUSES[table] || [];
-      let query = supabase
-        .from(table)
-        .select(`id, ${nameCol}`)
+      let query = (supabase
+        .from(table as any)
+        .select(`id, ${nameCol}`) as any)
         .is("deleted_at", null)
         .order("created_at", { ascending: false })
         .limit(20);
@@ -77,15 +78,18 @@ export function AppSidebar() {
   const ideasItems = useSectionItems("ideas", expanded.has("Ideas"));
   const brainstormsItems = useSectionItems("brainstorms", expanded.has("Brainstorms"));
   const projectsItems = useSectionItems("projects", expanded.has("Projects"));
+  const campaignsItems = useSectionItems("campaigns" as any, expanded.has("Campaigns"));
   const itemsMap: Record<string, ReturnType<typeof useSectionItems>> = {
     Ideas: ideasItems,
     Brainstorms: brainstormsItems,
     Projects: projectsItems,
+    Campaigns: campaignsItems,
   };
 
   const getDetailPath = (section: string, itemId: string) => {
     if (section === "Brainstorms") return `/brainstorms/${itemId}`;
     if (section === "Projects") return `/projects/${itemId}`;
+    if (section === "Campaigns") return `/campaigns/${itemId}`;
     return `/ideas`;
   };
 

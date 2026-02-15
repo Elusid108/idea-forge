@@ -161,6 +161,65 @@ export type Database = {
           },
         ]
       }
+      campaigns: {
+        Row: {
+          created_at: string
+          deleted_at: string | null
+          id: string
+          marketing_links: Json
+          primary_channel: string
+          project_id: string
+          revenue: number
+          sales_model: string
+          status: string
+          target_price: number
+          title: string
+          units_sold: number
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          deleted_at?: string | null
+          id?: string
+          marketing_links?: Json
+          primary_channel?: string
+          project_id: string
+          revenue?: number
+          sales_model?: string
+          status?: string
+          target_price?: number
+          title?: string
+          units_sold?: number
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          deleted_at?: string | null
+          id?: string
+          marketing_links?: Json
+          primary_channel?: string
+          project_id?: string
+          revenue?: number
+          sales_model?: string
+          status?: string
+          target_price?: number
+          title?: string
+          units_sold?: number
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "campaigns_project_id_fkey"
+            columns: ["project_id"]
+            isOneToOne: false
+            referencedRelation: "projects"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       ideas: {
         Row: {
           category: string | null
@@ -432,6 +491,7 @@ export type Database = {
         Row: {
           brainstorm_id: string | null
           bullet_breakdown: string | null
+          campaign_id: string | null
           category: string | null
           compiled_description: string | null
           created_at: string
@@ -449,6 +509,7 @@ export type Database = {
         Insert: {
           brainstorm_id?: string | null
           bullet_breakdown?: string | null
+          campaign_id?: string | null
           category?: string | null
           compiled_description?: string | null
           created_at?: string
@@ -466,6 +527,7 @@ export type Database = {
         Update: {
           brainstorm_id?: string | null
           bullet_breakdown?: string | null
+          campaign_id?: string | null
           category?: string | null
           compiled_description?: string | null
           created_at?: string
@@ -486,6 +548,13 @@ export type Database = {
             columns: ["brainstorm_id"]
             isOneToOne: false
             referencedRelation: "brainstorms"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "projects_campaign_id_fkey"
+            columns: ["campaign_id"]
+            isOneToOne: false
+            referencedRelation: "campaigns"
             referencedColumns: ["id"]
           },
         ]
