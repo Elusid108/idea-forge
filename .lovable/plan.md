@@ -1,137 +1,104 @@
 
+# UI Polish: Chat Bubbles, Linked Badges, Rename, Version Bump, and Sorting
 
-# Cross-Pipeline Badges, Campaign Context, and Persistent Chat State
-
-This plan covers four areas: adding "Linked Campaign" badges to Ideas and Brainstorms, adding full lineage badges to Campaigns, carrying over tags/category during campaign creation, enriching the Campaign Assistant with linked project context, and making the floating chat widget's collapsed/expanded state persist across navigation.
-
----
-
-## 1. "Linked Campaign" Badge on Ideas
-
-**File**: `src/pages/Ideas.tsx` (inside `IdeaDetailModal`)
-
-Currently the modal queries for `linkedBrainstorm` and `linkedProject`. Add a third query for `linkedCampaign`:
-
-- Query the `campaigns` table where `project_id = linkedProject.id` and `deleted_at IS NULL`
-- If found, render a badge:
-  ```
-  <Megaphone icon /> Linked Campaign
-  ```
-  clicking navigates to `/campaigns/{id}` (and closes the modal)
-
-This query is chained: `idea -> linkedBrainstorm -> linkedProject -> linkedCampaign` (only enabled when `linkedProject?.id` exists).
+This plan covers 5 areas of improvement across the app.
 
 ---
 
-## 2. "Linked Campaign" Badge on Brainstorm Workspace
+## 1. Chat Message Differentiation
 
-**File**: `src/pages/BrainstormWorkspace.tsx`
+**Problem**: In the Campaign Assistant, all messages look the same -- no visual distinction between user and AI messages.
 
-Currently shows "Linked Idea" and "Linked Project" badges. Add a query for `linkedCampaign`:
+**Fix**: Update the `renderMessage` in `CampaignWorkspace.tsx` to match the pattern already used in `ProjectWorkspace.tsx` and `BrainstormWorkspace.tsx`:
+- User messages: right-aligned with purple/primary background
+- AI messages: left-aligned with muted background, bot avatar icon, and markdown rendering
 
-- Query `campaigns` where `project_id = linkedProject.id` and `deleted_at IS NULL`
-- Render a badge next to the existing "Linked Project" badge:
-  ```
-  <Megaphone icon /> Linked Campaign
-  ```
-  clicking navigates to `/campaigns/{id}`
+**File**: `src/pages/CampaignWorkspace.tsx` (lines 531-533)
 
 ---
 
-## 3. Full Lineage Badges on Campaign Workspace
+## 2. Linked Idea Badge on Campaign Opens Overlay Instead of Navigating
 
-**File**: `src/pages/CampaignWorkspace.tsx`
+**Problem**: Clicking "Linked Idea" on Campaign navigates to `/ideas` instead of opening the read-only idea detail overlay.
 
-Currently only shows "Linked Project". Add queries to trace the full chain:
+**Fix**: In `CampaignWorkspace.tsx`, replace the `navigate('/ideas')` with an inline idea detail overlay (Dialog) that shows the idea's title, raw dump, summary, key features, and tags -- matching the same read-only overlay pattern used in `BrainstormWorkspace.tsx` and `ProjectWorkspace.tsx`.
 
-- **Linked Brainstorm**: Query `projects` for `brainstorm_id` using `linkedProject.id`, then use that to fetch the brainstorm title. Render badge with `Brain` icon navigating to `/brainstorms/{id}`.
-- **Linked Idea**: From the brainstorm data, check `idea_id`. Render badge with `Lightbulb` icon that opens a read-only idea overlay (or navigates to ideas page).
-- **Category badge**: Display `campaign.category` using the standard `CATEGORY_COLORS` map.
-- **Tags**: Display tag badges below the metadata row.
-
-The badge row will show: `Created date | Category | Linked Idea | Linked Brainstorm | Linked Project`
+**Files**:
+- `src/pages/CampaignWorkspace.tsx` -- add state for `viewingIdea`, fetch full idea data, render a Dialog overlay, and update the Linked Idea badge click handler
 
 ---
 
-## 4. Carry Over Tags and Category During Campaign Launch
+## 3. Badge Icon Colors Matching Sidebar Emojis
 
-**File**: `src/pages/ProjectWorkspace.tsx` (the `launchCampaign` mutation)
+**Problem**: The Linked Idea/Brainstorm/Project/Campaign badges use plain white icons, but the sidebar uses colored emojis (yellow bulb, pink brain, etc.).
 
-Currently the insert only passes `project_id`, `user_id`, and `title`. The campaigns table does not have `tags` or `category` columns yet.
+**Fix**: Apply consistent icon colors to all badge icons across all workspaces:
+- Lightbulb (Linked Idea): `text-yellow-400`
+- Brain (Linked Brainstorm): `text-pink-400`
+- FolderOpen/Wrench (Linked Project): `text-blue-400`
+- Megaphone (Linked Campaign): `text-orange-400`
 
-**Database migration needed**: Add `category` (text, nullable, default null) and `tags` (text array, nullable, default null) columns to the `campaigns` table.
-
-Then update the `launchCampaign` mutation to also pass:
-- `category: project.category`
-- `tags: project.tags`
+**Files** (badge icon className updates):
+- `src/pages/CampaignWorkspace.tsx` -- Linked Idea, Brainstorm, Project badges
+- `src/pages/BrainstormWorkspace.tsx` -- Linked Idea, Project, Campaign badges
+- `src/pages/ProjectWorkspace.tsx` -- Linked Idea, Brainstorm, Campaign badges
+- `src/pages/Ideas.tsx` -- Linked Brainstorm, Project, Campaign badges in IdeaDetailModal
 
 ---
 
-## 5. Enrich Campaign Assistant with Linked Project Context
+## 4. Rename App to "IdeaForge.AI" and Bump Version
 
-**File**: `src/pages/CampaignWorkspace.tsx` (the `handleChatSubmit` function)
+**Files**:
+- `src/components/AppSidebar.tsx` -- Change "Brainstormer" to "IdeaForge.AI", version from "v0.1" to "v0.2"
+- `index.html` -- Update `<title>`, og:title, twitter:title from "Brainstormer" to "IdeaForge.AI"
+- `src/pages/Login.tsx` -- Update "Brainstormer" reference to "IdeaForge.AI"
 
-Currently sends minimal campaign info. Enhance the context by fetching and including:
+---
 
-- Linked project's `compiled_description`, `execution_strategy`, `bullet_breakdown`, `name`
-- Linked project's tasks (query `project_tasks` for the project_id)
-- Linked project's notes (query `project_references` where type = 'note')
+## 5. Sorting for All Dashboard Pages
 
-Update the system prompt context to include all of this. The assistant should be told it can READ this project data to make campaign recommendations but cannot modify it. The edge function `project-chat` already accepts a `context` object, so we just need to pass richer data from the frontend.
+Add a sort dropdown to each dashboard page (Ideas, Brainstorms, Projects, Campaigns) with these options:
+- **Category** (A-Z by category name)
+- **Created Date** (newest first -- current default)
+- **Alphabetical** (A-Z by title/name)
+- **Recently Edited** (most recent `updated_at` first)
 
-Updated context object:
-```
-context: {
-  title: campaign.title,
-  description: `Campaign. Sales model: ${campaign.sales_model}. Channel: ${campaign.primary_channel}. Revenue: $${campaign.revenue}. Units sold: ${campaign.units_sold}. Target price: $${campaign.target_price}.`,
-  tasks: linkedProjectTasks (formatted string),
-  notes: linkedProjectNotes (formatted string),
-  execution_strategy: linkedProject.execution_strategy,
-  bullet_breakdown: linkedProject.bullet_breakdown,
-  project_description: linkedProject.compiled_description,
-}
+Implementation approach:
+- Add a sort state with localStorage persistence (e.g. `ideas-sort-mode`)
+- Add a sort dropdown button next to the existing grid/list toggle
+- Apply sorting to the items array before rendering in both grid/tile and list views
+- For Ideas, sorting applies within each group (Fresh, Brainstorming, Scrapped)
+- For Brainstorms, sorting applies within each status group
+- For Projects and Campaigns, sorting applies within each Kanban column and in list view
+
+**Files**:
+- `src/pages/Ideas.tsx` -- add sort dropdown and apply sorting within groups
+- `src/pages/Brainstorms.tsx` -- add sort dropdown and apply sorting within groups
+- `src/pages/Projects.tsx` -- add sort dropdown and apply sorting within columns and list
+- `src/pages/Campaigns.tsx` -- add sort dropdown and apply sorting within columns and list
+
+Sort options constant (shared across all pages):
+```text
+Sort Options:
+- "category"      -> Sort by category alphabetically
+- "newest"        -> Sort by created_at descending (default)
+- "alpha"         -> Sort alphabetically by title/name
+- "recent"        -> Sort by updated_at descending
 ```
 
-This reuses the existing `project-chat` edge function -- no new edge function needed.
-
 ---
 
-## 6. Persistent Floating Chat Widget State
+## Technical Summary
 
-**File**: `src/components/FloatingChatWidget.tsx`
-
-Currently defaults to `"expanded"` every time the component mounts. Change to use `localStorage`:
-
-- Store state in `localStorage` under key `"chat-widget-state"`
-- On first mount (no localStorage value), default to `"expanded"` so users discover the widget
-- On subsequent mounts, restore the last saved state
-- When the user clicks X (collapse) or the flag (expand), save the new state to localStorage
-
-Implementation:
-```tsx
-const [state, setState] = useState<WidgetState>(() => {
-  const saved = localStorage.getItem("chat-widget-state");
-  return (saved === "collapsed") ? "collapsed" : "expanded";
-});
-
-// Persist on change
-useEffect(() => {
-  localStorage.setItem("chat-widget-state", state);
-}, [state]);
-```
-
-This applies globally across all workspaces (Project, Brainstorm, Campaign) since they all use the same component.
-
----
-
-## Summary of All Changes
-
-| File | Change |
+| File | Changes |
 |---|---|
-| **Migration SQL** | Add `category` and `tags` columns to `campaigns` table |
-| `src/pages/Ideas.tsx` | Add `linkedCampaign` query and badge in IdeaDetailModal |
-| `src/pages/BrainstormWorkspace.tsx` | Add `linkedCampaign` query and badge |
-| `src/pages/CampaignWorkspace.tsx` | Add brainstorm/idea badges, category/tags display, enrich chat context |
-| `src/pages/ProjectWorkspace.tsx` | Pass `category` and `tags` in `launchCampaign` mutation |
-| `src/components/FloatingChatWidget.tsx` | Persist expanded/collapsed state in localStorage |
-
+| `src/pages/CampaignWorkspace.tsx` | Fix renderMessage with user/AI bubbles; add idea overlay dialog; color badge icons |
+| `src/pages/BrainstormWorkspace.tsx` | Color badge icons |
+| `src/pages/ProjectWorkspace.tsx` | Color badge icons |
+| `src/pages/Ideas.tsx` | Color badge icons; add sort dropdown |
+| `src/pages/Brainstorms.tsx` | Add sort dropdown |
+| `src/pages/Projects.tsx` | Add sort dropdown |
+| `src/pages/Campaigns.tsx` | Add sort dropdown |
+| `src/components/AppSidebar.tsx` | Rename to IdeaForge.AI, bump to v0.2 |
+| `index.html` | Update title and meta tags |
+| `src/pages/Login.tsx` | Update branding reference |
