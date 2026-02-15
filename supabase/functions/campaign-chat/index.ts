@@ -145,7 +145,9 @@ Ask ONE question at a time. Be conversational but focused. Reference the project
 
 For the FIRST question (when chat history is empty), blend a brief, friendly introduction. Start with something like "Great, let's build a go-to-market strategy for this." then seamlessly transition into your first question. Do NOT separate the intro from the question.
 
-The user may respond with questions or express uncertainty. When this happens, provide helpful guidance and then re-ask or refine your question.`;
+The user may respond with questions or express uncertainty. When this happens, provide helpful guidance and then re-ask or refine your question.
+
+IMPORTANT: You must also return a "topics_remaining" array listing the key topics you still need to discuss (e.g. ["Pricing Strategy", "Target Audience", "Fulfillment Method"]). As the conversation progresses and topics are covered, remove them from the list. When you believe you have enough information to generate a comprehensive playbook, return an empty array.`;
 
     const messages: any[] = [
       { role: "system", content: systemPrompt },
@@ -168,8 +170,9 @@ The user may respond with questions or express uncertainty. When this happens, p
               type: "object",
               properties: {
                 question: { type: "string", description: "The next critical question to ask." },
+                topics_remaining: { type: "array", items: { type: "string" }, description: "List of topics still needing discussion. Empty array if enough info gathered." },
               },
-              required: ["question"],
+              required: ["question", "topics_remaining"],
               additionalProperties: false,
             },
           },
@@ -177,7 +180,7 @@ The user may respond with questions or express uncertainty. When this happens, p
       ], { type: "function", function: { name: "ask_question" } });
 
       const result = JSON.parse(response);
-      return new Response(JSON.stringify({ question: result.question }), {
+      return new Response(JSON.stringify({ question: result.question, topics_remaining: result.topics_remaining || [] }), {
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
@@ -206,8 +209,9 @@ The user may respond with questions or express uncertainty. When this happens, p
             properties: {
               clarification: { type: "string", description: "Helpful response if user asked a question or was uncertain." },
               next_question: { type: "string", description: "The next question to ask." },
+              topics_remaining: { type: "array", items: { type: "string" }, description: "List of topics still needing discussion. Empty array if enough info gathered." },
             },
-            required: ["next_question"],
+            required: ["next_question", "topics_remaining"],
             additionalProperties: false,
           },
         },

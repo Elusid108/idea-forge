@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import {
   ArrowLeft, Trash2, ExternalLink, Plus, X, Pencil, DollarSign, ShoppingCart, Target, Rocket,
-  FolderOpen, Brain, Lightbulb, Megaphone, Bot, Send, Loader2, CheckCircle2, Sparkles,
+  Wrench, Brain, Lightbulb, Megaphone, Bot, Send, Loader2, CheckCircle2, Sparkles,
   GripVertical, Check,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -80,6 +80,7 @@ export default function CampaignWorkspace() {
   const [interviewChatHistory, setInterviewChatHistory] = useState<ChatMsg[]>([]);
   const [questionLoaded, setQuestionLoaded] = useState(false);
   const [isForging, setIsForging] = useState(false);
+  const [topicsRemaining, setTopicsRemaining] = useState<string[]>([]);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   // Add task state
@@ -213,6 +214,7 @@ export default function CampaignWorkspace() {
       });
       if (error) throw error;
       setCurrentQuestion(data.question);
+      if (data.topics_remaining) setTopicsRemaining(data.topics_remaining);
     } catch (e: any) {
       toast.error("Failed to generate question: " + e.message);
     } finally {
@@ -239,7 +241,8 @@ export default function CampaignWorkspace() {
       });
       if (error) throw error;
 
-      const { next_question, clarification } = data;
+      const { next_question, clarification, topics_remaining } = data;
+      if (topics_remaining) setTopicsRemaining(topics_remaining);
 
       if (clarification) {
         const assistantMsg: ChatMsg = { role: "assistant", content: clarification };
@@ -441,17 +444,39 @@ export default function CampaignWorkspace() {
             <CardContent className="p-4">
               <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-2">Project Context</p>
               <div className="flex items-center gap-2 flex-wrap">
-                <Badge variant="outline" className="text-xs gap-1">
-                  <FolderOpen className="h-3 w-3 text-blue-400" /> {linkedProject.name}
-                </Badge>
+                <p className="text-xs text-muted-foreground">
+                  Created {format(new Date(campaign.created_at), "MMM d, yyyy 'at' h:mm a")}
+                </p>
                 {campaign.category && (
                   <Badge className={`text-xs border ${CATEGORY_COLORS[campaign.category] || "bg-secondary text-secondary-foreground"}`}>
                     {campaign.category}
                   </Badge>
                 )}
-                {campaign.tags?.map((tag: string) => (
-                  <Badge key={tag} variant="secondary" className="text-xs">{tag}</Badge>
-                ))}
+                {linkedIdea && (
+                  <Badge
+                    variant="outline"
+                    className="text-xs gap-1 cursor-pointer hover:bg-accent transition-colors"
+                    onClick={() => setShowLinkedIdea(true)}
+                  >
+                    <Lightbulb className="h-3 w-3 text-yellow-400" /> Linked Idea
+                  </Badge>
+                )}
+                {linkedBrainstorm && (
+                  <Badge
+                    variant="outline"
+                    className="text-xs gap-1 cursor-pointer hover:bg-accent transition-colors"
+                    onClick={() => navigate(`/brainstorms/${linkedBrainstorm.id}`)}
+                  >
+                    <Brain className="h-3 w-3 text-pink-400" /> Linked Brainstorm
+                  </Badge>
+                )}
+                <Badge
+                  variant="outline"
+                  className="text-xs gap-1 cursor-pointer hover:bg-accent transition-colors"
+                  onClick={() => navigate(`/projects/${linkedProject.id}`)}
+                >
+                  <Wrench className="h-3 w-3 text-blue-400" /> Linked Project
+                </Badge>
               </div>
             </CardContent>
           </Card>
@@ -465,31 +490,14 @@ export default function CampaignWorkspace() {
               <h2 className="text-lg font-semibold">GTM Strategy Interview</h2>
             </div>
 
-            {/* Previous Q&A history */}
-            {interviewChatHistory.length > 0 && (
-              <div className="space-y-3 max-h-[300px] overflow-y-auto pr-2">
-                {interviewChatHistory.map((msg, i) => (
-                  <div key={i} className={`flex items-start gap-2 ${msg.role === "user" ? "justify-end" : ""}`}>
-                    {msg.role === "assistant" && (
-                      <div className="h-6 w-6 rounded-full bg-primary/10 flex items-center justify-center shrink-0 mt-0.5">
-                        <Bot className="h-3 w-3 text-primary" />
-                      </div>
-                    )}
-                    <div className={`rounded-lg px-3 py-2 text-sm max-w-[85%] ${msg.role === "user" ? "bg-primary text-primary-foreground" : "bg-muted"}`}>
-                      {msg.role === "assistant" ? (
-                        <div className="prose prose-invert prose-sm max-w-none [&_ul]:list-disc [&_ol]:list-decimal [&_ul]:pl-5 [&_ol]:pl-5 [&_li]:my-0.5 [&_p]:my-1.5">
-                          <ReactMarkdown components={markdownComponents}>{msg.content}</ReactMarkdown>
-                        </div>
-                      ) : (
-                        msg.content.replace(/^Q:.*\nA:\s*/, "")
-                      )}
-                    </div>
-                  </div>
-                ))}
-              </div>
+            {/* Progress indicator */}
+            {exchangeCount > 0 && (
+              <p className="text-xs text-muted-foreground italic">
+                {topicsRemaining.length > 0
+                  ? `To forge your playbook, we still need to discuss: ${topicsRemaining.join(", ")}`
+                  : "You can now forge your playbook, or continue answering to refine it."}
+              </p>
             )}
-
-            {interviewChatHistory.length > 0 && <Separator />}
 
             {/* Current question */}
             {isInterviewThinking && !currentQuestion ? (
@@ -549,6 +557,54 @@ export default function CampaignWorkspace() {
               <><Sparkles className="h-5 w-5" /> Forge Campaign Playbook</>
             )}
           </Button>
+        )}
+        {/* Linked Idea Overlay */}
+        {linkedIdea && (
+          <Dialog open={showLinkedIdea} onOpenChange={setShowLinkedIdea}>
+            <DialogContent className="sm:max-w-2xl">
+              <DialogHeader>
+                <DialogTitle>{linkedIdea.title || "Linked Idea"}</DialogTitle>
+              </DialogHeader>
+              <div className="space-y-4">
+                <div className="flex items-center gap-2 flex-wrap">
+                  <p className="text-xs text-muted-foreground">
+                    Created {format(new Date(linkedIdea.created_at), "MMM d, yyyy 'at' h:mm a")}
+                  </p>
+                  {linkedIdea.category && (
+                    <Badge className={`text-xs border ${CATEGORY_COLORS[linkedIdea.category] || "bg-secondary text-secondary-foreground"}`}>{linkedIdea.category}</Badge>
+                  )}
+                </div>
+                <div>
+                  <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-1">Raw Dump</p>
+                  <div className="rounded-lg bg-muted/50 p-3 text-sm text-muted-foreground whitespace-pre-wrap">{linkedIdea.raw_dump}</div>
+                </div>
+                {linkedIdea.processed_summary && (
+                  <div>
+                    <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-1">Summary</p>
+                    <p className="text-sm leading-relaxed">{linkedIdea.processed_summary}</p>
+                  </div>
+                )}
+                {linkedIdea.key_features && (
+                  <div>
+                    <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-1">Key Features</p>
+                    <div className="text-sm text-muted-foreground">
+                      <div dangerouslySetInnerHTML={{ __html: linkedIdea.key_features.replace(/^- /gm, "• ").replace(/\n/g, "<br/>") }} />
+                    </div>
+                  </div>
+                )}
+                {linkedIdea.tags && linkedIdea.tags.length > 0 && (
+                  <div className="flex flex-wrap gap-1">
+                    {linkedIdea.tags.map((tag: string) => (
+                      <Badge key={tag} variant="secondary" className="text-xs">{tag}</Badge>
+                    ))}
+                  </div>
+                )}
+              </div>
+              <DialogFooter>
+                <Button variant="ghost" onClick={() => setShowLinkedIdea(false)}>Close</Button>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
         )}
       </div>
     );
@@ -653,7 +709,7 @@ export default function CampaignWorkspace() {
             className="text-xs gap-1 cursor-pointer hover:bg-accent transition-colors"
             onClick={() => navigate(`/projects/${linkedProject.id}`)}
           >
-            <FolderOpen className="h-3 w-3 text-blue-400" /> Linked Project
+            <Wrench className="h-3 w-3 text-blue-400" /> Linked Project
           </Badge>
         )}
       </div>

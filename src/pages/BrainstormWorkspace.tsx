@@ -4,7 +4,7 @@ import { useParams, useNavigate } from "react-router-dom";
 import {
   ArrowLeft, Plus, Link as LinkIcon, Image, Film, StickyNote, X, Pencil,
   Loader2, Rocket, Lightbulb, Bot, Send, CheckCircle2,
-  Grid3X3, List, ChevronDown, ChevronRight, ArrowUpDown, FolderOpen, Megaphone,
+  Grid3X3, List, ChevronDown, ChevronRight, ArrowUpDown, Wrench, Megaphone,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -340,9 +340,9 @@ export default function BrainstormWorkspace() {
         .update({ deleted_at: new Date().toISOString() } as any)
         .eq("id", id!);
       if (error) throw error;
-      // Reset linked idea status back to "new" (Fresh Idea)
+      // Set linked idea status to "scrapped"
       if (brainstorm?.idea_id) {
-        await supabase.from("ideas").update({ status: "new" }).eq("id", brainstorm.idea_id);
+        await supabase.from("ideas").update({ status: "scrapped" }).eq("id", brainstorm.idea_id);
       }
     },
     onSuccess: () => {
@@ -893,7 +893,7 @@ export default function BrainstormWorkspace() {
             className="text-xs gap-1 cursor-pointer hover:bg-accent transition-colors"
             onClick={() => navigate(`/projects/${linkedProject.id}`)}
           >
-            <FolderOpen className="h-3 w-3 text-blue-400" /> Linked Project
+            <Wrench className="h-3 w-3 text-blue-400" /> Linked Project
           </Badge>
         )}
         {linkedCampaign && (

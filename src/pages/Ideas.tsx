@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
-import { Plus, Lightbulb, Grid3X3, List, Mic, MicOff, Loader2, Brain, ChevronDown, ChevronRight, ChevronLeft, Ban, FolderOpen, X, Megaphone, ArrowUpDown } from "lucide-react";
+import { Plus, Lightbulb, Grid3X3, List, Mic, MicOff, Loader2, Brain, ChevronDown, ChevronRight, ChevronLeft, Ban, Wrench, X, Megaphone, ArrowUpDown } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
@@ -221,7 +221,7 @@ function IdeaDetailModal({
                 className="text-xs gap-1 cursor-pointer hover:bg-accent transition-colors"
                 onClick={() => { onOpenChange(false); navigate(`/projects/${linkedProject.id}`); }}
               >
-                <FolderOpen className="h-3 w-3 text-blue-400" /> Linked Project
+                <Wrench className="h-3 w-3 text-blue-400" /> Linked Project
               </Badge>
             )}
             {linkedCampaign && (
@@ -396,6 +396,32 @@ export default function IdeasPage() {
       }
     }
   }, [ideas]);
+
+  // Cleanup orphaned ideas stuck in "brainstorming" without an active brainstorm
+  useEffect(() => {
+    if (!ideas.length || !user) return;
+    const brainstormingIdeas = ideas.filter((i: any) => i.status === "brainstorming");
+    if (!brainstormingIdeas.length) return;
+
+    (async () => {
+      let updated = false;
+      for (const idea of brainstormingIdeas) {
+        const { data } = await supabase
+          .from("brainstorms")
+          .select("id")
+          .eq("idea_id", idea.id)
+          .is("deleted_at", null)
+          .limit(1);
+        if (!data || data.length === 0) {
+          await supabase.from("ideas").update({ status: "scrapped" }).eq("id", idea.id);
+          updated = true;
+        }
+      }
+      if (updated) {
+        queryClient.invalidateQueries({ queryKey: ["ideas"] });
+      }
+    })();
+  }, [ideas, user]);
 
   const createIdea = useMutation({
     mutationFn: async (raw: string) => {

@@ -72,7 +72,7 @@ export default function FloatingChatWidget({
 
 
   return (
-    <div className="fixed bottom-4 right-4 z-50 w-[400px] max-h-[500px] flex flex-col rounded-lg bg-card border border-border shadow-xl">
+    <div className="fixed bottom-4 right-4 z-50 w-[calc(100vw-2rem)] sm:w-[400px] max-h-[500px] flex flex-col rounded-lg bg-card border border-border shadow-xl">
       {/* Title bar */}
       <div className="flex items-center justify-between px-3 py-2 rounded-t-lg bg-primary/10 border-b border-border shrink-0">
         <div className="flex items-center gap-2">
