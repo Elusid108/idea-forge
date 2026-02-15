@@ -1,90 +1,94 @@
 
-# UI Polish: Chat Bubbles, Linked Badges, Rename, Version Bump, and Sorting
 
-This plan covers 5 areas of improvement across the app.
+# UI Polish Round 2: Voice Fix, Cascading Scrap, Logo, Mobile, and FAB
 
----
-
-## 1. Chat Message Differentiation
-
-**Problem**: In the Campaign Assistant, all messages look the same -- no visual distinction between user and AI messages.
-
-**Fix**: Update the `renderMessage` in `CampaignWorkspace.tsx` to match the pattern already used in `ProjectWorkspace.tsx` and `BrainstormWorkspace.tsx`:
-- User messages: right-aligned with purple/primary background
-- AI messages: left-aligned with muted background, bot avatar icon, and markdown rendering
-
-**File**: `src/pages/CampaignWorkspace.tsx` (lines 531-533)
+This plan combines the previously approved items (cascading scrap, custom logo, mobile responsiveness, mobile Dump Idea FAB) with the new voice-to-text bug fix.
 
 ---
 
-## 2. Linked Idea Badge on Campaign Opens Overlay Instead of Navigating
+## 1. Fix Voice-to-Text Bug
 
-**Problem**: Clicking "Linked Idea" on Campaign navigates to `/ideas` instead of opening the read-only idea detail overlay.
+**Problem**: Every call to `handleVoice` creates a brand new `SpeechRecognition` instance. When the user clicks "Stop Recording", it stops the **new** instance -- not the one actually listening. Additionally, `interimResults` with `continuous` causes cumulative transcript appending, resulting in duplicated/repeated text (as seen in the screenshot).
 
-**Fix**: In `CampaignWorkspace.tsx`, replace the `navigate('/ideas')` with an inline idea detail overlay (Dialog) that shows the idea's title, raw dump, summary, key features, and tags -- matching the same read-only overlay pattern used in `BrainstormWorkspace.tsx` and `ProjectWorkspace.tsx`.
+**Fix in `src/pages/Ideas.tsx`**:
+- Store the recognition instance in a `useRef` so the same instance persists across renders
+- Track listening state with a ref (`isListeningRef`) alongside the state variable
+- On "stop", call `.stop()` on the **stored ref instance**
+- Fix `onresult` to only append the **final** transcript (not interim), preventing duplication
+- Clean up recognition on component unmount
 
-**Files**:
-- `src/pages/CampaignWorkspace.tsx` -- add state for `viewingIdea`, fetch full idea data, render a Dialog overlay, and update the Linked Idea badge click handler
-
----
-
-## 3. Badge Icon Colors Matching Sidebar Emojis
-
-**Problem**: The Linked Idea/Brainstorm/Project/Campaign badges use plain white icons, but the sidebar uses colored emojis (yellow bulb, pink brain, etc.).
-
-**Fix**: Apply consistent icon colors to all badge icons across all workspaces:
-- Lightbulb (Linked Idea): `text-yellow-400`
-- Brain (Linked Brainstorm): `text-pink-400`
-- FolderOpen/Wrench (Linked Project): `text-blue-400`
-- Megaphone (Linked Campaign): `text-orange-400`
-
-**Files** (badge icon className updates):
-- `src/pages/CampaignWorkspace.tsx` -- Linked Idea, Brainstorm, Project badges
-- `src/pages/BrainstormWorkspace.tsx` -- Linked Idea, Project, Campaign badges
-- `src/pages/ProjectWorkspace.tsx` -- Linked Idea, Brainstorm, Campaign badges
-- `src/pages/Ideas.tsx` -- Linked Brainstorm, Project, Campaign badges in IdeaDetailModal
-
----
-
-## 4. Rename App to "IdeaForge.AI" and Bump Version
-
-**Files**:
-- `src/components/AppSidebar.tsx` -- Change "Brainstormer" to "IdeaForge.AI", version from "v0.1" to "v0.2"
-- `index.html` -- Update `<title>`, og:title, twitter:title from "Brainstormer" to "IdeaForge.AI"
-- `src/pages/Login.tsx` -- Update "Brainstormer" reference to "IdeaForge.AI"
-
----
-
-## 5. Sorting for All Dashboard Pages
-
-Add a sort dropdown to each dashboard page (Ideas, Brainstorms, Projects, Campaigns) with these options:
-- **Category** (A-Z by category name)
-- **Created Date** (newest first -- current default)
-- **Alphabetical** (A-Z by title/name)
-- **Recently Edited** (most recent `updated_at` first)
-
-Implementation approach:
-- Add a sort state with localStorage persistence (e.g. `ideas-sort-mode`)
-- Add a sort dropdown button next to the existing grid/list toggle
-- Apply sorting to the items array before rendering in both grid/tile and list views
-- For Ideas, sorting applies within each group (Fresh, Brainstorming, Scrapped)
-- For Brainstorms, sorting applies within each status group
-- For Projects and Campaigns, sorting applies within each Kanban column and in list view
-
-**Files**:
-- `src/pages/Ideas.tsx` -- add sort dropdown and apply sorting within groups
-- `src/pages/Brainstorms.tsx` -- add sort dropdown and apply sorting within groups
-- `src/pages/Projects.tsx` -- add sort dropdown and apply sorting within columns and list
-- `src/pages/Campaigns.tsx` -- add sort dropdown and apply sorting within columns and list
-
-Sort options constant (shared across all pages):
 ```text
-Sort Options:
-- "category"      -> Sort by category alphabetically
-- "newest"        -> Sort by created_at descending (default)
-- "alpha"         -> Sort alphabetically by title/name
-- "recent"        -> Sort by updated_at descending
+Key changes:
+- Add: const recognitionRef = useRef<any>(null);
+- handleVoice "start": create instance only if ref is null, store in ref, call ref.current.start()
+- handleVoice "stop": call recognitionRef.current.stop(), set ref to null
+- onresult: only setRawDump when result.isFinal, using only the latest final result
+- onend: clear isListening state and ref
+- useEffect cleanup: stop recognition on unmount
 ```
+
+---
+
+## 2. Cascading Scrap (Database Trigger)
+
+**Database migration**: Create a trigger function `cascade_scrap()` that fires `AFTER UPDATE` on `ideas`, `brainstorms`, `projects`:
+- When an **idea** is scrapped: find brainstorm with `idea_id = id`, set to scrapped
+- When a **brainstorm** is scrapped: find project with `brainstorm_id = id`, set to scrapped
+- When a **project** is scrapped: find campaign with `project_id = id`, set to scrapped
+
+Un-scrapping does NOT cascade -- only scrapping propagates downstream.
+
+**Frontend changes** (cache invalidation after scrap):
+- `src/pages/Ideas.tsx` (scrapIdea mutation): add invalidation for `brainstorms`, `projects`, `campaigns`, `sidebar-items`
+- `src/pages/BrainstormWorkspace.tsx` (status change): add invalidation for `projects`, `campaigns`, `sidebar-items`
+- `src/pages/ProjectWorkspace.tsx` (status change): add invalidation for `campaigns`, `sidebar-items`
+
+---
+
+## 3. Custom Logo (Brain + Anvil + Mallet)
+
+**New file**: `src/components/IdeaForgeLogo.tsx`
+- An inline SVG component depicting a stylized brain with an anvil/hammer motif
+- Accepts `className` prop for sizing
+- Uses `currentColor` so it inherits text color
+
+**Updated files**:
+- `src/components/AppSidebar.tsx` (line 100): replace `Lightbulb` icon with `IdeaForgeLogo`
+- `src/pages/Login.tsx` (line 33): replace `Zap` icon with `IdeaForgeLogo`
+- `src/pages/Signup.tsx` (line 42): replace `Zap` icon with `IdeaForgeLogo`
+- `src/components/AppSidebar.tsx` (line 103): bump version from `v0.2` to `v0.3`
+
+---
+
+## 4. Mobile Responsiveness
+
+**`src/components/AppLayout.tsx`**:
+- Change main padding from `p-6` to `p-4 md:p-6`
+
+**Dashboard pages** (`Ideas.tsx`, `Brainstorms.tsx`, `Projects.tsx`, `Campaigns.tsx`):
+- Add `flex-wrap gap-2` to header flex containers so buttons wrap on small screens
+- Sort dropdown and view toggle buttons wrap naturally below the title on mobile
+
+**Workspace pages** (`BrainstormWorkspace.tsx`, `ProjectWorkspace.tsx`, `CampaignWorkspace.tsx`):
+- Already use `grid-cols-1 lg:grid-cols-2` for two-column layouts -- these are fine
+- Badge rows already use `flex-wrap` -- these are fine
+- Floating chat widget uses fixed positioning -- works on mobile
+
+---
+
+## 5. Mobile Floating "Dump Idea" Button
+
+**New file**: `src/components/MobileDumpIdea.tsx`
+- A floating action button (FAB) visible only on mobile (`md:hidden`)
+- Positioned `fixed bottom-20 right-4 z-50` (above the chat widget area)
+- Circular button with a `Plus` icon
+- Opens a Dialog identical to the "Dump Idea" dialog on the Ideas page
+- Includes the same textarea and voice input (using the fixed voice logic)
+- Uses the same `createIdea` mutation to save, then navigates to `/ideas`
+- Only renders when the user is authenticated
+
+**Updated file**: `src/components/AppLayout.tsx`
+- Import and render `MobileDumpIdea` inside the layout so it appears on every page
 
 ---
 
@@ -92,13 +96,17 @@ Sort Options:
 
 | File | Changes |
 |---|---|
-| `src/pages/CampaignWorkspace.tsx` | Fix renderMessage with user/AI bubbles; add idea overlay dialog; color badge icons |
-| `src/pages/BrainstormWorkspace.tsx` | Color badge icons |
-| `src/pages/ProjectWorkspace.tsx` | Color badge icons |
-| `src/pages/Ideas.tsx` | Color badge icons; add sort dropdown |
-| `src/pages/Brainstorms.tsx` | Add sort dropdown |
-| `src/pages/Projects.tsx` | Add sort dropdown |
-| `src/pages/Campaigns.tsx` | Add sort dropdown |
-| `src/components/AppSidebar.tsx` | Rename to IdeaForge.AI, bump to v0.2 |
-| `index.html` | Update title and meta tags |
-| `src/pages/Login.tsx` | Update branding reference |
+| **Migration SQL** | Create `cascade_scrap()` trigger function + triggers on ideas, brainstorms, projects |
+| `src/pages/Ideas.tsx` | Fix voice-to-text (useRef pattern), add cascade invalidations on scrap |
+| `src/components/IdeaForgeLogo.tsx` | New custom SVG logo component |
+| `src/components/MobileDumpIdea.tsx` | New floating "Dump Idea" FAB for mobile |
+| `src/components/AppSidebar.tsx` | Replace Lightbulb with IdeaForgeLogo, bump to v0.3 |
+| `src/components/AppLayout.tsx` | Add MobileDumpIdea, reduce mobile padding |
+| `src/pages/Login.tsx` | Replace Zap with IdeaForgeLogo |
+| `src/pages/Signup.tsx` | Replace Zap with IdeaForgeLogo |
+| `src/pages/Brainstorms.tsx` | Mobile header wrapping |
+| `src/pages/Projects.tsx` | Mobile header wrapping |
+| `src/pages/Campaigns.tsx` | Mobile header wrapping |
+| `src/pages/BrainstormWorkspace.tsx` | Add cascade invalidations on status change |
+| `src/pages/ProjectWorkspace.tsx` | Add cascade invalidations on status change |
+
