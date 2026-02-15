@@ -110,6 +110,7 @@ export default function BrainstormWorkspace() {
   const [answer, setAnswer] = useState("");
   const [isThinking, setIsThinking] = useState(false);
   const [questionLoaded, setQuestionLoaded] = useState(false);
+  const [showWelcomeIntro, setShowWelcomeIntro] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const lastLoadedIdRef = useRef<string | null>(null);
 
@@ -305,6 +306,9 @@ export default function BrainstormWorkspace() {
       });
       if (error) throw error;
       setCurrentQuestion(data.question);
+      if (chatHistory.length === 0) {
+        setShowWelcomeIntro(true);
+      }
     } catch (e: any) {
       toast.error("Failed to generate question: " + e.message);
     } finally {
@@ -898,6 +902,16 @@ export default function BrainstormWorkspace() {
                   </div>
                 ) : currentQuestion ? (
                   <>
+                    {showWelcomeIntro && chatHistory.length === 0 && (
+                      <div className="flex items-start gap-2 mb-3">
+                        <div className="h-6 w-6 rounded-full bg-primary/10 flex items-center justify-center shrink-0 mt-0.5">
+                          <Bot className="h-3 w-3 text-primary" />
+                        </div>
+                        <p className="text-sm text-muted-foreground leading-relaxed">
+                          👋 Hi! I'm here to help you flesh out your idea by asking you questions. I'll add what we discuss into the compiled description and bullet breakdown, I'll generate tags, and I can generate notes to help keep track of the things we come up with.
+                        </p>
+                      </div>
+                    )}
                     <div className="flex items-start gap-2">
                       <div className="h-6 w-6 rounded-full bg-primary/10 flex items-center justify-center shrink-0 mt-0.5">
                         <Bot className="h-3 w-3 text-primary" />
@@ -1297,6 +1311,7 @@ export default function BrainstormWorkspace() {
       {/* Floating Chat Widget for locked brainstorms */}
       {isLocked && (
         <FloatingChatWidget
+          storageKey="chat-widget-brainstorm"
           title="Brainstorm Assistant"
           chatHistory={queryChatHistory}
           chatInput={chatInput}
