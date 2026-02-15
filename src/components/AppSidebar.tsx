@@ -96,6 +96,7 @@ export function AppSidebar() {
           <Lightbulb className="h-4 w-4 text-primary" />
         </div>
         <span className="font-semibold text-sidebar-foreground">Brainstormer</span>
+        <span className="text-[10px] text-muted-foreground font-medium bg-muted px-1.5 py-0.5 rounded">v0.1</span>
       </div>
 
       <SidebarContent className="px-2 py-3">
