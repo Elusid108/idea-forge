@@ -213,7 +213,11 @@ export type Database = {
           deleted_at: string | null
           id: string
           interview_completed: boolean
+          ip_strategy: string | null
           marketing_links: Json
+          marketing_plan: string | null
+          monetization_plan: string | null
+          operations_plan: string | null
           playbook: string | null
           primary_channel: string
           project_id: string
@@ -234,7 +238,11 @@ export type Database = {
           deleted_at?: string | null
           id?: string
           interview_completed?: boolean
+          ip_strategy?: string | null
           marketing_links?: Json
+          marketing_plan?: string | null
+          monetization_plan?: string | null
+          operations_plan?: string | null
           playbook?: string | null
           primary_channel?: string
           project_id: string
@@ -255,7 +263,11 @@ export type Database = {
           deleted_at?: string | null
           id?: string
           interview_completed?: boolean
+          ip_strategy?: string | null
           marketing_links?: Json
+          marketing_plan?: string | null
+          monetization_plan?: string | null
+          operations_plan?: string | null
           playbook?: string | null
           primary_channel?: string
           project_id?: string

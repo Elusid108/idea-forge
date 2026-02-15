@@ -9,13 +9,13 @@ import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { format } from "date-fns";
 
-const statusColumns = ["asset_creation", "pre_launch", "active_campaign", "fulfillment", "evergreen"];
+const statusColumns = ["foundation_ip", "infrastructure_production", "asset_creation_prelaunch", "active_campaign", "operations_fulfillment"];
 const statusLabels: Record<string, string> = {
-  asset_creation: "Asset Creation",
-  pre_launch: "Pre-Launch",
+  foundation_ip: "Foundation & IP",
+  infrastructure_production: "Infrastructure & Production",
+  asset_creation_prelaunch: "Asset Creation & Pre-Launch",
   active_campaign: "Active Campaign",
-  fulfillment: "Fulfillment",
-  evergreen: "Evergreen",
+  operations_fulfillment: "Operations & Fulfillment",
 };
 
 const CHANNEL_COLORS: Record<string, string> = {

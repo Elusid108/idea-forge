@@ -25,13 +25,13 @@ import ReactMarkdown from "react-markdown";
 import { markdownComponents } from "@/lib/markdownComponents";
 import { format } from "date-fns";
 
-const STATUS_OPTIONS = ["asset_creation", "pre_launch", "active_campaign", "fulfillment", "evergreen"];
+const STATUS_OPTIONS = ["foundation_ip", "infrastructure_production", "asset_creation_prelaunch", "active_campaign", "operations_fulfillment"];
 const STATUS_LABELS: Record<string, string> = {
-  asset_creation: "Asset Creation",
-  pre_launch: "Pre-Launch",
+  foundation_ip: "Foundation & IP",
+  infrastructure_production: "Infrastructure & Production",
+  asset_creation_prelaunch: "Asset Creation & Pre-Launch",
   active_campaign: "Active Campaign",
-  fulfillment: "Fulfillment",
-  evergreen: "Evergreen",
+  operations_fulfillment: "Operations & Fulfillment",
 };
 
 const SALES_MODELS = ["B2B", "B2C", "Open Source", "Marketplace", "Direct", "Other"];
@@ -49,11 +49,11 @@ const CATEGORY_COLORS: Record<string, string> = {
 };
 
 const KANBAN_COLUMNS = [
-  { key: "asset_creation", label: "Asset Creation" },
-  { key: "pre_launch", label: "Pre-Launch" },
+  { key: "foundation_ip", label: "Foundation & IP" },
+  { key: "infrastructure_production", label: "Infrastructure & Production" },
+  { key: "asset_creation_prelaunch", label: "Asset Creation & Pre-Launch" },
   { key: "active_campaign", label: "Active Campaign" },
-  { key: "fulfillment", label: "Fulfillment" },
-  { key: "evergreen", label: "Evergreen" },
+  { key: "operations_fulfillment", label: "Operations & Fulfillment" },
 ];
 
 type MarketingLink = { label: string; url: string };
@@ -280,11 +280,15 @@ export default function CampaignWorkspace() {
       });
       if (error) throw error;
 
-      const { playbook, sales_model, primary_channel, tasks } = data;
+      const { playbook, ip_strategy, monetization_plan, marketing_plan, operations_plan, sales_model, primary_channel, tasks } = data;
 
       // Update campaign
       await supabase.from("campaigns" as any).update({
         playbook,
+        ip_strategy: ip_strategy || "",
+        monetization_plan: monetization_plan || "",
+        marketing_plan: marketing_plan || "",
+        operations_plan: operations_plan || "",
         sales_model: sales_model || "",
         primary_channel: primary_channel || "",
         interview_completed: true,
@@ -300,7 +304,7 @@ export default function CampaignWorkspace() {
             user_id: user!.id,
             title: t.title || "",
             description: t.description || "",
-            status_column: t.status_column || "asset_creation",
+            status_column: t.status_column || "foundation_ip",
             sort_order: i,
           });
         }
@@ -762,8 +766,17 @@ export default function CampaignWorkspace() {
         ))}
       </div>
 
-      {/* Campaign Playbook */}
-      <EditablePlaybook campaignId={id!} initialValue={campaign.playbook || ""} updateCampaign={updateCampaign} />
+      {/* Campaign Playbook — 4 structured sections with legacy fallback */}
+      {(campaign.ip_strategy || campaign.monetization_plan || campaign.marketing_plan || campaign.operations_plan) ? (
+        <div className="space-y-4">
+          <PlaybookSection campaignId={id!} label="Discovery & IP Strategy" field="ip_strategy" value={campaign.ip_strategy || ""} updateCampaign={updateCampaign} />
+          <PlaybookSection campaignId={id!} label="Monetization Strategy" field="monetization_plan" value={campaign.monetization_plan || ""} updateCampaign={updateCampaign} />
+          <PlaybookSection campaignId={id!} label="Distribution & Marketing" field="marketing_plan" value={campaign.marketing_plan || ""} updateCampaign={updateCampaign} />
+          <PlaybookSection campaignId={id!} label="Logistics & Operations" field="operations_plan" value={campaign.operations_plan || ""} updateCampaign={updateCampaign} />
+        </div>
+      ) : (
+        <EditablePlaybook campaignId={id!} initialValue={campaign.playbook || ""} updateCampaign={updateCampaign} />
+      )}
 
       {/* Two-column layout */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
@@ -994,6 +1007,32 @@ function EditablePlaybook({ campaignId, initialValue, updateCampaign }: { campai
         }}
         placeholder="No playbook generated yet…"
         minHeight="120px"
+      />
+    </div>
+  );
+}
+
+// Separate component for each playbook section
+function PlaybookSection({ campaignId, label, field, value, updateCampaign }: { campaignId: string; label: string; field: string; value: string; updateCampaign: any }) {
+  const [content, setContent] = useState(value);
+
+  useEffect(() => {
+    setContent(value);
+  }, [value]);
+
+  return (
+    <div>
+      <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-1">{label}</p>
+      <EditableMarkdown
+        value={content}
+        onChange={setContent}
+        onSave={() => {
+          if (content !== value) {
+            updateCampaign.mutate({ [field]: content });
+          }
+        }}
+        placeholder={`No ${label.toLowerCase()} yet…`}
+        minHeight="80px"
       />
     </div>
   );
