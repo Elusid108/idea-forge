@@ -39,7 +39,7 @@ export default function ReferenceViewer({ reference, open, onOpenChange }: Refer
             <DialogDescription className="sr-only">Note details</DialogDescription>
           </DialogHeader>
           {hasHtml ? (
-            <div className="text-sm text-muted-foreground prose prose-invert prose-sm max-w-none" dangerouslySetInnerHTML={{ __html: content }} />
+            <div className="text-sm text-muted-foreground prose prose-invert prose-sm max-w-none [&_li]:my-1 [&_ul]:my-2 [&_ol]:my-2 [&_p]:my-2" dangerouslySetInnerHTML={{ __html: content }} />
           ) : (
             <div className="text-sm text-muted-foreground whitespace-pre-wrap">{content}</div>
           )}

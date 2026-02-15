@@ -24,7 +24,7 @@ const tools = [
     type: "function",
     function: {
       name: "add_task",
-      description: "Add a new task to the project",
+      description: "Add a new task to the project. Can be a subtask if parent_task_id is provided.",
       parameters: {
         type: "object",
         properties: {
@@ -32,6 +32,7 @@ const tools = [
           description: { type: "string", description: "Task description" },
           priority: { type: "string", enum: ["low", "medium", "high", "critical"], description: "Task priority" },
           due_date: { type: "string", description: "Due date in YYYY-MM-DD format (optional)" },
+          parent_task_id: { type: "string", description: "UUID of the parent task if this is a subtask (optional)" },
         },
         required: ["title"],
       },
@@ -76,7 +77,7 @@ YOUR CAPABILITIES:
 - Help plan and break down the project into actionable steps
 - Suggest specific resources: websites (with URLs), books (with authors and publication dates), articles, tools
 - Update the execution strategy when the user wants changes
-- Add tasks to the project task list
+- Add tasks to the project task list (including subtasks under existing tasks using parent_task_id)
 - Create notes to compile research, book lists, resource recommendations, etc.
 
 GUIDELINES:
@@ -85,8 +86,15 @@ GUIDELINES:
 - When recommending websites/tools, include the URL.
 - Use the create_note tool to compile lists of resources, books, references, etc.
 - Use the add_task tool to break work into concrete steps.
+- You can create subtasks by providing a parent_task_id matching an existing task ID from the Current Tasks list.
 - Use the update_strategy tool when the user wants to modify the execution plan.
-- Always respond with helpful context even when using tools.`;
+- Always respond with helpful context even when using tools.
+
+TIMELINE & DUE DATES:
+- When creating tasks, set due_date based on estimated time to complete and the user's desired timeline.
+- If the user hasn't stated a timeline or deadline, ASK them what their timeline is before creating tasks with dates.
+- If the user doesn't provide a timeline after being asked, order tasks by logical sequence of operations without due dates.
+- When the user provides a timeline, distribute task due dates appropriately across the timeframe.`;
 
     const apiKey = Deno.env.get("LOVABLE_API_KEY");
     const response = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
