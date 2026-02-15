@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { Plus, Lightbulb, Grid3X3, List, Mic, MicOff, Loader2, Brain } from "lucide-react";
+import { Plus, Lightbulb, Grid3X3, List, Mic, MicOff, Loader2, Brain, ChevronDown, ChevronRight, Ban } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
@@ -8,10 +8,12 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogD
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from "@/components/ui/alert-dialog";
 import { Textarea } from "@/components/ui/textarea";
 import { Separator } from "@/components/ui/separator";
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { useAuth } from "@/contexts/AuthContext";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { format } from "date-fns";
 
 const CATEGORY_COLORS: Record<string, string> = {
   "Product": "bg-blue-500/20 text-blue-400 border-blue-500/30",
@@ -26,7 +28,8 @@ const CATEGORY_COLORS: Record<string, string> = {
 
 function IdeaCard({ idea, onClick }: { idea: any; onClick: () => void }) {
   const isProcessing = idea.status === "processing";
-  const isProcessed = idea.status === "processed" || idea.status === "brainstorming";
+  const isProcessed = idea.status === "processed" || idea.status === "brainstorming" || idea.status === "scrapped";
+  const isScrapped = idea.status === "scrapped";
   const categoryClass = CATEGORY_COLORS[idea.category] || "bg-secondary text-secondary-foreground";
 
   return (
@@ -38,7 +41,11 @@ function IdeaCard({ idea, onClick }: { idea: any; onClick: () => void }) {
     >
       <CardHeader className="pb-2">
         <div className="flex items-start justify-between gap-2">
-          {isProcessed && idea.category ? (
+          {isScrapped ? (
+            <Badge className="text-xs border bg-zinc-500/20 text-zinc-400 border-zinc-500/30">
+              <Ban className="h-3 w-3 mr-1" /> Scrapped
+            </Badge>
+          ) : isProcessed && idea.category ? (
             <Badge className={`text-xs border ${categoryClass}`}>{idea.category}</Badge>
           ) : isProcessing ? (
             <div className="flex items-center gap-1.5 text-xs text-primary">
@@ -75,6 +82,10 @@ function IdeaCard({ idea, onClick }: { idea: any; onClick: () => void }) {
             )}
           </div>
         )}
+
+        <p className="text-[10px] text-muted-foreground/60">
+          {format(new Date(idea.created_at), "MMM d, yyyy")}
+        </p>
       </CardContent>
     </Card>
   );
@@ -86,20 +97,25 @@ function IdeaDetailModal({
   onOpenChange,
   onDelete,
   onStartBrainstorm,
+  onScrap,
   isDeleting,
   isStarting,
+  isScrapping,
 }: {
   idea: any;
   open: boolean;
   onOpenChange: (open: boolean) => void;
   onDelete: () => void;
   onStartBrainstorm: () => void;
+  onScrap: () => void;
   isDeleting: boolean;
   isStarting: boolean;
+  isScrapping: boolean;
 }) {
   if (!idea) return null;
   const categoryClass = CATEGORY_COLORS[idea.category] || "bg-secondary text-secondary-foreground";
   const isBrainstorming = idea.status === "brainstorming";
+  const isScrapped = idea.status === "scrapped";
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -113,6 +129,10 @@ function IdeaDetailModal({
           </div>
           <DialogDescription className="sr-only">View idea details, delete, or start a brainstorm</DialogDescription>
         </DialogHeader>
+
+        <p className="text-xs text-muted-foreground">
+          Created {format(new Date(idea.created_at), "MMM d, yyyy 'at' h:mm a")}
+        </p>
 
         <div className="space-y-4">
           {/* Raw Dump */}
@@ -173,7 +193,11 @@ function IdeaDetailModal({
               </AlertDialogContent>
             </AlertDialog>
           )}
-          <Button variant="ghost" onClick={() => onOpenChange(false)}>Close</Button>
+          {!isBrainstorming && (
+            <Button variant="secondary" onClick={onScrap} disabled={isScrapping}>
+              {isScrapped ? "Un-scrap" : "Scrap"}
+            </Button>
+          )}
           <Button
             onClick={onStartBrainstorm}
             disabled={isBrainstorming || isStarting || idea.status === "processing"}
@@ -188,6 +212,12 @@ function IdeaDetailModal({
   );
 }
 
+const IDEA_GROUPS = [
+  { key: "fresh", label: "Fresh Ideas", statuses: ["new", "processing", "processed"] },
+  { key: "brainstorming", label: "Brainstorming", statuses: ["brainstorming"] },
+  { key: "scrapped", label: "Scrapped", statuses: ["scrapped"] },
+];
+
 export default function IdeasPage() {
   const { user } = useAuth();
   const queryClient = useQueryClient();
@@ -199,6 +229,21 @@ export default function IdeasPage() {
   );
   const [isListening, setIsListening] = useState(false);
   const [selectedIdea, setSelectedIdea] = useState<any>(null);
+  const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(() => {
+    try {
+      const saved = localStorage.getItem("ideas-collapsed-groups");
+      return saved ? new Set(JSON.parse(saved)) : new Set();
+    } catch { return new Set(); }
+  });
+
+  const toggleGroupCollapse = (key: string) => {
+    setCollapsedGroups(prev => {
+      const next = new Set(prev);
+      next.has(key) ? next.delete(key) : next.add(key);
+      localStorage.setItem("ideas-collapsed-groups", JSON.stringify([...next]));
+      return next;
+    });
+  };
 
   const toggleView = (mode: "grid" | "list") => {
     setViewMode(mode);
@@ -261,6 +306,20 @@ export default function IdeasPage() {
       queryClient.invalidateQueries({ queryKey: ["ideas"] });
       setSelectedIdea(null);
       toast.success("Idea moved to trash");
+    },
+    onError: (e: Error) => toast.error(e.message),
+  });
+
+  const scrapIdea = useMutation({
+    mutationFn: async ({ id, currentStatus }: { id: string; currentStatus: string }) => {
+      const newStatus = currentStatus === "scrapped" ? "processed" : "scrapped";
+      const { error } = await supabase.from("ideas").update({ status: newStatus }).eq("id", id);
+      if (error) throw error;
+      return newStatus;
+    },
+    onSuccess: (newStatus) => {
+      queryClient.invalidateQueries({ queryKey: ["ideas"] });
+      toast.success(newStatus === "scrapped" ? "Idea scrapped" : "Idea restored");
     },
     onError: (e: Error) => toast.error(e.message),
   });
@@ -358,10 +417,28 @@ export default function IdeasPage() {
           <p className="text-sm text-muted-foreground/70">Hit "Dump Idea" to capture your first thought</p>
         </div>
       ) : (
-        <div className={viewMode === "grid" ? "grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3" : "space-y-3"}>
-          {ideas.map((idea: any) => (
-            <IdeaCard key={idea.id} idea={idea} onClick={() => setSelectedIdea(idea)} />
-          ))}
+        <div className="space-y-4">
+          {IDEA_GROUPS.map(group => {
+            const groupIdeas = ideas.filter((i: any) => group.statuses.includes(i.status));
+            if (groupIdeas.length === 0) return null;
+            const isCollapsed = collapsedGroups.has(group.key);
+            return (
+              <Collapsible key={group.key} open={!isCollapsed} onOpenChange={() => toggleGroupCollapse(group.key)}>
+                <CollapsibleTrigger className="flex items-center gap-2 w-full text-left py-1 hover:text-primary transition-colors">
+                  {isCollapsed ? <ChevronRight className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
+                  <span className="text-sm font-semibold uppercase tracking-wider">{group.label}</span>
+                  <Badge variant="secondary" className="text-[10px] ml-1">{groupIdeas.length}</Badge>
+                </CollapsibleTrigger>
+                <CollapsibleContent className="mt-2">
+                  <div className={viewMode === "grid" ? "grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3" : "space-y-3"}>
+                    {groupIdeas.map((idea: any) => (
+                      <IdeaCard key={idea.id} idea={idea} onClick={() => setSelectedIdea(idea)} />
+                    ))}
+                  </div>
+                </CollapsibleContent>
+              </Collapsible>
+            );
+          })}
         </div>
       )}
 
@@ -407,8 +484,10 @@ export default function IdeasPage() {
         onOpenChange={(open) => { if (!open) setSelectedIdea(null); }}
         onDelete={() => currentIdea && deleteIdea.mutate(currentIdea.id)}
         onStartBrainstorm={() => currentIdea && startBrainstorm.mutate(currentIdea)}
+        onScrap={() => currentIdea && scrapIdea.mutate({ id: currentIdea.id, currentStatus: currentIdea.status })}
         isDeleting={deleteIdea.isPending}
         isStarting={startBrainstorm.isPending}
+        isScrapping={scrapIdea.isPending}
       />
     </div>
   );

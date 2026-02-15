@@ -1,13 +1,15 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { Brain, Plus, Grid3X3, List } from "lucide-react";
+import { Brain, Plus, Grid3X3, List, ChevronDown, ChevronRight } from "lucide-react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { toast } from "sonner";
+import { format } from "date-fns";
 
 const CATEGORY_COLORS: Record<string, string> = {
   "Product": "bg-blue-500/20 text-blue-400 border-blue-500/30",
@@ -20,6 +22,20 @@ const CATEGORY_COLORS: Record<string, string> = {
   "Environment/Space": "bg-teal-500/20 text-teal-400 border-teal-500/30",
 };
 
+const STATUS_BADGES: Record<string, { label: string; className: string }> = {
+  active: { label: "Active", className: "bg-sky-500/20 text-sky-400 border-sky-500/30" },
+  backburner: { label: "Backburner", className: "bg-amber-500/20 text-amber-400 border-amber-500/30" },
+  scrapped: { label: "Scrapped", className: "bg-zinc-500/20 text-zinc-400 border-zinc-500/30" },
+  completed: { label: "Complete", className: "bg-emerald-500/20 text-emerald-400 border-emerald-500/30" },
+};
+
+const BRAINSTORM_GROUPS = [
+  { key: "active", label: "Active", statuses: ["active"] },
+  { key: "backburner", label: "Backburner", statuses: ["backburner"] },
+  { key: "scrapped", label: "Scrap", statuses: ["scrapped"] },
+  { key: "completed", label: "Complete", statuses: ["completed"] },
+];
+
 export default function BrainstormsPage() {
   const { user } = useAuth();
   const navigate = useNavigate();
@@ -27,6 +43,21 @@ export default function BrainstormsPage() {
   const [viewMode, setViewMode] = useState<"grid" | "list">(
     () => (localStorage.getItem("brainstorms-view-mode") as "grid" | "list") || "grid"
   );
+  const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(() => {
+    try {
+      const saved = localStorage.getItem("brainstorms-collapsed-groups");
+      return saved ? new Set(JSON.parse(saved)) : new Set();
+    } catch { return new Set(); }
+  });
+
+  const toggleGroupCollapse = (key: string) => {
+    setCollapsedGroups(prev => {
+      const next = new Set(prev);
+      next.has(key) ? next.delete(key) : next.add(key);
+      localStorage.setItem("brainstorms-collapsed-groups", JSON.stringify([...next]));
+      return next;
+    });
+  };
 
   const toggleView = (mode: "grid" | "list") => {
     setViewMode(mode);
@@ -64,6 +95,53 @@ export default function BrainstormsPage() {
     onError: (e: Error) => toast.error(e.message),
   });
 
+  const renderCard = (b: any) => {
+    const categoryClass = CATEGORY_COLORS[b.category] || "bg-secondary text-secondary-foreground";
+    const tags: string[] = b.tags || [];
+    const descPreview = b.compiled_description || (b.ideas?.processed_summary) || (b.ideas?.raw_dump?.slice(0, 140));
+    const statusBadge = STATUS_BADGES[b.status] || STATUS_BADGES.active;
+
+    return (
+      <Card
+        key={b.id}
+        onClick={() => navigate(`/brainstorms/${b.id}`)}
+        className="cursor-pointer border-border/50 bg-card/50 transition-all hover:border-primary/30 hover:bg-card/80"
+      >
+        <CardHeader className="pb-2">
+          <div className="flex items-start justify-between gap-2">
+            {b.category ? (
+              <Badge className={`text-xs border ${categoryClass}`}>{b.category}</Badge>
+            ) : (
+              <Badge variant="secondary" className="text-xs">Uncategorized</Badge>
+            )}
+            <Badge className={`text-xs border ${statusBadge.className}`}>{statusBadge.label}</Badge>
+          </div>
+        </CardHeader>
+        <CardContent className="space-y-2">
+          <p className="text-sm font-bold leading-snug">{b.title}</p>
+          {descPreview && (
+            <p className="text-sm text-muted-foreground leading-relaxed line-clamp-3">
+              {descPreview}
+            </p>
+          )}
+          {tags.length > 0 && (
+            <div className="flex flex-wrap gap-1">
+              {tags.slice(0, 4).map((tag: string) => (
+                <Badge key={tag} variant="secondary" className="text-[10px]">{tag}</Badge>
+              ))}
+              {tags.length > 4 && (
+                <Badge variant="secondary" className="text-[10px]">+{tags.length - 4}</Badge>
+              )}
+            </div>
+          )}
+          <p className="text-[10px] text-muted-foreground/60">
+            {format(new Date(b.created_at), "MMM d, yyyy")}
+          </p>
+        </CardContent>
+      </Card>
+    );
+  };
+
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
@@ -95,51 +173,24 @@ export default function BrainstormsPage() {
           <p className="text-sm text-muted-foreground/70">Start a brainstorm from an idea or create one directly</p>
         </div>
       ) : (
-        <div className={viewMode === "grid" ? "grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3" : "space-y-3"}>
-          {brainstorms.map((b: any) => {
-            const categoryClass = CATEGORY_COLORS[b.category] || "bg-secondary text-secondary-foreground";
-            const tags: string[] = b.tags || [];
-            const descPreview = b.compiled_description || (b.ideas?.processed_summary) || (b.ideas?.raw_dump?.slice(0, 140));
-
+        <div className="space-y-4">
+          {BRAINSTORM_GROUPS.map(group => {
+            const groupItems = brainstorms.filter((b: any) => group.statuses.includes(b.status));
+            if (groupItems.length === 0) return null;
+            const isCollapsed = collapsedGroups.has(group.key);
             return (
-              <Card
-                key={b.id}
-                onClick={() => navigate(`/brainstorms/${b.id}`)}
-                className="cursor-pointer border-border/50 bg-card/50 transition-all hover:border-primary/30 hover:bg-card/80"
-              >
-                <CardHeader className="pb-2">
-                  <div className="flex items-start justify-between gap-2">
-                    {b.category ? (
-                      <Badge className={`text-xs border ${categoryClass}`}>{b.category}</Badge>
-                    ) : (
-                      <Badge variant="secondary" className="text-xs">Uncategorized</Badge>
-                    )}
-                    {b.status === "completed" ? (
-                      <Badge className="text-xs border bg-emerald-500/20 text-emerald-400 border-emerald-500/30">Complete</Badge>
-                    ) : (
-                      <Badge className="text-xs border bg-sky-500/20 text-sky-400 border-sky-500/30">Active</Badge>
-                    )}
+              <Collapsible key={group.key} open={!isCollapsed} onOpenChange={() => toggleGroupCollapse(group.key)}>
+                <CollapsibleTrigger className="flex items-center gap-2 w-full text-left py-1 hover:text-primary transition-colors">
+                  {isCollapsed ? <ChevronRight className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
+                  <span className="text-sm font-semibold uppercase tracking-wider">{group.label}</span>
+                  <Badge variant="secondary" className="text-[10px] ml-1">{groupItems.length}</Badge>
+                </CollapsibleTrigger>
+                <CollapsibleContent className="mt-2">
+                  <div className={viewMode === "grid" ? "grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3" : "space-y-3"}>
+                    {groupItems.map(renderCard)}
                   </div>
-                </CardHeader>
-                <CardContent className="space-y-2">
-                  <p className="text-sm font-bold leading-snug">{b.title}</p>
-                  {descPreview && (
-                    <p className="text-sm text-muted-foreground leading-relaxed line-clamp-3">
-                      {descPreview}
-                    </p>
-                  )}
-                  {tags.length > 0 && (
-                    <div className="flex flex-wrap gap-1">
-                      {tags.slice(0, 4).map((tag: string) => (
-                        <Badge key={tag} variant="secondary" className="text-[10px]">{tag}</Badge>
-                      ))}
-                      {tags.length > 4 && (
-                        <Badge variant="secondary" className="text-[10px]">+{tags.length - 4}</Badge>
-                      )}
-                    </div>
-                  )}
-                </CardContent>
-              </Card>
+                </CollapsibleContent>
+              </Collapsible>
             );
           })}
         </div>

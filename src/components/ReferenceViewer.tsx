@@ -1,6 +1,4 @@
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
-import { X } from "lucide-react";
-import { Button } from "@/components/ui/button";
 
 interface Reference {
   id: string;
@@ -49,17 +47,19 @@ export default function ReferenceViewer({ reference, open, onOpenChange }: Refer
   if (reference.type === "image") {
     return (
       <Dialog open={open} onOpenChange={onOpenChange}>
-        <DialogContent className="sm:max-w-4xl p-0 bg-black/95 border-none [&>button]:text-white [&>button]:hover:opacity-100">
+        <DialogContent className="sm:max-w-4xl p-0 bg-black/95 border-none [&>button]:text-white [&>button]:hover:opacity-100 [&>button]:top-2 [&>button]:right-2 [&>button]:z-10">
           <DialogHeader className="sr-only">
             <DialogTitle>{reference.title}</DialogTitle>
             <DialogDescription>Image viewer</DialogDescription>
           </DialogHeader>
-          <div className="flex items-center justify-center min-h-[60vh] p-4">
-            <img
-              src={reference.url || ""}
-              alt={reference.title}
-              className="max-w-full max-h-[85vh] object-contain"
-            />
+          <div className="pt-10 pb-4 px-4">
+            <div className="flex items-center justify-center min-h-[50vh]">
+              <img
+                src={reference.url || ""}
+                alt={reference.title}
+                className="max-w-full max-h-[80vh] object-contain"
+              />
+            </div>
           </div>
         </DialogContent>
       </Dialog>
@@ -73,29 +73,31 @@ export default function ReferenceViewer({ reference, open, onOpenChange }: Refer
 
     return (
       <Dialog open={open} onOpenChange={onOpenChange}>
-        <DialogContent className="sm:max-w-4xl p-0 bg-black/95 border-none [&>button]:text-white [&>button]:hover:opacity-100">
+        <DialogContent className="sm:max-w-4xl p-0 bg-black/95 border-none [&>button]:text-white [&>button]:hover:opacity-100 [&>button]:top-2 [&>button]:right-2 [&>button]:z-10">
           <DialogHeader className="sr-only">
             <DialogTitle>{reference.title}</DialogTitle>
             <DialogDescription>Video viewer</DialogDescription>
           </DialogHeader>
-          <div className="aspect-video">
-            {ytId ? (
-              <iframe
-                src={`https://www.youtube.com/embed/${ytId}?autoplay=1`}
-                className="w-full h-full"
-                allow="autoplay; fullscreen"
-                allowFullScreen
-              />
-            ) : vimeoId ? (
-              <iframe
-                src={`https://player.vimeo.com/video/${vimeoId}?autoplay=1`}
-                className="w-full h-full"
-                allow="autoplay; fullscreen"
-                allowFullScreen
-              />
-            ) : (
-              <video src={url} controls autoPlay className="w-full h-full" />
-            )}
+          <div className="pt-10 pb-4 px-4">
+            <div className="aspect-video">
+              {ytId ? (
+                <iframe
+                  src={`https://www.youtube.com/embed/${ytId}?autoplay=1`}
+                  className="w-full h-full rounded"
+                  allow="autoplay; fullscreen"
+                  allowFullScreen
+                />
+              ) : vimeoId ? (
+                <iframe
+                  src={`https://player.vimeo.com/video/${vimeoId}?autoplay=1`}
+                  className="w-full h-full rounded"
+                  allow="autoplay; fullscreen"
+                  allowFullScreen
+                />
+              ) : (
+                <video src={url} controls autoPlay className="w-full h-full rounded" />
+              )}
+            </div>
           </div>
         </DialogContent>
       </Dialog>
@@ -110,6 +112,6 @@ export function getVideoThumbnail(url: string): string | null {
   const ytId = getYouTubeId(url);
   if (ytId) return `https://img.youtube.com/vi/${ytId}/mqdefault.jpg`;
   const vimeoId = getVimeoId(url);
-  if (vimeoId) return null; // Vimeo needs API call, use placeholder
+  if (vimeoId) return null;
   return null;
 }

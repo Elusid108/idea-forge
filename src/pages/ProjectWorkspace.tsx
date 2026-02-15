@@ -23,6 +23,7 @@ import { toast } from "sonner";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import EditableMarkdown from "@/components/EditableMarkdown";
 import ReferenceViewer, { getVideoThumbnail } from "@/components/ReferenceViewer";
+import { format } from "date-fns";
 
 type RefType = "link" | "image" | "video" | "note";
 type SortMode = "az" | "za" | "newest" | "oldest";
@@ -57,7 +58,6 @@ export default function ProjectWorkspace() {
   const [titleDraft, setTitleDraft] = useState("");
   const [description, setDescription] = useState("");
   const [bullets, setBullets] = useState("");
-  const [notes, setNotes] = useState("");
   const [githubUrl, setGithubUrl] = useState("");
   const [viewingRef, setViewingRef] = useState<any>(null);
   const [addRefType, setAddRefType] = useState<RefType | null>(null);
@@ -106,7 +106,6 @@ export default function ProjectWorkspace() {
       setTitleDraft(project.name);
       setDescription((project as any).compiled_description || "");
       setBullets((project as any).bullet_breakdown || "");
-      setNotes(project.general_notes || "");
       setGithubUrl(project.github_repo_url || "");
     }
   }, [project]);
@@ -124,7 +123,6 @@ export default function ProjectWorkspace() {
 
   const deleteProject = useMutation({
     mutationFn: async () => {
-      // Also unlock the linked brainstorm
       if (project?.brainstorm_id) {
         await supabase.from("brainstorms").update({ status: "active" }).eq("id", project.brainstorm_id);
       }
@@ -329,6 +327,11 @@ export default function ProjectWorkspace() {
         </div>
       </div>
 
+      {/* Created date */}
+      <p className="text-xs text-muted-foreground">
+        Created {format(new Date(project.created_at), "MMM d, yyyy 'at' h:mm a")}
+      </p>
+
       <Separator />
 
       {/* Two-column layout */}
@@ -344,18 +347,6 @@ export default function ProjectWorkspace() {
               onSave={() => updateProject.mutate({ compiled_description: description })}
               placeholder="Project description…"
               minHeight="100px"
-            />
-          </div>
-
-          {/* General Notes */}
-          <div>
-            <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-1">General Notes</p>
-            <EditableMarkdown
-              value={notes}
-              onChange={setNotes}
-              onSave={() => updateProject.mutate({ general_notes: notes })}
-              placeholder="Technical notes, wiring diagrams, print settings…"
-              minHeight="80px"
             />
           </div>
 
