@@ -1,4 +1,4 @@
-import { Wrench, LayoutGrid, List, Plus } from "lucide-react";
+import { Wrench, LayoutGrid, List, Plus, ArrowUpDown } from "lucide-react";
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
@@ -7,6 +7,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { toast } from "sonner";
 import { format } from "date-fns";
 
@@ -31,6 +32,25 @@ const statusLabels: Record<string, string> = {
 
 export default function ProjectsPage() {
   const [viewMode, setViewMode] = useState<"kanban" | "list">("kanban");
+  const [sortMode, setSortMode] = useState<string>(
+    () => localStorage.getItem("projects-sort-mode") || "newest"
+  );
+
+  const handleSortChange = (val: string) => {
+    setSortMode(val);
+    localStorage.setItem("projects-sort-mode", val);
+  };
+
+  const sortItems = (items: any[]) => {
+    const sorted = [...items];
+    switch (sortMode) {
+      case "category": return sorted.sort((a, b) => (a.category || "").localeCompare(b.category || ""));
+      case "newest": return sorted.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+      case "alpha": return sorted.sort((a, b) => (a.name || "").localeCompare(b.name || ""));
+      case "recent": return sorted.sort((a, b) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime());
+      default: return sorted;
+    }
+  };
   const navigate = useNavigate();
   const { user } = useAuth();
   const queryClient = useQueryClient();
@@ -125,6 +145,18 @@ export default function ProjectsPage() {
           <Button variant="ghost" size="icon" onClick={() => setViewMode("list")} className={viewMode === "list" ? "text-primary" : ""}>
             <List className="h-4 w-4" />
           </Button>
+          <Select value={sortMode} onValueChange={handleSortChange}>
+            <SelectTrigger className="w-[150px] h-9 text-xs">
+              <ArrowUpDown className="h-3 w-3 mr-1" />
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="newest">Created Date</SelectItem>
+              <SelectItem value="recent">Recently Edited</SelectItem>
+              <SelectItem value="alpha">Alphabetical</SelectItem>
+              <SelectItem value="category">Category</SelectItem>
+            </SelectContent>
+          </Select>
           <Button onClick={() => createProject.mutate()} disabled={createProject.isPending} className="gap-2">
             <Plus className="h-4 w-4" /> New Project
           </Button>
@@ -151,13 +183,13 @@ export default function ProjectsPage() {
                   {projects.filter((p) => p.status === status).length}
                 </Badge>
               </h3>
-              {projects.filter((p) => p.status === status).map(renderProjectCard)}
+              {sortItems(projects.filter((p) => p.status === status)).map(renderProjectCard)}
             </div>
           ))}
         </div>
       ) : (
         <div className="space-y-3">
-          {projects.map(renderProjectCard)}
+          {sortItems(projects).map(renderProjectCard)}
         </div>
       )}
     </div>

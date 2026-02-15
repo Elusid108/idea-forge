@@ -861,7 +861,7 @@ export default function ProjectWorkspace() {
             className="text-xs gap-1 cursor-pointer hover:bg-accent transition-colors"
             onClick={() => setShowLinkedIdea(true)}
           >
-            <Lightbulb className="h-3 w-3" /> Linked Idea
+            <Lightbulb className="h-3 w-3 text-yellow-400" /> Linked Idea
           </Badge>
         )}
         {linkedBrainstorm && (
@@ -870,7 +870,7 @@ export default function ProjectWorkspace() {
             className="text-xs gap-1 cursor-pointer hover:bg-accent transition-colors"
             onClick={() => navigate(`/brainstorms/${linkedBrainstorm.id}`)}
           >
-            <Brain className="h-3 w-3" /> Linked Brainstorm
+            <Brain className="h-3 w-3 text-pink-400" /> Linked Brainstorm
           </Badge>
         )}
         {(project as any).campaign_id && (
@@ -879,7 +879,7 @@ export default function ProjectWorkspace() {
             className="text-xs gap-1 cursor-pointer hover:bg-accent transition-colors"
             onClick={() => navigate(`/campaigns/${(project as any).campaign_id}`)}
           >
-            <Megaphone className="h-3 w-3" /> Linked Campaign
+            <Megaphone className="h-3 w-3 text-orange-400" /> Linked Campaign
           </Badge>
         )}
       </div>

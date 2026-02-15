@@ -1,4 +1,4 @@
-import { Megaphone, LayoutGrid, List } from "lucide-react";
+import { Megaphone, LayoutGrid, List, ArrowUpDown } from "lucide-react";
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
@@ -6,6 +6,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { format } from "date-fns";
 
 const statusColumns = ["asset_creation", "pre_launch", "active_campaign", "fulfillment", "evergreen"];
@@ -28,7 +29,26 @@ const CHANNEL_COLORS: Record<string, string> = {
 
 export default function CampaignsPage() {
   const [viewMode, setViewMode] = useState<"kanban" | "list">("kanban");
+  const [sortMode, setSortMode] = useState<string>(
+    () => localStorage.getItem("campaigns-sort-mode") || "newest"
+  );
   const navigate = useNavigate();
+
+  const handleSortChange = (val: string) => {
+    setSortMode(val);
+    localStorage.setItem("campaigns-sort-mode", val);
+  };
+
+  const sortItems = (items: any[]) => {
+    const sorted = [...items];
+    switch (sortMode) {
+      case "category": return sorted.sort((a, b) => (a.category || "").localeCompare(b.category || ""));
+      case "newest": return sorted.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+      case "alpha": return sorted.sort((a, b) => (a.title || "").localeCompare(b.title || ""));
+      case "recent": return sorted.sort((a, b) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime());
+      default: return sorted;
+    }
+  };
 
   const { data: campaigns = [], isLoading } = useQuery({
     queryKey: ["campaigns"],
@@ -90,6 +110,18 @@ export default function CampaignsPage() {
           <Button variant="ghost" size="icon" onClick={() => setViewMode("list")} className={viewMode === "list" ? "text-primary" : ""}>
             <List className="h-4 w-4" />
           </Button>
+          <Select value={sortMode} onValueChange={handleSortChange}>
+            <SelectTrigger className="w-[150px] h-9 text-xs">
+              <ArrowUpDown className="h-3 w-3 mr-1" />
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="newest">Created Date</SelectItem>
+              <SelectItem value="recent">Recently Edited</SelectItem>
+              <SelectItem value="alpha">Alphabetical</SelectItem>
+              <SelectItem value="category">Category</SelectItem>
+            </SelectContent>
+          </Select>
         </div>
       </div>
 
@@ -113,13 +145,13 @@ export default function CampaignsPage() {
                   {campaigns.filter((c: any) => c.status === status).length}
                 </Badge>
               </h3>
-              {campaigns.filter((c: any) => c.status === status).map(renderCampaignCard)}
+              {sortItems(campaigns.filter((c: any) => c.status === status)).map(renderCampaignCard)}
             </div>
           ))}
         </div>
       ) : (
         <div className="space-y-3">
-          {campaigns.map(renderCampaignCard)}
+          {sortItems(campaigns).map(renderCampaignCard)}
         </div>
       )}
     </div>
