@@ -327,6 +327,7 @@ export default function IdeasPage() {
   const recognitionRef = useRef<any>(null);
   const isListeningRef = useRef(false);
   const [selectedIdea, setSelectedIdea] = useState<any>(null);
+  const pendingIdeaIdRef = useRef<string | null>(null);
   const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(() => {
     try {
       const saved = localStorage.getItem("ideas-collapsed-groups");
@@ -385,6 +386,17 @@ export default function IdeasPage() {
     },
   });
 
+  // Auto-open idea detail after processing completes
+  useEffect(() => {
+    if (pendingIdeaIdRef.current && ideas.length > 0) {
+      const pending = ideas.find((i: any) => i.id === pendingIdeaIdRef.current);
+      if (pending && pending.status !== "processing") {
+        setSelectedIdea(pending);
+        pendingIdeaIdRef.current = null;
+      }
+    }
+  }, [ideas]);
+
   const createIdea = useMutation({
     mutationFn: async (raw: string) => {
       const { data, error } = await supabase
@@ -400,6 +412,7 @@ export default function IdeasPage() {
       queryClient.invalidateQueries({ queryKey: ["sidebar-items"] });
       setDumpOpen(false);
       setRawDump("");
+      pendingIdeaIdRef.current = data.id;
       toast.success("Idea captured! AI is processing…");
       supabase.functions
         .invoke("process-idea", { body: { idea_id: data.id, raw_dump: data.raw_dump } })
@@ -407,6 +420,7 @@ export default function IdeasPage() {
           if (error) {
             console.error("AI processing error:", error);
             toast.error("AI processing failed — you can retry later.");
+            pendingIdeaIdRef.current = null;
           }
           queryClient.invalidateQueries({ queryKey: ["ideas"] });
         });

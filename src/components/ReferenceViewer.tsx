@@ -1,4 +1,5 @@
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
+import { addTargetBlankToHtml } from "@/lib/markdownComponents";
 
 interface Reference {
   id: string;
@@ -38,11 +39,13 @@ export default function ReferenceViewer({ reference, open, onOpenChange }: Refer
             <DialogTitle>{reference.title}</DialogTitle>
             <DialogDescription className="sr-only">Note details</DialogDescription>
           </DialogHeader>
-          {hasHtml ? (
-            <div className="text-sm text-muted-foreground prose prose-invert prose-sm max-w-none [&_li]:my-1 [&_ul]:my-2 [&_ol]:my-2 [&_p]:my-2" dangerouslySetInnerHTML={{ __html: content }} />
-          ) : (
-            <div className="text-sm text-muted-foreground whitespace-pre-wrap">{content}</div>
-          )}
+          <div className="max-h-[60vh] overflow-y-auto">
+            {hasHtml ? (
+              <div className="text-sm text-muted-foreground prose prose-invert prose-sm max-w-none [&_li]:my-1 [&_ul]:my-2 [&_ol]:my-2 [&_p]:my-2" dangerouslySetInnerHTML={{ __html: addTargetBlankToHtml(content) }} />
+            ) : (
+              <div className="text-sm text-muted-foreground whitespace-pre-wrap">{content}</div>
+            )}
+          </div>
         </DialogContent>
       </Dialog>
     );

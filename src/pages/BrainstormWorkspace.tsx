@@ -27,6 +27,7 @@ import EditableMarkdown from "@/components/EditableMarkdown";
 import ReferenceViewer, { getVideoThumbnail } from "@/components/ReferenceViewer";
 import RichTextNoteEditor from "@/components/RichTextNoteEditor";
 import ReactMarkdown from "react-markdown";
+import { markdownComponents } from "@/lib/markdownComponents";
 import { useUndoRedo } from "@/hooks/useUndoRedo";
 import { format } from "date-fns";
 
@@ -113,7 +114,9 @@ export default function BrainstormWorkspace() {
   const lastLoadedIdRef = useRef<string | null>(null);
 
   // Chatbot state (post-promotion or scrapped)
-  const [queryChatHistory, setQueryChatHistory] = useState<ChatMsg[]>([]);
+  const [queryChatHistory, setQueryChatHistory] = useState<ChatMsg[]>([
+    { role: "assistant", content: "👋 I'm your brainstorm assistant. I can answer questions about this brainstorm's content, help you explore ideas, and **create research notes** with book lists, resource compilations, and more. What would you like to know?" }
+  ]);
   const [chatInput, setChatInput] = useState("");
   const [isChatThinking, setIsChatThinking] = useState(false);
   const chatScrollRef = useRef<HTMLDivElement>(null);
@@ -128,7 +131,9 @@ export default function BrainstormWorkspace() {
       setQuestionLoaded(false);
       setCurrentQuestion("");
       setAnswer("");
-      setQueryChatHistory([]);
+      setQueryChatHistory([
+        { role: "assistant", content: "👋 I'm your brainstorm assistant. I can answer questions about this brainstorm's content, help you explore ideas, and **create research notes** with book lists, resource compilations, and more. What would you like to know?" }
+      ]);
       setChatInput("");
     }
   }, [id]);
@@ -684,7 +689,34 @@ export default function BrainstormWorkspace() {
         },
       });
       if (error) throw error;
-      const assistantMsg: ChatMsg = { role: "assistant", content: data.answer };
+
+      // Process note creation actions
+      let createdNoteId: string | null = null;
+      let createdNoteTitle: string | null = null;
+      if (data.actions && data.actions.length > 0) {
+        for (const action of data.actions) {
+          if (action.action === "create_note" && action.title) {
+            const { data: noteData } = await supabase.from("brainstorm_references").insert({
+              brainstorm_id: id!,
+              user_id: user!.id,
+              type: "note",
+              title: action.title,
+              description: action.content || "",
+              sort_order: references.length,
+            }).select("id").single();
+            createdNoteId = noteData?.id || null;
+            createdNoteTitle = action.title;
+            queryClient.invalidateQueries({ queryKey: ["brainstorm-refs", id] });
+            toast.success(`Note created: ${action.title}`);
+          }
+        }
+      }
+
+      const assistantMsg: ChatMsg = {
+        role: "assistant",
+        content: data.answer || "Done.",
+        ...(createdNoteId ? { noteId: createdNoteId, noteTitle: createdNoteTitle! } : {}),
+      };
       setQueryChatHistory([...newHistory, assistantMsg]);
     } catch (e: any) {
       toast.error("Chat failed: " + e.message);
@@ -1282,8 +1314,22 @@ export default function BrainstormWorkspace() {
               )}
               <div className={`rounded-lg px-3 py-2 text-sm max-w-[80%] ${msg.role === "user" ? "bg-primary text-primary-foreground" : "bg-muted"}`}>
                 {msg.role === "assistant" ? (
-                  <div className="prose prose-invert prose-sm max-w-none [&_ul]:list-disc [&_ol]:list-decimal [&_ul]:pl-5 [&_ol]:pl-5 [&_li]:my-0.5 [&_p]:my-1.5">
-                    <ReactMarkdown>{msg.content}</ReactMarkdown>
+                  <div>
+                    <div className="prose prose-invert prose-sm max-w-none [&_ul]:list-disc [&_ol]:list-decimal [&_ul]:pl-5 [&_ol]:pl-5 [&_li]:my-0.5 [&_p]:my-1.5">
+                      <ReactMarkdown components={markdownComponents}>{msg.content}</ReactMarkdown>
+                    </div>
+                    {msg.noteId && (
+                      <button
+                        className="mt-2 inline-flex items-center gap-1.5 text-xs px-2.5 py-1 rounded-full bg-yellow-500/20 text-yellow-400 border border-yellow-500/30 hover:bg-yellow-500/30 transition-colors"
+                        onClick={() => {
+                          const note = references.find((r: any) => r.id === msg.noteId);
+                          if (note) setViewingRef(note);
+                        }}
+                      >
+                        <StickyNote className="h-3 w-3" />
+                        View: {msg.noteTitle}
+                      </button>
+                    )}
                   </div>
                 ) : msg.content}
               </div>
