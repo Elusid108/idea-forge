@@ -1,131 +1,126 @@
 
 
-# Phase 4: Campaigns GTM Board
+# Cross-Pipeline Badges, Campaign Context, and Persistent Chat State
 
-This is a major new feature adding a 4th section to the app pipeline: Ideas -> Brainstorms -> Projects -> **Campaigns**.
-
----
-
-## 1. Database Setup
-
-### New Table: `campaigns`
-
-| Column | Type | Default | Notes |
-|---|---|---|---|
-| id | uuid | gen_random_uuid() | Primary key |
-| project_id | uuid | NOT NULL | References the source project |
-| user_id | uuid | NOT NULL | For RLS |
-| title | text | 'Untitled Campaign' | |
-| sales_model | text | '' | e.g. B2B, B2C, Open Source |
-| primary_channel | text | '' | e.g. Shopify, Etsy, GitHub |
-| status | text | 'asset_creation' | Pipeline stage |
-| marketing_links | jsonb | '[]' | Array of {label, url} objects |
-| target_price | integer | 0 | |
-| units_sold | integer | 0 | |
-| revenue | integer | 0 | |
-| deleted_at | timestamptz | NULL | Soft delete |
-| created_at | timestamptz | now() | |
-| updated_at | timestamptz | now() | |
-
-### RLS Policies (same pattern as all other tables)
-- SELECT, INSERT, UPDATE, DELETE -- all scoped to `auth.uid() = user_id`
-
-### Trigger
-- `update_updated_at_column` on UPDATE (reuse existing function)
-
-### Project Table Change
-- Add `campaign_id` column (uuid, nullable) to `projects` table -- set when a project is promoted to a campaign, used to lock the project (same pattern as brainstorm's `status = 'completed'` lock)
+This plan covers four areas: adding "Linked Campaign" badges to Ideas and Brainstorms, adding full lineage badges to Campaigns, carrying over tags/category during campaign creation, enriching the Campaign Assistant with linked project context, and making the floating chat widget's collapsed/expanded state persist across navigation.
 
 ---
 
-## 2. Project Workspace: "Launch Campaign" Button
+## 1. "Linked Campaign" Badge on Ideas
 
-**File**: `src/pages/ProjectWorkspace.tsx`
+**File**: `src/pages/Ideas.tsx` (inside `IdeaDetailModal`)
 
-- When `project.status === "done"`, show a **"Launch Campaign"** button next to the Delete button (green/primary styled, with a Rocket icon)
-- Clicking it:
-  1. Creates a new `campaigns` row with `project_id`, `user_id`, `title = project.name`, and carries over `category`/`tags` metadata
-  2. Updates the project's `campaign_id` to the new campaign ID
-  3. Navigates to `/campaigns/{newId}`
-- When the project has a `campaign_id`:
-  - Hide the status dropdown (project is locked -- same as how brainstorms hide the status select when completed)
-  - Show a "Linked Campaign" badge (similar to existing "Linked Brainstorm" badge)
-  - The project becomes read-only for status changes; other edits (description, tasks, etc.) remain available
+Currently the modal queries for `linkedBrainstorm` and `linkedProject`. Add a third query for `linkedCampaign`:
 
-### Unlocking on Campaign Delete
-- When a campaign is deleted, clear the `campaign_id` on the linked project (same pattern as how deleting a project unlocks the linked brainstorm by setting it back to "active")
+- Query the `campaigns` table where `project_id = linkedProject.id` and `deleted_at IS NULL`
+- If found, render a badge:
+  ```
+  <Megaphone icon /> Linked Campaign
+  ```
+  clicking navigates to `/campaigns/{id}` (and closes the modal)
+
+This query is chained: `idea -> linkedBrainstorm -> linkedProject -> linkedCampaign` (only enabled when `linkedProject?.id` exists).
 
 ---
 
-## 3. Sidebar Update
+## 2. "Linked Campaign" Badge on Brainstorm Workspace
 
-**File**: `src/components/AppSidebar.tsx`
+**File**: `src/pages/BrainstormWorkspace.tsx`
 
-- Add a 4th section: `{ label: "Campaigns", href: "/campaigns", emoji: "📣", table: "campaigns" }`
-- Add to `SIDEBAR_EXCLUDED_STATUSES`: campaigns exclude items where `deleted_at` is not null (handled by the query's `.is("deleted_at", null)`)
-- The sidebar item query already uses the `name` column for projects; campaigns will need the `title` column (which is the default in `useSectionItems`)
+Currently shows "Linked Idea" and "Linked Project" badges. Add a query for `linkedCampaign`:
+
+- Query `campaigns` where `project_id = linkedProject.id` and `deleted_at IS NULL`
+- Render a badge next to the existing "Linked Project" badge:
+  ```
+  <Megaphone icon /> Linked Campaign
+  ```
+  clicking navigates to `/campaigns/{id}`
 
 ---
 
-## 4. Campaigns Dashboard Page (`/campaigns`)
+## 3. Full Lineage Badges on Campaign Workspace
 
-**File**: `src/pages/Campaigns.tsx` (new file)
+**File**: `src/pages/CampaignWorkspace.tsx`
 
-A Kanban-style board with 5 columns:
+Currently only shows "Linked Project". Add queries to trace the full chain:
 
-```text
-Asset Creation | Pre-Launch | Active Campaign | Fulfillment | Evergreen
+- **Linked Brainstorm**: Query `projects` for `brainstorm_id` using `linkedProject.id`, then use that to fetch the brainstorm title. Render badge with `Brain` icon navigating to `/brainstorms/{id}`.
+- **Linked Idea**: From the brainstorm data, check `idea_id`. Render badge with `Lightbulb` icon that opens a read-only idea overlay (or navigates to ideas page).
+- **Category badge**: Display `campaign.category` using the standard `CATEGORY_COLORS` map.
+- **Tags**: Display tag badges below the metadata row.
+
+The badge row will show: `Created date | Category | Linked Idea | Linked Brainstorm | Linked Project`
+
+---
+
+## 4. Carry Over Tags and Category During Campaign Launch
+
+**File**: `src/pages/ProjectWorkspace.tsx` (the `launchCampaign` mutation)
+
+Currently the insert only passes `project_id`, `user_id`, and `title`. The campaigns table does not have `tags` or `category` columns yet.
+
+**Database migration needed**: Add `category` (text, nullable, default null) and `tags` (text array, nullable, default null) columns to the `campaigns` table.
+
+Then update the `launchCampaign` mutation to also pass:
+- `category: project.category`
+- `tags: project.tags`
+
+---
+
+## 5. Enrich Campaign Assistant with Linked Project Context
+
+**File**: `src/pages/CampaignWorkspace.tsx` (the `handleChatSubmit` function)
+
+Currently sends minimal campaign info. Enhance the context by fetching and including:
+
+- Linked project's `compiled_description`, `execution_strategy`, `bullet_breakdown`, `name`
+- Linked project's tasks (query `project_tasks` for the project_id)
+- Linked project's notes (query `project_references` where type = 'note')
+
+Update the system prompt context to include all of this. The assistant should be told it can READ this project data to make campaign recommendations but cannot modify it. The edge function `project-chat` already accepts a `context` object, so we just need to pass richer data from the frontend.
+
+Updated context object:
+```
+context: {
+  title: campaign.title,
+  description: `Campaign. Sales model: ${campaign.sales_model}. Channel: ${campaign.primary_channel}. Revenue: $${campaign.revenue}. Units sold: ${campaign.units_sold}. Target price: $${campaign.target_price}.`,
+  tasks: linkedProjectTasks (formatted string),
+  notes: linkedProjectNotes (formatted string),
+  execution_strategy: linkedProject.execution_strategy,
+  bullet_breakdown: linkedProject.bullet_breakdown,
+  project_description: linkedProject.compiled_description,
+}
 ```
 
-Each card displays:
-- Campaign title (bold)
-- `primary_channel` as a colored badge
-- Mini-stat row: units_sold and revenue
-
-Includes:
-- Kanban and list view toggle (same pattern as Projects page)
-- No "New Campaign" button -- campaigns are only created by promoting a project
+This reuses the existing `project-chat` edge function -- no new edge function needed.
 
 ---
 
-## 5. Campaign Workspace (Detail View) (`/campaigns/:id`)
+## 6. Persistent Floating Chat Widget State
 
-**File**: `src/pages/CampaignWorkspace.tsx` (new file)
+**File**: `src/components/FloatingChatWidget.tsx`
 
-### Header
-- Back button, editable title, status dropdown (the 5 Kanban stages)
-- Delete button (soft-deletes campaign, unlinks the project by clearing `campaign_id`)
-- "Linked Project" badge that navigates back to the source project
+Currently defaults to `"expanded"` every time the component mounts. Change to use `localStorage`:
 
-### Metrics Row (top)
-- Three stat cards: Revenue ($), Units Sold, Target Price
-- Each is inline-editable (click to edit the number)
+- Store state in `localStorage` under key `"chat-widget-state"`
+- On first mount (no localStorage value), default to `"expanded"` so users discover the widget
+- On subsequent mounts, restore the last saved state
+- When the user clicks X (collapse) or the flag (expand), save the new state to localStorage
 
-### Distribution Strategy Section
-- Dropdowns for `sales_model` (B2B, B2C, Open Source, Marketplace, Direct, Other)
-- Dropdown for `primary_channel` (Shopify, Etsy, GitHub, Gumroad, Amazon, Website, Other)
+Implementation:
+```tsx
+const [state, setState] = useState<WidgetState>(() => {
+  const saved = localStorage.getItem("chat-widget-state");
+  return (saved === "collapsed") ? "collapsed" : "expanded";
+});
 
-### Campaign Links Widget
-- Stored in the `marketing_links` JSONB column as `[{label, url}]`
-- "Add Link" button opens a small form (label + URL with auto-https prefix)
-- Display as a clean list of clickable outgoing links with external link icons
-- Delete button on each link
+// Persist on change
+useEffect(() => {
+  localStorage.setItem("chat-widget-state", state);
+}, [state]);
+```
 
-### Floating Chat Widget
-- Same `FloatingChatWidget` component used in Projects and Brainstorms
-- Will need a new edge function `campaign-chat` (or reuse `project-chat` with a campaign context) -- for initial implementation, we can wire it up to `project-chat` since the campaign is an extension of a project
-
----
-
-## 6. Routing
-
-**File**: `src/App.tsx`
-
-Add two new routes:
-- `/campaigns` -> `CampaignsPage`
-- `/campaigns/:id` -> `CampaignWorkspace`
-
-Both wrapped in `ProtectedRoute` and `AppLayout` (same pattern as all existing routes).
+This applies globally across all workspaces (Project, Brainstorm, Campaign) since they all use the same component.
 
 ---
 
@@ -133,10 +128,10 @@ Both wrapped in `ProtectedRoute` and `AppLayout` (same pattern as all existing r
 
 | File | Change |
 |---|---|
-| **Migration SQL** | Create `campaigns` table with RLS; add `campaign_id` to `projects` |
-| `src/components/AppSidebar.tsx` | Add Campaigns section to sidebar |
-| `src/App.tsx` | Add `/campaigns` and `/campaigns/:id` routes |
-| `src/pages/Campaigns.tsx` | New Kanban dashboard page |
-| `src/pages/CampaignWorkspace.tsx` | New detail/workspace page |
-| `src/pages/ProjectWorkspace.tsx` | Add "Launch Campaign" button when done; lock status when campaign exists; add "Linked Campaign" badge |
+| **Migration SQL** | Add `category` and `tags` columns to `campaigns` table |
+| `src/pages/Ideas.tsx` | Add `linkedCampaign` query and badge in IdeaDetailModal |
+| `src/pages/BrainstormWorkspace.tsx` | Add `linkedCampaign` query and badge |
+| `src/pages/CampaignWorkspace.tsx` | Add brainstorm/idea badges, category/tags display, enrich chat context |
+| `src/pages/ProjectWorkspace.tsx` | Pass `category` and `tags` in `launchCampaign` mutation |
+| `src/components/FloatingChatWidget.tsx` | Persist expanded/collapsed state in localStorage |
 
