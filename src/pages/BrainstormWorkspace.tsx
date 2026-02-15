@@ -315,6 +315,8 @@ export default function BrainstormWorkspace() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["brainstorm", id] });
+      queryClient.invalidateQueries({ queryKey: ["projects"] });
+      queryClient.invalidateQueries({ queryKey: ["campaigns"] });
       queryClient.invalidateQueries({ queryKey: ["sidebar-items"] });
     },
   });

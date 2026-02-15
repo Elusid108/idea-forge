@@ -5,7 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
 import { toast } from "sonner";
-import { Zap } from "lucide-react";
+import IdeaForgeLogo from "@/components/IdeaForgeLogo";
 
 export default function LoginPage() {
   const [email, setEmail] = useState("");
@@ -30,7 +30,7 @@ export default function LoginPage() {
       <Card className="w-full max-w-md border-border/50 bg-card/80 backdrop-blur-sm">
         <CardHeader className="text-center">
           <div className="mx-auto mb-2 flex h-12 w-12 items-center justify-center rounded-xl bg-primary/10">
-            <Zap className="h-6 w-6 text-primary" />
+            <IdeaForgeLogo className="h-6 w-6 text-primary" />
           </div>
           <CardTitle className="text-2xl font-bold">Welcome back</CardTitle>
           <CardDescription>Sign in to your IdeaForge.AI account</CardDescription>

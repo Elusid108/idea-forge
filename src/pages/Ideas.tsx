@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useRef, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { Plus, Lightbulb, Grid3X3, List, Mic, MicOff, Loader2, Brain, ChevronDown, ChevronRight, ChevronLeft, Ban, FolderOpen, X, Megaphone, ArrowUpDown } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -324,6 +324,8 @@ export default function IdeasPage() {
     () => (localStorage.getItem("ideas-view-mode") as "grid" | "list") || "grid"
   );
   const [isListening, setIsListening] = useState(false);
+  const recognitionRef = useRef<any>(null);
+  const isListeningRef = useRef(false);
   const [selectedIdea, setSelectedIdea] = useState<any>(null);
   const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(() => {
     try {
@@ -434,6 +436,10 @@ export default function IdeasPage() {
     },
     onSuccess: (newStatus) => {
       queryClient.invalidateQueries({ queryKey: ["ideas"] });
+      queryClient.invalidateQueries({ queryKey: ["brainstorms"] });
+      queryClient.invalidateQueries({ queryKey: ["projects"] });
+      queryClient.invalidateQueries({ queryKey: ["campaigns"] });
+      queryClient.invalidateQueries({ queryKey: ["sidebar-items"] });
       toast.success(newStatus === "scrapped" ? "Idea scrapped" : "Idea restored");
     },
     onError: (e: Error) => toast.error(e.message),
@@ -468,30 +474,54 @@ export default function IdeasPage() {
     onError: (e: Error) => toast.error(e.message),
   });
 
-  const handleVoice = () => {
-    if (!("webkitSpeechRecognition" in window || "SpeechRecognition" in window)) {
-      toast.error("Speech recognition not supported in this browser");
-      return;
-    }
-    const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
-    const recognition = new SpeechRecognition();
-    recognition.continuous = true;
-    recognition.interimResults = true;
-    if (isListening) {
-      recognition.stop();
-      setIsListening(false);
-      return;
-    }
-    recognition.onresult = (event: any) => {
-      let transcript = "";
-      for (let i = 0; i < event.results.length; i++) {
-        transcript += event.results[i][0].transcript;
-      }
-      setRawDump(prev => prev + " " + transcript);
+  // Cleanup speech recognition on unmount
+  useEffect(() => {
+    return () => {
+      isListeningRef.current = false;
+      recognitionRef.current?.stop();
+      recognitionRef.current = null;
     };
-    recognition.onend = () => setIsListening(false);
-    recognition.start();
-    setIsListening(true);
+  }, []);
+
+  const handleVoice = () => {
+    if (!isListening) {
+      const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+      if (!SpeechRecognition) {
+        toast.error("Speech recognition not supported in this browser");
+        return;
+      }
+      isListeningRef.current = true;
+      setIsListening(true);
+      const recognition = new SpeechRecognition();
+      recognition.continuous = true;
+      recognition.interimResults = false;
+      recognition.lang = "en-US";
+      recognition.onresult = (event: any) => {
+        const last = event.results[event.results.length - 1];
+        if (last.isFinal) {
+          setRawDump(prev => (prev ? prev + " " : "") + last[0].transcript);
+        }
+      };
+      recognition.onend = () => {
+        if (isListeningRef.current) {
+          recognition.start();
+        } else {
+          setIsListening(false);
+          recognitionRef.current = null;
+        }
+      };
+      recognition.onerror = (event: any) => {
+        console.error("Speech recognition error:", event.error);
+        isListeningRef.current = false;
+        setIsListening(false);
+        recognitionRef.current = null;
+      };
+      recognitionRef.current = recognition;
+      recognition.start();
+    } else {
+      isListeningRef.current = false;
+      recognitionRef.current?.stop();
+    }
   };
 
   const handleSave = () => {
@@ -512,12 +542,12 @@ export default function IdeasPage() {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-wrap items-center justify-between gap-2">
         <div>
           <h1 className="text-3xl font-bold">Ideas</h1>
           <p className="text-muted-foreground">Capture raw thoughts and let AI help organize them</p>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           <Button variant="ghost" size="icon" onClick={() => toggleView("grid")} className={viewMode === "grid" ? "text-primary" : ""}>
             <Grid3X3 className="h-4 w-4" />
           </Button>
