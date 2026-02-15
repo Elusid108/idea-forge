@@ -337,9 +337,15 @@ export default function BrainstormWorkspace() {
         .update({ deleted_at: new Date().toISOString() } as any)
         .eq("id", id!);
       if (error) throw error;
+      // Reset linked idea status back to "new" (Fresh Idea)
+      if (brainstorm?.idea_id) {
+        await supabase.from("ideas").update({ status: "new" }).eq("id", brainstorm.idea_id);
+      }
     },
     onSuccess: () => {
       toast.success("Brainstorm moved to trash");
+      queryClient.invalidateQueries({ queryKey: ["ideas"] });
+      queryClient.invalidateQueries({ queryKey: ["sidebar-items"] });
       navigate("/brainstorms");
     },
     onError: (e: Error) => toast.error(e.message),

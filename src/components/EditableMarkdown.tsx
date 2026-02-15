@@ -69,6 +69,12 @@ function htmlToMarkdown(html: string): string {
 export default function EditableMarkdown({ value, onChange, onSave, placeholder, minHeight = "80px", readOnly }: EditableMarkdownProps) {
   const [editing, setEditing] = useState(false);
   const [htmlValue, setHtmlValue] = useState("");
+  const containerRef = useRef<HTMLDivElement>(null);
+  const htmlValueRef = useRef(htmlValue);
+
+  useEffect(() => {
+    htmlValueRef.current = htmlValue;
+  }, [htmlValue]);
 
   useEffect(() => {
     if (editing) {
@@ -76,34 +82,29 @@ export default function EditableMarkdown({ value, onChange, onSave, placeholder,
     }
   }, [editing]);
 
-  const handleBlur = () => {
-    // This is handled by the RichTextNoteEditor internally
-  };
-
-  const handleDone = () => {
-    const md = htmlToMarkdown(htmlValue);
-    onChange(md);
-    setEditing(false);
-    // Use setTimeout to ensure state is updated before saving
-    setTimeout(() => onSave(), 0);
-  };
+  // Click-outside auto-save
+  useEffect(() => {
+    if (!editing) return;
+    const handleClickOutside = (e: MouseEvent) => {
+      if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
+        const md = htmlToMarkdown(htmlValueRef.current);
+        onChange(md);
+        setEditing(false);
+        setTimeout(() => onSave(), 0);
+      }
+    };
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, [editing, onChange, onSave]);
 
   if (editing && !readOnly) {
     return (
-      <div className="rounded-lg bg-zinc-900/50 border border-white/5 p-4 space-y-2">
+      <div ref={containerRef} className="rounded-lg bg-zinc-900/50 border border-white/5 p-4">
         <RichTextNoteEditor
           value={htmlValue}
           onChange={setHtmlValue}
           placeholder={placeholder}
         />
-        <div className="flex justify-end">
-          <button
-            onClick={handleDone}
-            className="text-xs px-3 py-1 rounded bg-primary text-primary-foreground hover:bg-primary/90 transition-colors"
-          >
-            Done
-          </button>
-        </div>
       </div>
     );
   }

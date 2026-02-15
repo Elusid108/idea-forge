@@ -43,12 +43,20 @@ export default function FloatingChatWidget({
     localStorage.setItem(effectiveKey, state);
   }, [state, effectiveKey]);
   const scrollRef = useRef<HTMLDivElement>(null);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   useEffect(() => {
     if (state === "expanded") {
       setTimeout(() => scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" }), 100);
     }
   }, [chatHistory, isThinking, state]);
+
+  // Auto-focus textarea when AI finishes thinking
+  useEffect(() => {
+    if (!isThinking && state === "expanded" && textareaRef.current) {
+      textareaRef.current.focus();
+    }
+  }, [isThinking, state]);
 
   if (state === "collapsed") {
     return (
@@ -99,6 +107,7 @@ export default function FloatingChatWidget({
       <div className="p-3 border-t border-border shrink-0">
         <div className="flex gap-2">
           <Textarea
+            ref={textareaRef}
             value={chatInput}
             onChange={(e) => onInputChange(e.target.value)}
             onKeyDown={onKeyDown}
