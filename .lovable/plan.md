@@ -1,140 +1,102 @@
 
 
-# Execution Strategy Fix, Expense Receipts, Task Grouping, Note HTML Cleanup, Project Layout Restructure, and Project AI Chatbot
+# Task Sorting, Subtasks, Task Preview, and AI Chat Note Links
 
-This plan covers 7 areas of work, including a new edge function and a database migration.
-
----
-
-## 1. Fix Execution Strategy Not Generating on Promote
-
-**Problem**: The `generate-strategy` edge function is invoked but logs show no activity, suggesting the call may be silently failing. The function also doesn't include notes from brainstorm references.
-
-**Changes**:
-
-**`src/pages/BrainstormWorkspace.tsx`** (promote mutation, ~line 388):
-- Fetch brainstorm references (notes specifically) before invoking the edge function.
-- Pass `notes` in the body alongside `title`, `description`, `bullets`, `tags`, `category`.
-- Add `.catch(err => console.error("Strategy generation failed:", err))` for debugging.
-- Await the function invocation so we can catch errors properly.
-
-**`supabase/functions/generate-strategy/index.ts`**:
-- Accept `notes` parameter in the request body.
-- Include notes in the prompt: `Notes/Research: ${notes || "None"}`.
-- Update CORS headers to include full list (matching other functions).
+This plan covers 4 areas: task sorting by due date/priority, subtask support, task detail preview popup, and improved AI chat note linking.
 
 ---
 
-## 2. Fix Expense Receipt Retrieval
+## 1. Task Sorting by Due Date then Priority
 
-**Problem**: The `project-assets` storage bucket is set to `is_public: No`, so `getPublicUrl()` returns a URL that 403s.
+**File**: `src/pages/ProjectWorkspace.tsx`
 
-**Fix**: Either make the bucket public (like `brainstorm-references`) or use `createSignedUrl()` instead.
+Currently `activeTasks` and `completedTasks` are split from `tasks` (ordered by `sort_order` from DB). Change the sorting logic:
 
-**Database migration**: Make the `project-assets` bucket public:
-```sql
-UPDATE storage.buckets SET public = true WHERE id = 'project-assets';
+- Sort active tasks: first by `due_date` ascending (nulls last), then by priority weight (`critical=0, high=1, medium=2, low=3`).
+- Same sorting for completed tasks.
+
+```
+const PRIORITY_WEIGHT = { critical: 0, high: 1, medium: 2, low: 3 };
+
+const sortTasks = (list) => [...list].sort((a, b) => {
+  // Due date first (nulls last)
+  if (a.due_date && b.due_date) {
+    const diff = new Date(a.due_date).getTime() - new Date(b.due_date).getTime();
+    if (diff !== 0) return diff;
+  } else if (a.due_date) return -1;
+  else if (b.due_date) return 1;
+  // Then priority
+  return (PRIORITY_WEIGHT[a.priority] ?? 2) - (PRIORITY_WEIGHT[b.priority] ?? 2);
+});
 ```
 
-**Also add vendor field**:
-- Add a `vendor` column to `project_expenses` table.
-- Update expense form in `ProjectWorkspace.tsx` to include a Vendor input field.
-- Display vendor in the expense row.
+Update `activeTasks` and `completedTasks` useMemo to use `sortTasks`.
 
 ---
 
-## 3. Completed Tasks in Collapsible Group
+## 2. Subtask Support
 
-**Changes in `src/pages/ProjectWorkspace.tsx`** (Tasks section, ~line 666-724):
-- Split tasks into `activeTasks` (not completed) and `completedTasks` (completed).
-- Render active tasks in the main list.
-- Render completed tasks inside a `Collapsible` component (default closed) with header "Completed ({count})".
-- Add a `completedTasksOpen` state defaulting to `false`.
+### Database Migration
 
----
+Add a `parent_task_id` column to `project_tasks`:
 
-## 4. Strip HTML from Note Preview in List/Tile View
+```sql
+ALTER TABLE public.project_tasks
+  ADD COLUMN parent_task_id UUID REFERENCES public.project_tasks(id) ON DELETE CASCADE;
+```
 
-**Problem**: Notes stored as HTML show raw `<ol><li>` tags in the reference list preview (screenshot confirms this).
+### UI Changes in `src/pages/ProjectWorkspace.tsx`
 
-**Changes in both `src/pages/ProjectWorkspace.tsx` and `src/pages/BrainstormWorkspace.tsx`**:
-- Create a `stripHtml` utility function: `(html: string) => html.replace(/<[^>]*>/g, "").trim()`.
-- In the reference list/tile rendering, where `ref.description` is displayed as preview text, wrap with `stripHtml()` for note-type references:
-  - Grid view (line ~829 in ProjectWorkspace): `{ref.type === "note" ? stripHtml(ref.description) : ref.description}`
-  - List view (line ~1021 in BrainstormWorkspace): same treatment.
+- Filter `activeTasks` into top-level tasks (`parent_task_id IS NULL`) and subtasks.
+- Render subtasks indented below their parent task with `ml-6` or similar.
+- The task form dialog gets an optional "Parent Task" select dropdown (only shown when adding subtasks).
+- Add a small "+" button on each task row to create a subtask under that task (opens the task dialog with `parent_task_id` pre-set).
+- Subtasks appear directly below their parent in the sorted list, also sorted by due date/priority within a parent.
 
----
+### AI Tool Update
 
-## 5. Restructure Project Page Layout
+**File**: `supabase/functions/project-chat/index.ts`
 
-**Problem**: The user wants to remove the brainstorm callout and redistribute its elements. New layout:
-
-**Left column** (top to bottom):
-1. Description (always shown -- carried from brainstorm if linked)
-2. Execution Strategy
-3. Project AI Chatbot (new -- see section 7)
-4. Tasks
-5. Resources
-6. Expenses
-
-**Right column** (top to bottom):
-1. Tags
-2. GitHub (URL + widget)
-3. References from brainstorm (if linked) -- displayed as a standalone section, not inside a collapsible callout
-4. Bullet Breakdown (always shown, from brainstorm if linked, editable if standalone)
-
-**Changes in `src/pages/ProjectWorkspace.tsx`**:
-- Remove the brainstorm callout `Collapsible` component entirely.
-- Always show Description (left) and Bullet Breakdown (right), removing the `!brainstormId &&` conditions.
-- Move brainstorm references to the right column as "Brainstorm References" section (between GitHub and Bullet Breakdown).
-- Keep the description editable -- it saves to `compiled_description` on the project.
+- Add `parent_task_id` as an optional parameter to the `add_task` tool.
+- Update the system prompt to instruct the AI:
+  - It can create subtasks by specifying `parent_task_id`.
+  - It should set due dates based on estimated task length and desired timeline.
+  - If the user hasn't stated a timeline, the AI should ask about it.
+  - If no timeline is given after asking, order tasks by logical sequence of operations.
 
 ---
 
-## 6. Note List Formatting in Rich Text Editor
+## 3. Task Detail Preview Popup
 
-**Problem**: Bullet and numbered lists created via toolbar buttons don't render in the `contentEditable` editor, only appearing after save. This is likely because `document.execCommand("insertUnorderedList")` requires a selection/cursor to be inside the editor, and the `onMouseDown` with `preventDefault` may cause the editor to lose focus.
+**File**: `src/pages/ProjectWorkspace.tsx`
 
-**Changes in `src/components/RichTextNoteEditor.tsx`**:
-- The `execCmd` function already calls `editorRef.current?.focus()` before `execCommand`. Verify this works. If the issue persists, ensure `handleInput` is called after `execCmd` to sync state.
-- The real issue may be that `handleInput` reads `innerHTML` but the DOM hasn't updated yet after `execCommand`. Add a `requestAnimationFrame` wrapper around the `handleInput()` call inside `execCmd` to ensure the DOM has updated.
+- Add a `viewingTask` state (initially null).
+- Clicking a task row (not the checkbox or action buttons) sets `viewingTask`.
+- Render a `Dialog` showing full task details: Title, Description, Priority badge, Due Date, Completion status, Created date, Subtasks list (if any).
+- Include Edit and Delete buttons in the dialog footer.
 
 ---
 
-## 7. Project AI Chatbot (New Feature)
+## 4. AI Chat: Link to Generated Notes
 
-**Purpose**: An AI assistant below the Execution Strategy that can modify strategy, manage tasks, and create notes. It takes in description, bullet breakdown, brainstorm notes (if linked), and project notes as context.
+**Problem**: When the AI creates a note via `create_note`, the chat just shows a toast. The user wants a clickable link in the chat to open the note.
 
-### New Edge Function: `supabase/functions/project-chat/index.ts`
+**Changes in `src/pages/ProjectWorkspace.tsx`** (handleChatSubmit, ~line 601):
 
-System prompt instructs the AI to:
-- Help the user plan and execute their project
-- Suggest resources (websites, books, articles) with specific titles/authors/dates
-- Return structured tool calls for actions: `update_strategy`, `add_task`, `update_task`, `remove_task`, `create_note`
+When a `create_note` action is processed:
+- After inserting the note, capture the returned note `id`.
+- Append a special marker to the assistant message content indicating a note was created, e.g. append `\n\n[View Note: {title}](#note-{id})` to the message.
+- When rendering assistant messages, detect these `#note-{id}` links and make them clickable. On click, find the note in `references` and open it in `ReferenceViewer` (set `viewingRef`).
 
-Uses tool calling with these tools:
-- `update_strategy`: `{ strategy: string }` -- replaces execution strategy
-- `add_task`: `{ title, description, priority, due_date }` -- creates a task
-- `create_note`: `{ title, content }` -- creates a project reference note
-- `respond`: `{ message }` -- plain text response
+Alternatively, simpler approach: after inserting the note and getting the ID, add a separate "system" style message in chat with a clickable button/badge to open the note. This avoids parsing markdown links.
 
-Input context includes: description, bullet_breakdown, notes (from brainstorm refs + project refs), execution_strategy, tasks list.
+Implementation: Add a `noteId` field to `ChatMsg` type. When a note is created, the assistant message includes `noteId` and `noteTitle`. In the chat renderer, if `msg.noteId` exists, render a clickable badge below the message text that opens the note viewer.
 
-### UI in `src/pages/ProjectWorkspace.tsx`
+### Note Viewer Spacing Fix
 
-Place below the Execution Strategy section:
-- Chat interface with message history (stored in component state, not persisted)
-- Input field + Send button
-- Streaming responses using SSE (same pattern as brainstorm chat)
-- When tool calls are returned, execute them:
-  - `update_strategy`: update the project's `execution_strategy` via mutation
-  - `add_task`: insert into `project_tasks` via mutation
-  - `create_note`: insert into `project_references` with type "note"
-  - `respond`: display the message in chat
-- Messages from the AI that include links should be rendered with ReactMarkdown
-
-### Config update: `supabase/config.toml`
-Add `[functions.project-chat]` with `verify_jwt = false`.
+The screenshot shows the note content is cramped. In `ReferenceViewer.tsx`, ensure the note content rendering has proper spacing:
+- Add `[&_li]:my-1` and `[&_ul]:my-2 [&_ol]:my-2` classes to the prose wrapper for better list spacing.
+- Ensure `[&_p]:my-2` for paragraph spacing.
 
 ---
 
@@ -142,11 +104,8 @@ Add `[functions.project-chat]` with `verify_jwt = false`.
 
 | File | Changes |
 |---|---|
-| `src/pages/ProjectWorkspace.tsx` | Restructure layout (remove callout, always show desc/bullets); completed tasks collapsible; strip HTML from note previews; vendor field on expenses; project AI chatbot UI |
-| `src/pages/BrainstormWorkspace.tsx` | Fix strategy generation call (include notes); strip HTML from note previews |
-| `src/components/RichTextNoteEditor.tsx` | Fix list rendering with `requestAnimationFrame` in `execCmd` |
-| `supabase/functions/generate-strategy/index.ts` | Accept and include notes in prompt; fix CORS headers |
-| `supabase/functions/project-chat/index.ts` | New edge function for project AI assistant with tool calling |
-| `supabase/config.toml` | Add project-chat function entry |
-| Database migration | Make `project-assets` bucket public; add `vendor` column to `project_expenses` |
+| `src/pages/ProjectWorkspace.tsx` | Task sorting by due date/priority; subtask rendering with indentation; task preview dialog; AI chat note links; subtask "+" button on task rows |
+| `supabase/functions/project-chat/index.ts` | Add `parent_task_id` to `add_task` tool; update system prompt for timeline awareness and subtask creation |
+| `src/components/ReferenceViewer.tsx` | Improve note content spacing (list margins, paragraph margins) |
+| Database migration | Add `parent_task_id` column to `project_tasks` |
 
