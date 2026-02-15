@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from "react";
+import FloatingChatWidget from "@/components/FloatingChatWidget";
 import { useParams, useNavigate } from "react-router-dom";
 import {
   ArrowLeft, Plus, Link as LinkIcon, Image, Film, StickyNote, X, Pencil,
@@ -455,6 +456,11 @@ export default function BrainstormWorkspace() {
     }
   };
 
+  const ensureHttps = (url: string) => {
+    if (!url) return url;
+    return url.match(/^https?:\/\//) ? url : `https://${url}`;
+  };
+
   const handleAddRef = async () => {
     if (addRefType === "image" && refFile) {
       const path = `${user!.id}/${id}/${Date.now()}-${refFile.name}`;
@@ -474,6 +480,7 @@ export default function BrainstormWorkspace() {
         thumbnail_url: urlData.publicUrl,
       });
     } else if (addRefType === "link" || addRefType === "video") {
+      const url = addRefType === "link" ? ensureHttps(refForm.url) : refForm.url;
       let thumbnail_url: string | null = null;
       if (addRefType === "video" && refForm.url) {
         thumbnail_url = getVideoThumbnail(refForm.url);
@@ -484,7 +491,7 @@ export default function BrainstormWorkspace() {
       addReference.mutate({
         type: addRefType,
         title: refForm.title,
-        url: refForm.url,
+        url,
         description: refForm.description,
         thumbnail_url: thumbnail_url || undefined,
       });
@@ -514,14 +521,13 @@ export default function BrainstormWorkspace() {
 
   const handleSaveEditRef = async () => {
     if (!editingRef) return;
-    updateReference.mutate({
-      refId: editingRef.id,
-      fields: {
-        title: refForm.title,
-        url: refForm.url,
-        description: refForm.description,
-      },
-    });
+    const fields: Record<string, any> = {
+      title: refForm.title,
+      url: refForm.url,
+      description: refForm.description,
+    };
+    if (editingRef.type === "link") fields.url = ensureHttps(refForm.url);
+    updateReference.mutate({ refId: editingRef.id, fields });
   };
 
   const toggleRefViewMode = (mode: "grid" | "list") => {
@@ -820,113 +826,56 @@ export default function BrainstormWorkspace() {
       <div className="grid grid-cols-1 lg:grid-cols-5 gap-6">
         {/* Left column */}
         <div className="lg:col-span-3 space-y-6">
-          {/* AI Interview or Chatbot */}
+          {/* AI Interview (only shown when not locked) */}
+          {!isLocked && (
           <div>
-            <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-2">
-              {isLocked ? "AI Assistant" : "AI Interview"}
-            </p>
+            <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-2">AI Interview</p>
             <Card className="border-border bg-muted/30">
               <CardContent className="p-4 space-y-3">
-                {isLocked ? (
+                {isThinking && !currentQuestion ? (
+                  <div className="space-y-2">
+                    <Skeleton className="h-4 w-3/4" />
+                    <Skeleton className="h-4 w-1/2" />
+                  </div>
+                ) : currentQuestion ? (
                   <>
-                    <div ref={chatScrollRef} className="max-h-64 overflow-y-auto space-y-3">
-                      {queryChatHistory.length === 0 && (
-                        <div className="flex flex-col items-center justify-center py-4 text-center">
-                          <Bot className="h-8 w-8 text-muted-foreground/50 mb-2" />
-                          <p className="text-xs text-muted-foreground">Ask questions about this brainstorm's content…</p>
-                        </div>
-                      )}
-                      {queryChatHistory.map((msg, i) => (
-                        <div key={i} className={`flex items-start gap-2 ${msg.role === "user" ? "justify-end" : ""}`}>
-                          {msg.role === "assistant" && (
-                            <div className="h-6 w-6 rounded-full bg-primary/10 flex items-center justify-center shrink-0 mt-0.5">
-                              <Bot className="h-3 w-3 text-primary" />
-                            </div>
-                          )}
-                          <div className={`rounded-lg px-3 py-2 text-sm max-w-[80%] ${msg.role === "user" ? "bg-primary text-primary-foreground" : "bg-muted"}`}>
-                            {msg.role === "assistant" ? (
-                              <div className="prose prose-invert prose-sm max-w-none [&_ul]:list-disc [&_ol]:list-decimal [&_ul]:pl-5 [&_ol]:pl-5 [&_li]:my-0.5 [&_p]:my-1.5">
-                                <ReactMarkdown>{msg.content}</ReactMarkdown>
-                              </div>
-                            ) : msg.content}
-                          </div>
-                        </div>
-                      ))}
-                      {isChatThinking && (
-                        <div className="flex items-start gap-2">
-                          <div className="h-6 w-6 rounded-full bg-primary/10 flex items-center justify-center shrink-0">
-                            <Bot className="h-3 w-3 text-primary" />
-                          </div>
-                          <Skeleton className="h-8 w-40 rounded-lg" />
-                        </div>
-                      )}
+                    <div className="flex items-start gap-2">
+                      <div className="h-6 w-6 rounded-full bg-primary/10 flex items-center justify-center shrink-0 mt-0.5">
+                        <Bot className="h-3 w-3 text-primary" />
+                      </div>
+                      <p className="text-sm font-medium leading-relaxed">{currentQuestion}</p>
                     </div>
-                    <div className="flex gap-2">
-                      <Textarea
-                        value={chatInput}
-                        onChange={(e) => setChatInput(e.target.value)}
-                        onKeyDown={handleChatKeyDown}
-                        placeholder="Ask about this brainstorm… (Enter to send)"
-                        className="min-h-[60px] resize-none text-sm flex-1"
-                        disabled={isChatThinking}
-                      />
-                      <Button
-                        onClick={handleChatSubmit}
-                        disabled={!chatInput.trim() || isChatThinking}
-                        size="icon"
-                        className="shrink-0 self-end"
-                      >
-                        {isChatThinking ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
-                      </Button>
-                    </div>
+                    <Textarea
+                      ref={textareaRef}
+                      value={answer}
+                      onChange={(e) => setAnswer(e.target.value)}
+                      onKeyDown={handleAnswerKeyDown}
+                      placeholder="Type your answer… (Enter to send, Shift+Enter for newline)"
+                      className="min-h-[80px] resize-none text-sm"
+                      disabled={isThinking}
+                    />
+                    <Button
+                      onClick={handleSubmitAnswer}
+                      disabled={!answer.trim() || isThinking}
+                      className="w-full gap-2"
+                    >
+                      {isThinking ? (
+                        <><Loader2 className="h-4 w-4 animate-spin" /> Thinking…</>
+                      ) : (
+                        <><Send className="h-4 w-4" /> Submit Answer</>
+                      )}
+                    </Button>
                   </>
                 ) : (
-                  <>
-                    {isThinking && !currentQuestion ? (
-                      <div className="space-y-2">
-                        <Skeleton className="h-4 w-3/4" />
-                        <Skeleton className="h-4 w-1/2" />
-                      </div>
-                    ) : currentQuestion ? (
-                      <>
-                        <div className="flex items-start gap-2">
-                          <div className="h-6 w-6 rounded-full bg-primary/10 flex items-center justify-center shrink-0 mt-0.5">
-                            <Bot className="h-3 w-3 text-primary" />
-                          </div>
-                          <p className="text-sm font-medium leading-relaxed">{currentQuestion}</p>
-                        </div>
-                        <Textarea
-                          ref={textareaRef}
-                          value={answer}
-                          onChange={(e) => setAnswer(e.target.value)}
-                          onKeyDown={handleAnswerKeyDown}
-                          placeholder="Type your answer… (Enter to send, Shift+Enter for newline)"
-                          className="min-h-[80px] resize-none text-sm"
-                          disabled={isThinking}
-                        />
-                        <Button
-                          onClick={handleSubmitAnswer}
-                          disabled={!answer.trim() || isThinking}
-                          className="w-full gap-2"
-                        >
-                          {isThinking ? (
-                            <><Loader2 className="h-4 w-4 animate-spin" /> Thinking…</>
-                          ) : (
-                            <><Send className="h-4 w-4" /> Submit Answer</>
-                          )}
-                        </Button>
-                      </>
-                    ) : (
-                      <div className="flex flex-col items-center justify-center py-4 text-center">
-                        <Bot className="h-8 w-8 text-muted-foreground/50 mb-2" />
-                        <p className="text-xs text-muted-foreground">Loading interview questions…</p>
-                      </div>
-                    )}
-                  </>
+                  <div className="flex flex-col items-center justify-center py-4 text-center">
+                    <Bot className="h-8 w-8 text-muted-foreground/50 mb-2" />
+                    <p className="text-xs text-muted-foreground">Loading interview questions…</p>
+                  </div>
                 )}
               </CardContent>
             </Card>
           </div>
+          )}
 
           {/* Compiled Description */}
           <div>
@@ -1285,6 +1234,36 @@ export default function BrainstormWorkspace() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* Floating Chat Widget for locked brainstorms */}
+      {isLocked && (
+        <FloatingChatWidget
+          title="Brainstorm Assistant"
+          chatHistory={queryChatHistory}
+          chatInput={chatInput}
+          onInputChange={setChatInput}
+          onSubmit={handleChatSubmit}
+          isThinking={isChatThinking}
+          placeholder="Ask questions about this brainstorm's content…"
+          onKeyDown={handleChatKeyDown}
+          renderMessage={(msg, i) => (
+            <div key={i} className={`flex items-start gap-2 ${msg.role === "user" ? "justify-end" : ""}`}>
+              {msg.role === "assistant" && (
+                <div className="h-6 w-6 rounded-full bg-primary/10 flex items-center justify-center shrink-0 mt-0.5">
+                  <Bot className="h-3 w-3 text-primary" />
+                </div>
+              )}
+              <div className={`rounded-lg px-3 py-2 text-sm max-w-[80%] ${msg.role === "user" ? "bg-primary text-primary-foreground" : "bg-muted"}`}>
+                {msg.role === "assistant" ? (
+                  <div className="prose prose-invert prose-sm max-w-none [&_ul]:list-disc [&_ol]:list-decimal [&_ul]:pl-5 [&_ol]:pl-5 [&_li]:my-0.5 [&_p]:my-1.5">
+                    <ReactMarkdown>{msg.content}</ReactMarkdown>
+                  </div>
+                ) : msg.content}
+              </div>
+            </div>
+          )}
+        />
+      )}
     </div>
   );
 }
