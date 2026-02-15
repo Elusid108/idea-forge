@@ -271,6 +271,53 @@ export type Database = {
           },
         ]
       }
+      project_expenses: {
+        Row: {
+          amount: number
+          category: string | null
+          created_at: string
+          date: string | null
+          description: string | null
+          id: string
+          project_id: string
+          receipt_url: string | null
+          title: string
+          user_id: string
+        }
+        Insert: {
+          amount?: number
+          category?: string | null
+          created_at?: string
+          date?: string | null
+          description?: string | null
+          id?: string
+          project_id: string
+          receipt_url?: string | null
+          title?: string
+          user_id: string
+        }
+        Update: {
+          amount?: number
+          category?: string | null
+          created_at?: string
+          date?: string | null
+          description?: string | null
+          id?: string
+          project_id?: string
+          receipt_url?: string | null
+          title?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "project_expenses_project_id_fkey"
+            columns: ["project_id"]
+            isOneToOne: false
+            referencedRelation: "projects"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       project_references: {
         Row: {
           created_at: string
@@ -318,6 +365,56 @@ export type Database = {
           },
         ]
       }
+      project_tasks: {
+        Row: {
+          completed: boolean
+          created_at: string
+          description: string | null
+          due_date: string | null
+          id: string
+          priority: string
+          project_id: string
+          sort_order: number
+          title: string
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          completed?: boolean
+          created_at?: string
+          description?: string | null
+          due_date?: string | null
+          id?: string
+          priority?: string
+          project_id: string
+          sort_order?: number
+          title?: string
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          completed?: boolean
+          created_at?: string
+          description?: string | null
+          due_date?: string | null
+          id?: string
+          priority?: string
+          project_id?: string
+          sort_order?: number
+          title?: string
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "project_tasks_project_id_fkey"
+            columns: ["project_id"]
+            isOneToOne: false
+            referencedRelation: "projects"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       projects: {
         Row: {
           brainstorm_id: string | null
@@ -326,6 +423,7 @@ export type Database = {
           compiled_description: string | null
           created_at: string
           deleted_at: string | null
+          execution_strategy: string | null
           general_notes: string | null
           github_repo_url: string | null
           id: string
@@ -342,6 +440,7 @@ export type Database = {
           compiled_description?: string | null
           created_at?: string
           deleted_at?: string | null
+          execution_strategy?: string | null
           general_notes?: string | null
           github_repo_url?: string | null
           id?: string
@@ -358,6 +457,7 @@ export type Database = {
           compiled_description?: string | null
           created_at?: string
           deleted_at?: string | null
+          execution_strategy?: string | null
           general_notes?: string | null
           github_repo_url?: string | null
           id?: string

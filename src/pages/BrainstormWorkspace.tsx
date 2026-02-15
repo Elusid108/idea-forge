@@ -383,9 +383,23 @@ export default function BrainstormWorkspace() {
         .single();
       if (error) throw error;
 
-      // Brainstorm references are viewable in the Brainstorm Callout - no need to copy
-
       await supabase.from("brainstorms").update({ status: "completed" }).eq("id", id!);
+
+      // Generate execution strategy in background
+      supabase.functions.invoke("generate-strategy", {
+        body: {
+          title: brainstorm?.title || "",
+          description,
+          bullets,
+          tags: bTags,
+          category: bCategory,
+        },
+      }).then(async (res) => {
+        if (!res.error && res.data?.strategy) {
+          await supabase.from("projects").update({ execution_strategy: res.data.strategy } as any).eq("id", data.id);
+        }
+      }).catch(() => {});
+
       return data;
     },
     onSuccess: (data) => {

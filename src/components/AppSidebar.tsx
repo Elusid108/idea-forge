@@ -23,17 +23,30 @@ const sections = [
   { label: "Projects", href: "/projects", emoji: "🔧", table: "projects" as const },
 ];
 
+const SIDEBAR_EXCLUDED_STATUSES: Record<string, string[]> = {
+  ideas: ["brainstorming", "scrapped"],
+  brainstorms: ["completed", "scrapped"],
+  projects: ["done"],
+};
+
 function useSectionItems(table: "ideas" | "brainstorms" | "projects", enabled: boolean) {
   return useQuery({
     queryKey: ["sidebar-items", table],
     queryFn: async () => {
       const nameCol = table === "projects" ? "name" : "title";
-      const { data, error } = await supabase
+      const excluded = SIDEBAR_EXCLUDED_STATUSES[table] || [];
+      let query = supabase
         .from(table)
         .select(`id, ${nameCol}`)
         .is("deleted_at", null)
         .order("created_at", { ascending: false })
         .limit(20);
+      if (excluded.length > 0) {
+        for (const status of excluded) {
+          query = query.neq("status", status);
+        }
+      }
+      const { data, error } = await query;
       if (error) throw error;
       return (data || []).map((item: any) => ({
         id: item.id,

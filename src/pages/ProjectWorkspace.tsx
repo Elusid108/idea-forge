@@ -4,12 +4,14 @@ import {
   ArrowLeft, Link as LinkIcon, Image, Film, StickyNote, X, Pencil,
   Grid3X3, List, ChevronDown, ChevronRight, ArrowUpDown, Trash2,
   Plus, Lightbulb, Brain, FileText, FolderOpen, Github, Star, GitFork, AlertCircle, GitCommit,
+  CheckSquare, DollarSign, Calendar, ExternalLink, Receipt, Upload, Loader2,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from "@/components/ui/dialog";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from "@/components/ui/alert-dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -63,6 +65,15 @@ const STATUS_LABELS: Record<string, string> = {
   planning: "Planning", in_progress: "In Progress", testing: "Testing", done: "Done",
 };
 
+const PRIORITY_COLORS: Record<string, string> = {
+  low: "bg-emerald-500/20 text-emerald-400 border-emerald-500/30",
+  medium: "bg-amber-500/20 text-amber-400 border-amber-500/30",
+  high: "bg-orange-500/20 text-orange-400 border-orange-500/30",
+  critical: "bg-red-500/20 text-red-400 border-red-500/30",
+};
+
+const EXPENSE_CATEGORIES = ["General", "Materials", "Software", "Hardware", "Services", "Shipping", "Other"];
+
 export default function ProjectWorkspace() {
   const { id } = useParams<{ id: string }>();
   const { user } = useAuth();
@@ -74,6 +85,9 @@ export default function ProjectWorkspace() {
   const [description, setDescription] = useState("");
   const [bullets, setBullets] = useState("");
   const [githubUrl, setGithubUrl] = useState("");
+  const [editingGithub, setEditingGithub] = useState(false);
+  const [githubDraft, setGithubDraft] = useState("");
+  const [executionStrategy, setExecutionStrategy] = useState("");
   const [viewingRef, setViewingRef] = useState<any>(null);
   const [addRefType, setAddRefType] = useState<RefType | null>(null);
   const [editingRef, setEditingRef] = useState<any>(null);
@@ -97,6 +111,17 @@ export default function ProjectWorkspace() {
       return localStorage.getItem(`proj-brainstorm-callout-${id}`) === "true";
     } catch { return false; }
   });
+
+  // Task states
+  const [showTaskDialog, setShowTaskDialog] = useState(false);
+  const [editingTask, setEditingTask] = useState<any>(null);
+  const [taskForm, setTaskForm] = useState({ title: "", description: "", priority: "medium", due_date: "" });
+
+  // Expense states
+  const [showExpenseDialog, setShowExpenseDialog] = useState(false);
+  const [editingExpense, setEditingExpense] = useState<any>(null);
+  const [expenseForm, setExpenseForm] = useState({ title: "", description: "", amount: "", category: "General", date: format(new Date(), "yyyy-MM-dd") });
+  const [receiptFile, setReceiptFile] = useState<File | null>(null);
 
   const { data: project, isLoading } = useQuery({
     queryKey: ["project", id],
@@ -126,7 +151,6 @@ export default function ProjectWorkspace() {
     enabled: !!id,
   });
 
-  // Fetch brainstorm references if project has brainstorm_id
   const brainstormId = project?.brainstorm_id;
   const { data: brainstormRefs = [] } = useQuery({
     queryKey: ["brainstorm-refs-for-project", brainstormId],
@@ -142,12 +166,46 @@ export default function ProjectWorkspace() {
     enabled: !!brainstormId,
   });
 
+  // Tasks query
+  const { data: tasks = [] } = useQuery({
+    queryKey: ["project-tasks", id],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("project_tasks")
+        .select("*")
+        .eq("project_id", id!)
+        .order("completed")
+        .order("sort_order");
+      if (error) throw error;
+      return data;
+    },
+    enabled: !!id,
+  });
+
+  // Expenses query
+  const { data: expenses = [] } = useQuery({
+    queryKey: ["project-expenses", id],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("project_expenses")
+        .select("*")
+        .eq("project_id", id!)
+        .order("date", { ascending: false });
+      if (error) throw error;
+      return data;
+    },
+    enabled: !!id,
+  });
+
+  const totalExpenses = useMemo(() => expenses.reduce((sum: number, e: any) => sum + Number(e.amount || 0), 0), [expenses]);
+
   useEffect(() => {
     if (project) {
       setTitleDraft(project.name);
       setDescription((project as any).compiled_description || "");
       setBullets((project as any).bullet_breakdown || "");
       setGithubUrl(project.github_repo_url || "");
+      setExecutionStrategy((project as any).execution_strategy || "");
     }
   }, [project]);
 
@@ -213,6 +271,90 @@ export default function ProjectWorkspace() {
     },
   });
 
+  // Task mutations
+  const addTask = useMutation({
+    mutationFn: async (fields: any) => {
+      const { error } = await supabase.from("project_tasks").insert({
+        project_id: id!,
+        user_id: user!.id,
+        ...fields,
+        sort_order: tasks.length,
+      });
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["project-tasks", id] });
+      setShowTaskDialog(false);
+      setTaskForm({ title: "", description: "", priority: "medium", due_date: "" });
+    },
+  });
+
+  const updateTask = useMutation({
+    mutationFn: async ({ taskId, fields }: { taskId: string; fields: Record<string, any> }) => {
+      const { error } = await supabase.from("project_tasks").update(fields).eq("id", taskId);
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["project-tasks", id] });
+      setEditingTask(null);
+      setTaskForm({ title: "", description: "", priority: "medium", due_date: "" });
+    },
+  });
+
+  const deleteTask = useMutation({
+    mutationFn: async (taskId: string) => {
+      const { error } = await supabase.from("project_tasks").delete().eq("id", taskId);
+      if (error) throw error;
+    },
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["project-tasks", id] }),
+  });
+
+  const toggleTaskComplete = useMutation({
+    mutationFn: async ({ taskId, completed }: { taskId: string; completed: boolean }) => {
+      const { error } = await supabase.from("project_tasks").update({ completed }).eq("id", taskId);
+      if (error) throw error;
+    },
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["project-tasks", id] }),
+  });
+
+  // Expense mutations
+  const addExpense = useMutation({
+    mutationFn: async (fields: any) => {
+      const { error } = await supabase.from("project_expenses").insert({
+        project_id: id!,
+        user_id: user!.id,
+        ...fields,
+      });
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["project-expenses", id] });
+      setShowExpenseDialog(false);
+      setExpenseForm({ title: "", description: "", amount: "", category: "General", date: format(new Date(), "yyyy-MM-dd") });
+      setReceiptFile(null);
+    },
+  });
+
+  const updateExpense = useMutation({
+    mutationFn: async ({ expenseId, fields }: { expenseId: string; fields: Record<string, any> }) => {
+      const { error } = await supabase.from("project_expenses").update(fields).eq("id", expenseId);
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["project-expenses", id] });
+      setEditingExpense(null);
+      setExpenseForm({ title: "", description: "", amount: "", category: "General", date: format(new Date(), "yyyy-MM-dd") });
+    },
+  });
+
+  const deleteExpense = useMutation({
+    mutationFn: async (expenseId: string) => {
+      const { error } = await supabase.from("project_expenses").delete().eq("id", expenseId);
+      if (error) throw error;
+    },
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["project-expenses", id] }),
+  });
+
   const addReference = useMutation({
     mutationFn: async ({ type, title, url, description, thumbnail_url }: { type: string; title: string; url?: string; description?: string; thumbnail_url?: string }) => {
       const { error } = await supabase.from("project_references").insert({
@@ -260,6 +402,14 @@ export default function ProjectWorkspace() {
     setEditingTitle(false);
   };
 
+  const handleSaveGithubUrl = () => {
+    if (githubDraft !== githubUrl) {
+      setGithubUrl(githubDraft);
+      updateProject.mutate({ github_repo_url: githubDraft });
+    }
+    setEditingGithub(false);
+  };
+
   const handleRefClick = (ref: any) => {
     if (ref.type === "link" && ref.url) {
       const url = ref.url.match(/^https?:\/\//) ? ref.url : `https://${ref.url}`;
@@ -296,6 +446,25 @@ export default function ProjectWorkspace() {
     } else {
       addReference.mutate({ type: addRefType!, title: refForm.title, url: refForm.url, description: refForm.description });
     }
+  };
+
+  const handleAddExpense = async () => {
+    let receiptUrl = "";
+    if (receiptFile) {
+      const path = `${user!.id}/${id}/receipts/${Date.now()}-${receiptFile.name}`;
+      const { error: uploadError } = await supabase.storage.from("project-assets").upload(path, receiptFile);
+      if (uploadError) { toast.error("Upload failed: " + uploadError.message); return; }
+      const { data: urlData } = supabase.storage.from("project-assets").getPublicUrl(path);
+      receiptUrl = urlData.publicUrl;
+    }
+    addExpense.mutate({
+      title: expenseForm.title,
+      description: expenseForm.description,
+      amount: parseFloat(expenseForm.amount) || 0,
+      category: expenseForm.category,
+      date: expenseForm.date || undefined,
+      receipt_url: receiptUrl,
+    });
   };
 
   const toggleRefViewMode = (mode: "grid" | "list") => { setRefViewMode(mode); localStorage.setItem("ref-view-mode", mode); };
@@ -340,7 +509,6 @@ export default function ProjectWorkspace() {
   const linkedBrainstorm = (project as any)?.brainstorms;
   const linkedIdeaId = linkedBrainstorm?.idea_id;
 
-  // Fetch linked idea data for overlay popup
   const { data: linkedIdeaData } = useQuery({
     queryKey: ["linked-idea-for-project", linkedIdeaId],
     queryFn: async () => {
@@ -354,6 +522,14 @@ export default function ProjectWorkspace() {
     },
     enabled: !!linkedIdeaId,
   });
+
+  // GitHub Pages link
+  const githubPagesUrl = useMemo(() => {
+    if (!githubData) return null;
+    if (githubData.repo.homepage) return githubData.repo.homepage;
+    if (githubData.repo.has_pages) return `https://${githubParsed?.owner}.github.io/${githubParsed?.repo}`;
+    return null;
+  }, [githubData, githubParsed]);
 
   if (isLoading) {
     return <div className="flex items-center justify-center py-20"><Skeleton className="h-8 w-8" /></div>;
@@ -473,6 +649,80 @@ export default function ProjectWorkspace() {
               />
             </div>
           )}
+
+          {/* Execution Strategy */}
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-1">Execution Strategy</p>
+            <EditableMarkdown
+              value={executionStrategy}
+              onChange={setExecutionStrategy}
+              onSave={() => updateProject.mutate({ execution_strategy: executionStrategy } as any)}
+              placeholder={brainstormId ? "Generating strategy…" : "Plan your execution strategy here…"}
+              minHeight="80px"
+            />
+          </div>
+
+          {/* Tasks Section */}
+          <div className="space-y-3">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <CheckSquare className="h-4 w-4 text-primary" />
+                <h2 className="text-lg font-semibold">Tasks</h2>
+                <Badge variant="secondary" className="text-[10px]">
+                  {tasks.filter((t: any) => t.completed).length}/{tasks.length}
+                </Badge>
+              </div>
+              <Button variant="outline" size="sm" className="gap-1 h-8" onClick={() => { setEditingTask(null); setTaskForm({ title: "", description: "", priority: "medium", due_date: "" }); setShowTaskDialog(true); }}>
+                <Plus className="h-3 w-3" /> Add Task
+              </Button>
+            </div>
+
+            {tasks.length === 0 ? (
+              <div className="flex flex-col items-center justify-center rounded-xl border border-dashed border-border py-8">
+                <CheckSquare className="mb-2 h-6 w-6 text-muted-foreground/50" />
+                <p className="text-sm text-muted-foreground">No tasks yet</p>
+              </div>
+            ) : (
+              <div className="space-y-1.5">
+                {tasks.map((task: any) => (
+                  <div
+                    key={task.id}
+                    className={`flex items-center gap-3 p-2.5 rounded-lg border border-border/50 bg-card/50 transition-colors hover:border-primary/20 ${task.completed ? "opacity-60" : ""}`}
+                  >
+                    <Checkbox
+                      checked={task.completed}
+                      onCheckedChange={(checked) => toggleTaskComplete.mutate({ taskId: task.id, completed: !!checked })}
+                    />
+                    <div className="flex-1 min-w-0">
+                      <p className={`text-sm font-medium ${task.completed ? "line-through text-muted-foreground" : ""}`}>{task.title}</p>
+                      {task.description && <p className="text-xs text-muted-foreground line-clamp-1">{task.description}</p>}
+                    </div>
+                    <Badge className={`text-[10px] border ${PRIORITY_COLORS[task.priority] || PRIORITY_COLORS.medium}`}>
+                      {task.priority}
+                    </Badge>
+                    {task.due_date && (
+                      <span className="text-[10px] text-muted-foreground flex items-center gap-1">
+                        <Calendar className="h-3 w-3" />
+                        {format(new Date(task.due_date), "MMM d")}
+                      </span>
+                    )}
+                    <div className="flex items-center gap-0.5 shrink-0">
+                      <Button variant="ghost" size="icon" className="h-6 w-6 text-muted-foreground hover:text-primary" onClick={() => {
+                        setEditingTask(task);
+                        setTaskForm({ title: task.title, description: task.description || "", priority: task.priority, due_date: task.due_date || "" });
+                        setShowTaskDialog(true);
+                      }}>
+                        <Pencil className="h-3 w-3" />
+                      </Button>
+                      <Button variant="ghost" size="icon" className="h-6 w-6 text-muted-foreground hover:text-destructive" onClick={() => deleteTask.mutate(task.id)}>
+                        <X className="h-3 w-3" />
+                      </Button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
 
           {/* Resources */}
           <div className="space-y-4">
@@ -599,6 +849,64 @@ export default function ProjectWorkspace() {
               </div>
             )}
           </div>
+
+          {/* Expenses Section */}
+          <div className="space-y-3">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <DollarSign className="h-4 w-4 text-primary" />
+                <h2 className="text-lg font-semibold">Expenses</h2>
+                {totalExpenses > 0 && (
+                  <Badge variant="secondary" className="text-xs">${totalExpenses.toFixed(2)}</Badge>
+                )}
+              </div>
+              <Button variant="outline" size="sm" className="gap-1 h-8" onClick={() => { setEditingExpense(null); setExpenseForm({ title: "", description: "", amount: "", category: "General", date: format(new Date(), "yyyy-MM-dd") }); setReceiptFile(null); setShowExpenseDialog(true); }}>
+                <Plus className="h-3 w-3" /> Add Expense
+              </Button>
+            </div>
+
+            {expenses.length === 0 ? (
+              <div className="flex flex-col items-center justify-center rounded-xl border border-dashed border-border py-8">
+                <DollarSign className="mb-2 h-6 w-6 text-muted-foreground/50" />
+                <p className="text-sm text-muted-foreground">No expenses tracked yet</p>
+              </div>
+            ) : (
+              <div className="space-y-1.5">
+                {expenses.map((expense: any) => (
+                  <div key={expense.id} className="flex items-center gap-3 p-2.5 rounded-lg border border-border/50 bg-card/50 transition-colors hover:border-primary/20">
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2">
+                        <p className="text-sm font-medium">{expense.title}</p>
+                        <Badge variant="secondary" className="text-[10px]">{expense.category}</Badge>
+                      </div>
+                      {expense.description && <p className="text-xs text-muted-foreground line-clamp-1">{expense.description}</p>}
+                    </div>
+                    <span className="text-sm font-semibold text-primary">${Number(expense.amount).toFixed(2)}</span>
+                    {expense.date && (
+                      <span className="text-[10px] text-muted-foreground">{format(new Date(expense.date), "MMM d")}</span>
+                    )}
+                    {expense.receipt_url && (
+                      <Button variant="ghost" size="icon" className="h-6 w-6 text-muted-foreground hover:text-primary" onClick={() => window.open(expense.receipt_url, "_blank")}>
+                        <Receipt className="h-3 w-3" />
+                      </Button>
+                    )}
+                    <div className="flex items-center gap-0.5 shrink-0">
+                      <Button variant="ghost" size="icon" className="h-6 w-6 text-muted-foreground hover:text-primary" onClick={() => {
+                        setEditingExpense(expense);
+                        setExpenseForm({ title: expense.title, description: expense.description || "", amount: String(expense.amount), category: expense.category, date: expense.date || "" });
+                        setShowExpenseDialog(true);
+                      }}>
+                        <Pencil className="h-3 w-3" />
+                      </Button>
+                      <Button variant="ghost" size="icon" className="h-6 w-6 text-muted-foreground hover:text-destructive" onClick={() => deleteExpense.mutate(expense.id)}>
+                        <X className="h-3 w-3" />
+                      </Button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
         </div>
 
         {/* Right column */}
@@ -690,16 +998,34 @@ export default function ProjectWorkspace() {
             </div>
           )}
 
-          {/* GitHub URL */}
+          {/* GitHub URL - Click to edit */}
           <div>
             <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-1">GitHub Repository</p>
-            <Input
-              value={githubUrl}
-              onChange={(e) => setGithubUrl(e.target.value)}
-              onBlur={() => updateProject.mutate({ github_repo_url: githubUrl })}
-              placeholder="https://github.com/…"
-              className="text-sm"
-            />
+            {editingGithub ? (
+              <Input
+                value={githubDraft}
+                onChange={(e) => setGithubDraft(e.target.value)}
+                onBlur={handleSaveGithubUrl}
+                onKeyDown={(e) => e.key === "Enter" && handleSaveGithubUrl()}
+                placeholder="https://github.com/…"
+                className="text-sm"
+                autoFocus
+              />
+            ) : githubUrl ? (
+              <p
+                className="text-sm text-primary hover:underline cursor-pointer truncate"
+                onClick={() => { setGithubDraft(githubUrl); setEditingGithub(true); }}
+              >
+                {githubUrl}
+              </p>
+            ) : (
+              <p
+                className="text-sm text-muted-foreground/60 italic cursor-pointer hover:text-muted-foreground"
+                onClick={() => { setGithubDraft(""); setEditingGithub(true); }}
+              >
+                Click to add GitHub URL…
+              </p>
+            )}
           </div>
 
           {/* GitHub Activity Widget */}
@@ -716,6 +1042,18 @@ export default function ProjectWorkspace() {
                   >
                     {githubData.repo.full_name}
                   </a>
+                  {githubPagesUrl && (
+                    <a
+                      href={githubPagesUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="ml-auto"
+                    >
+                      <Badge variant="outline" className="text-[10px] gap-1 cursor-pointer hover:bg-accent">
+                        <ExternalLink className="h-2.5 w-2.5" /> View Site
+                      </Badge>
+                    </a>
+                  )}
                 </div>
                 {githubData.repo.description && (
                   <p className="text-xs text-muted-foreground">{githubData.repo.description}</p>
@@ -839,6 +1177,113 @@ export default function ProjectWorkspace() {
             <Button variant="ghost" onClick={() => setEditingRef(null)}>Cancel</Button>
             <Button onClick={() => updateReference.mutate({ refId: editingRef.id, fields: { title: refForm.title, url: refForm.url, description: refForm.description } })} disabled={!refForm.title.trim() || updateReference.isPending}>
               {updateReference.isPending ? "Saving…" : "Save Changes"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Task Dialog */}
+      <Dialog open={showTaskDialog} onOpenChange={(open) => { if (!open) { setShowTaskDialog(false); setEditingTask(null); } }}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>{editingTask ? "Edit Task" : "Add Task"}</DialogTitle>
+            <DialogDescription className="sr-only">{editingTask ? "Edit task details" : "Create a new task"}</DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3">
+            <Input placeholder="Task title" value={taskForm.title} onChange={(e) => setTaskForm(p => ({ ...p, title: e.target.value }))} />
+            <Textarea placeholder="Description (optional)" value={taskForm.description} onChange={(e) => setTaskForm(p => ({ ...p, description: e.target.value }))} className="resize-none min-h-[80px]" />
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="text-xs text-muted-foreground mb-1 block">Priority</label>
+                <Select value={taskForm.priority} onValueChange={(val) => setTaskForm(p => ({ ...p, priority: val }))}>
+                  <SelectTrigger className="h-8 text-xs">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="low">Low</SelectItem>
+                    <SelectItem value="medium">Medium</SelectItem>
+                    <SelectItem value="high">High</SelectItem>
+                    <SelectItem value="critical">Critical</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div>
+                <label className="text-xs text-muted-foreground mb-1 block">Due Date</label>
+                <Input type="date" value={taskForm.due_date} onChange={(e) => setTaskForm(p => ({ ...p, due_date: e.target.value }))} className="h-8 text-xs" />
+              </div>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="ghost" onClick={() => setShowTaskDialog(false)}>Cancel</Button>
+            <Button
+              onClick={() => {
+                if (editingTask) {
+                  updateTask.mutate({ taskId: editingTask.id, fields: { title: taskForm.title, description: taskForm.description, priority: taskForm.priority, due_date: taskForm.due_date || null } });
+                } else {
+                  addTask.mutate({ title: taskForm.title, description: taskForm.description, priority: taskForm.priority, due_date: taskForm.due_date || null });
+                }
+              }}
+              disabled={!taskForm.title.trim()}
+            >
+              {editingTask ? "Save Changes" : "Add Task"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Expense Dialog */}
+      <Dialog open={showExpenseDialog} onOpenChange={(open) => { if (!open) { setShowExpenseDialog(false); setEditingExpense(null); setReceiptFile(null); } }}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>{editingExpense ? "Edit Expense" : "Add Expense"}</DialogTitle>
+            <DialogDescription className="sr-only">{editingExpense ? "Edit expense details" : "Track a new expense"}</DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3">
+            <Input placeholder="Expense title" value={expenseForm.title} onChange={(e) => setExpenseForm(p => ({ ...p, title: e.target.value }))} />
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="text-xs text-muted-foreground mb-1 block">Amount ($)</label>
+                <Input type="number" step="0.01" placeholder="0.00" value={expenseForm.amount} onChange={(e) => setExpenseForm(p => ({ ...p, amount: e.target.value }))} className="h-8 text-xs" />
+              </div>
+              <div>
+                <label className="text-xs text-muted-foreground mb-1 block">Category</label>
+                <Select value={expenseForm.category} onValueChange={(val) => setExpenseForm(p => ({ ...p, category: val }))}>
+                  <SelectTrigger className="h-8 text-xs">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {EXPENSE_CATEGORIES.map(c => (
+                      <SelectItem key={c} value={c}>{c}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+            <div>
+              <label className="text-xs text-muted-foreground mb-1 block">Date</label>
+              <Input type="date" value={expenseForm.date} onChange={(e) => setExpenseForm(p => ({ ...p, date: e.target.value }))} className="h-8 text-xs" />
+            </div>
+            <Textarea placeholder="Description (optional)" value={expenseForm.description} onChange={(e) => setExpenseForm(p => ({ ...p, description: e.target.value }))} className="resize-none min-h-[60px]" />
+            {!editingExpense && (
+              <div>
+                <label className="text-xs text-muted-foreground mb-1 block">Receipt (image/PDF)</label>
+                <Input type="file" accept="image/*,.pdf" onChange={(e) => setReceiptFile(e.target.files?.[0] || null)} />
+              </div>
+            )}
+          </div>
+          <DialogFooter>
+            <Button variant="ghost" onClick={() => setShowExpenseDialog(false)}>Cancel</Button>
+            <Button
+              onClick={() => {
+                if (editingExpense) {
+                  updateExpense.mutate({ expenseId: editingExpense.id, fields: { title: expenseForm.title, description: expenseForm.description, amount: parseFloat(expenseForm.amount) || 0, category: expenseForm.category, date: expenseForm.date || null } });
+                } else {
+                  handleAddExpense();
+                }
+              }}
+              disabled={!expenseForm.title.trim() || !expenseForm.amount}
+            >
+              {editingExpense ? "Save Changes" : "Add Expense"}
             </Button>
           </DialogFooter>
         </DialogContent>
