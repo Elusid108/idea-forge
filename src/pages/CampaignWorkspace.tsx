@@ -80,7 +80,7 @@ export default function CampaignWorkspace() {
   const [interviewChatHistory, setInterviewChatHistory] = useState<ChatMsg[]>([]);
   const [questionLoaded, setQuestionLoaded] = useState(false);
   const [isForging, setIsForging] = useState(false);
-  const [topicsRemaining, setTopicsRemaining] = useState<string[]>([]);
+  const [topicsRemaining, setTopicsRemaining] = useState<string[] | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   // Add task state
@@ -491,11 +491,14 @@ export default function CampaignWorkspace() {
             </div>
 
             {/* Progress indicator */}
-            {exchangeCount > 0 && (
+            {topicsRemaining !== null && topicsRemaining.length > 0 && (
               <p className="text-xs text-muted-foreground italic">
-                {topicsRemaining.length > 0
-                  ? `To forge your playbook, we still need to discuss: ${topicsRemaining.join(", ")}`
-                  : "You can now forge your playbook, or continue answering to refine it."}
+                To forge your playbook, we still need to discuss: {topicsRemaining.join(", ")}
+              </p>
+            )}
+            {topicsRemaining !== null && topicsRemaining.length === 0 && exchangeCount >= 1 && (
+              <p className="text-xs text-muted-foreground italic">
+                You can now forge your playbook, or continue answering to refine it.
               </p>
             )}
 
@@ -543,8 +546,8 @@ export default function CampaignWorkspace() {
           </CardContent>
         </Card>
 
-        {/* Forge Playbook button -- appears after 3+ exchanges */}
-        {exchangeCount >= 3 && (
+        {/* Forge Playbook button -- appears when AI confirms all topics covered */}
+        {topicsRemaining !== null && topicsRemaining.length === 0 && exchangeCount >= 1 && (
           <Button
             onClick={handleForgePlaybook}
             disabled={isForging}
