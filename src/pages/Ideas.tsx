@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { Plus, Lightbulb, Grid3X3, List, Mic, MicOff, Loader2, Brain, ChevronDown, ChevronRight, Ban, FolderOpen } from "lucide-react";
+import { Plus, Lightbulb, Grid3X3, List, Mic, MicOff, Loader2, Brain, ChevronDown, ChevronRight, ChevronLeft, Ban, FolderOpen } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
@@ -101,6 +101,10 @@ function IdeaDetailModal({
   isDeleting,
   isStarting,
   isScrapping,
+  onPrev,
+  onNext,
+  hasPrev,
+  hasNext,
 }: {
   idea: any;
   open: boolean;
@@ -111,6 +115,10 @@ function IdeaDetailModal({
   isDeleting: boolean;
   isStarting: boolean;
   isScrapping: boolean;
+  onPrev?: () => void;
+  onNext?: () => void;
+  hasPrev?: boolean;
+  hasNext?: boolean;
 }) {
   const navigate = useNavigate();
 
@@ -155,7 +163,19 @@ function IdeaDetailModal({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-2xl max-h-[85vh] overflow-y-auto">
         <DialogHeader>
-          <DialogTitle>{idea.title || "Idea Details"}</DialogTitle>
+          <div className="flex items-center gap-2">
+            {onPrev && (
+              <Button variant="ghost" size="icon" className="h-7 w-7 shrink-0" disabled={!hasPrev} onClick={onPrev}>
+                <ChevronLeft className="h-4 w-4" />
+              </Button>
+            )}
+            <DialogTitle className="flex-1">{idea.title || "Idea Details"}</DialogTitle>
+            {onNext && (
+              <Button variant="ghost" size="icon" className="h-7 w-7 shrink-0" disabled={!hasNext} onClick={onNext}>
+                <ChevronRight className="h-4 w-4" />
+              </Button>
+            )}
+          </div>
           <DialogDescription className="sr-only">View idea details, delete, or start a brainstorm</DialogDescription>
         </DialogHeader>
 
@@ -439,6 +459,14 @@ export default function IdeasPage() {
 
   const currentIdea = selectedIdea ? ideas.find((i: any) => i.id === selectedIdea.id) || selectedIdea : null;
 
+  // Fresh ideas for navigation
+  const freshStatuses = ["new", "processing", "processed"];
+  const freshIdeas = ideas.filter((i: any) => freshStatuses.includes(i.status));
+  const currentFreshIndex = currentIdea ? freshIdeas.findIndex((i: any) => i.id === currentIdea.id) : -1;
+  const hasPrev = currentFreshIndex > 0;
+  const hasNext = currentFreshIndex >= 0 && currentFreshIndex < freshIdeas.length - 1;
+  const isFreshIdea = currentFreshIndex >= 0;
+
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
@@ -537,10 +565,31 @@ export default function IdeasPage() {
         onOpenChange={(open) => { if (!open) setSelectedIdea(null); }}
         onDelete={() => currentIdea && deleteIdea.mutate(currentIdea.id)}
         onStartBrainstorm={() => currentIdea && startBrainstorm.mutate(currentIdea)}
-        onScrap={() => currentIdea && scrapIdea.mutate({ id: currentIdea.id, currentStatus: currentIdea.status })}
+        onScrap={() => {
+          if (!currentIdea) return;
+          const isScrapping = currentIdea.status !== "scrapped";
+          scrapIdea.mutate({ id: currentIdea.id, currentStatus: currentIdea.status }, {
+            onSuccess: () => {
+              // Auto-advance to next fresh idea when scrapping
+              if (isScrapping && isFreshIdea) {
+                if (hasNext) {
+                  setSelectedIdea(freshIdeas[currentFreshIndex + 1]);
+                } else if (hasPrev) {
+                  setSelectedIdea(freshIdeas[currentFreshIndex - 1]);
+                } else {
+                  setSelectedIdea(null);
+                }
+              }
+            },
+          });
+        }}
         isDeleting={deleteIdea.isPending}
         isStarting={startBrainstorm.isPending}
         isScrapping={scrapIdea.isPending}
+        onPrev={isFreshIdea ? () => hasPrev && setSelectedIdea(freshIdeas[currentFreshIndex - 1]) : undefined}
+        onNext={isFreshIdea ? () => hasNext && setSelectedIdea(freshIdeas[currentFreshIndex + 1]) : undefined}
+        hasPrev={hasPrev}
+        hasNext={hasNext}
       />
     </div>
   );
