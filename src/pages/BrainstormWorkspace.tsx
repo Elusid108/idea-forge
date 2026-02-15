@@ -385,6 +385,14 @@ export default function BrainstormWorkspace() {
 
       await supabase.from("brainstorms").update({ status: "completed" }).eq("id", id!);
 
+      // Gather notes from brainstorm references
+      const { data: bRefs } = await supabase
+        .from("brainstorm_references")
+        .select("title, description, type")
+        .eq("brainstorm_id", id!)
+        .eq("type", "note");
+      const notesText = (bRefs || []).map((r: any) => `${r.title}: ${r.description || ""}`).join("\n");
+
       // Generate execution strategy in background
       supabase.functions.invoke("generate-strategy", {
         body: {
@@ -393,12 +401,13 @@ export default function BrainstormWorkspace() {
           bullets,
           tags: bTags,
           category: bCategory,
+          notes: notesText,
         },
       }).then(async (res) => {
         if (!res.error && res.data?.strategy) {
           await supabase.from("projects").update({ execution_strategy: res.data.strategy } as any).eq("id", data.id);
         }
-      }).catch(() => {});
+      }).catch((err) => console.error("Strategy generation failed:", err));
 
       return data;
     },
@@ -1018,7 +1027,7 @@ export default function BrainstormWorkspace() {
                                   <Icon className={`h-4 w-4 ${iconColor} shrink-0`} />
                                   <span className="text-sm font-medium truncate flex-1">{ref.title}</span>
                                   {ref.description && (
-                                    <span className="text-xs text-muted-foreground truncate max-w-[200px] hidden sm:inline">{ref.description}</span>
+                                    <span className="text-xs text-muted-foreground truncate max-w-[200px] hidden sm:inline">{ref.type === "note" ? ref.description.replace(/<[^>]*>/g, "").trim() : ref.description}</span>
                                   )}
                                   {!isLocked && (
                                     <div className="flex items-center gap-0.5 shrink-0">
@@ -1054,7 +1063,7 @@ export default function BrainstormWorkspace() {
                                     <div className="flex-1 min-w-0">
                                       <p className="text-sm font-medium truncate">{ref.title}</p>
                                       {ref.description && (
-                                        <p className="text-xs text-muted-foreground line-clamp-2">{ref.description}</p>
+                                        <p className="text-xs text-muted-foreground line-clamp-2">{ref.type === "note" ? ref.description.replace(/<[^>]*>/g, "").trim() : ref.description}</p>
                                       )}
                                     </div>
                                     {!isLocked && (

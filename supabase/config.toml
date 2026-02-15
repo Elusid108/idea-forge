@@ -11,3 +11,6 @@ verify_jwt = false
 
 [functions.generate-strategy]
 verify_jwt = false
+
+[functions.project-chat]
+verify_jwt = false
