@@ -1679,6 +1679,7 @@ export default function ProjectWorkspace() {
 
       {/* Floating Chat Widget */}
       <FloatingChatWidget
+        storageKey="chat-widget-project"
         title="Project Assistant"
         chatHistory={chatHistory}
         chatInput={chatInput}

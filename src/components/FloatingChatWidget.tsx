@@ -18,6 +18,7 @@ interface FloatingChatWidgetProps {
   renderMessage: (msg: ChatMsg, i: number) => ReactNode;
   placeholder: string;
   onKeyDown?: (e: React.KeyboardEvent<HTMLTextAreaElement>) => void;
+  storageKey?: string;
 }
 
 export default function FloatingChatWidget({
@@ -30,15 +31,17 @@ export default function FloatingChatWidget({
   renderMessage,
   placeholder,
   onKeyDown,
+  storageKey,
 }: FloatingChatWidgetProps) {
+  const effectiveKey = storageKey || "chat-widget-state";
   const [state, setState] = useState<WidgetState>(() => {
-    const saved = localStorage.getItem("chat-widget-state");
+    const saved = localStorage.getItem(effectiveKey);
     return (saved === "collapsed") ? "collapsed" : "expanded";
   });
 
   useEffect(() => {
-    localStorage.setItem("chat-widget-state", state);
-  }, [state]);
+    localStorage.setItem(effectiveKey, state);
+  }, [state, effectiveKey]);
   const scrollRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {

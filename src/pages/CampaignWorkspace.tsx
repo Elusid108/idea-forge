@@ -520,6 +520,7 @@ export default function CampaignWorkspace() {
 
       {/* Floating Chat */}
       <FloatingChatWidget
+        storageKey="chat-widget-campaign"
         chatHistory={chatHistory}
         chatInput={chatInput}
         isThinking={isChatThinking}
