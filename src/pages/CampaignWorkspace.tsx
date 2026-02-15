@@ -1,23 +1,26 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import {
   ArrowLeft, Trash2, ExternalLink, Plus, X, Pencil, DollarSign, ShoppingCart, Target, Rocket,
-  FolderOpen, Brain, Lightbulb, Megaphone, Bot,
+  FolderOpen, Brain, Lightbulb, Megaphone, Bot, Send, Loader2, CheckCircle2, Sparkles,
+  GripVertical, Check,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Separator } from "@/components/ui/separator";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Checkbox } from "@/components/ui/checkbox";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from "@/components/ui/alert-dialog";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { useAuth } from "@/contexts/AuthContext";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import FloatingChatWidget from "@/components/FloatingChatWidget";
+import EditableMarkdown from "@/components/EditableMarkdown";
 import ReactMarkdown from "react-markdown";
 import { markdownComponents } from "@/lib/markdownComponents";
 import { format } from "date-fns";
@@ -45,7 +48,16 @@ const CATEGORY_COLORS: Record<string, string> = {
   "Environment/Space": "bg-teal-500/20 text-teal-400 border-teal-500/30",
 };
 
+const KANBAN_COLUMNS = [
+  { key: "asset_creation", label: "Asset Creation" },
+  { key: "pre_launch", label: "Pre-Launch" },
+  { key: "active_campaign", label: "Active Campaign" },
+  { key: "fulfillment", label: "Fulfillment" },
+  { key: "evergreen", label: "Evergreen" },
+];
+
 type MarketingLink = { label: string; url: string };
+type ChatMsg = { role: "user" | "assistant"; content: string };
 
 export default function CampaignWorkspace() {
   const { id } = useParams<{ id: string }>();
@@ -61,12 +73,18 @@ export default function CampaignWorkspace() {
   const [linkForm, setLinkForm] = useState({ label: "", url: "" });
   const [showLinkedIdea, setShowLinkedIdea] = useState(false);
 
-  // Chat states
-  const [chatHistory, setChatHistory] = useState<{ role: "user" | "assistant"; content: string }[]>([
-    { role: "assistant", content: "👋 I'm your campaign assistant. I can help you:\n\n- **Plan marketing strategy** and distribution channels\n- **Create tasks** for campaign execution\n- **Generate research notes** with competitor analysis, pricing strategies, and more\n- **Provide actionable recommendations** for growth\n\nHow can I help with your campaign?" }
-  ]);
-  const [chatInput, setChatInput] = useState("");
-  const [isChatThinking, setIsChatThinking] = useState(false);
+  // GTM Interview state
+  const [currentQuestion, setCurrentQuestion] = useState("");
+  const [interviewAnswer, setInterviewAnswer] = useState("");
+  const [isInterviewThinking, setIsInterviewThinking] = useState(false);
+  const [interviewChatHistory, setInterviewChatHistory] = useState<ChatMsg[]>([]);
+  const [questionLoaded, setQuestionLoaded] = useState(false);
+  const [isForging, setIsForging] = useState(false);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+
+  // Add task state
+  const [addingTaskColumn, setAddingTaskColumn] = useState<string | null>(null);
+  const [newTaskTitle, setNewTaskTitle] = useState("");
 
   const { data: campaign, isLoading } = useQuery({
     queryKey: ["campaign", id],
@@ -82,13 +100,12 @@ export default function CampaignWorkspace() {
     enabled: !!id,
   });
 
-  // Linked project with full data for chat context
   const { data: linkedProject } = useQuery({
     queryKey: ["campaign-linked-project", campaign?.project_id],
     queryFn: async () => {
       const { data, error } = await supabase
         .from("projects")
-        .select("id, name, brainstorm_id, compiled_description, execution_strategy, bullet_breakdown")
+        .select("id, name, brainstorm_id, compiled_description, execution_strategy, bullet_breakdown, general_notes, github_repo_url, tags, category")
         .eq("id", campaign!.project_id)
         .single();
       if (error) throw error;
@@ -97,7 +114,6 @@ export default function CampaignWorkspace() {
     enabled: !!campaign?.project_id,
   });
 
-  // Linked brainstorm (through project)
   const { data: linkedBrainstorm } = useQuery({
     queryKey: ["campaign-linked-brainstorm", linkedProject?.brainstorm_id],
     queryFn: async () => {
@@ -113,7 +129,6 @@ export default function CampaignWorkspace() {
     enabled: !!linkedProject?.brainstorm_id,
   });
 
-  // Linked idea (through brainstorm) - full data for overlay
   const { data: linkedIdea } = useQuery({
     queryKey: ["campaign-linked-idea", linkedBrainstorm?.idea_id],
     queryFn: async () => {
@@ -129,41 +144,175 @@ export default function CampaignWorkspace() {
     enabled: !!linkedBrainstorm?.idea_id,
   });
 
-  // Project tasks for chat context
-  const { data: projectTasks = [] } = useQuery({
-    queryKey: ["campaign-project-tasks", campaign?.project_id],
+  const { data: campaignTasks = [], refetch: refetchTasks } = useQuery({
+    queryKey: ["campaign-tasks", id],
     queryFn: async () => {
       const { data, error } = await supabase
-        .from("project_tasks")
-        .select("title, description, priority, completed, due_date")
-        .eq("project_id", campaign!.project_id)
+        .from("campaign_tasks" as any)
+        .select("*")
+        .eq("campaign_id", id!)
         .order("sort_order");
       if (error) throw error;
-      return data;
+      return data as any[];
     },
-    enabled: !!campaign?.project_id,
-  });
-
-  // Project notes for chat context
-  const { data: projectNotes = [] } = useQuery({
-    queryKey: ["campaign-project-notes", campaign?.project_id],
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from("project_references")
-        .select("title, description")
-        .eq("project_id", campaign!.project_id)
-        .eq("type", "note");
-      if (error) throw error;
-      return data;
-    },
-    enabled: !!campaign?.project_id,
+    enabled: !!id,
   });
 
   useEffect(() => {
     if (campaign) {
       setTitleDraft(campaign.title);
+      // Load saved interview chat history
+      if (campaign.chat_history && Array.isArray(campaign.chat_history) && campaign.chat_history.length > 0) {
+        setInterviewChatHistory(campaign.chat_history as ChatMsg[]);
+      }
     }
   }, [campaign]);
+
+  const interviewCompleted = campaign?.interview_completed === true;
+
+  // Generate first GTM question
+  useEffect(() => {
+    if (campaign && !interviewCompleted && !questionLoaded && !isInterviewThinking && linkedProject) {
+      setQuestionLoaded(true);
+      const history = (campaign.chat_history as ChatMsg[]) || [];
+      if (history.length > 0) {
+        const lastAssistant = [...history].reverse().find(m => m.role === "assistant");
+        if (lastAssistant) {
+          const match = lastAssistant.content.match(/Next question:\s*(.+)/);
+          if (match) {
+            setCurrentQuestion(match[1].trim());
+            return;
+          }
+        }
+      }
+      generateFirstQuestion();
+    }
+  }, [campaign, interviewCompleted, questionLoaded, linkedProject]);
+
+  const getInterviewContext = () => ({
+    title: campaign?.title || "",
+    project_name: linkedProject?.name || "",
+    category: campaign?.category || linkedProject?.category || "",
+    tags: campaign?.tags || linkedProject?.tags || [],
+    compiled_description: linkedProject?.compiled_description || "",
+    bullet_breakdown: linkedProject?.bullet_breakdown || "",
+    execution_strategy: (linkedProject as any)?.execution_strategy || "",
+    has_github: !!(linkedProject as any)?.github_repo_url,
+    general_notes: (linkedProject as any)?.general_notes || "",
+  });
+
+  const generateFirstQuestion = async () => {
+    setIsInterviewThinking(true);
+    try {
+      const { data, error } = await supabase.functions.invoke("campaign-chat", {
+        body: {
+          mode: "generate_question",
+          chat_history: interviewChatHistory,
+          context: getInterviewContext(),
+        },
+      });
+      if (error) throw error;
+      setCurrentQuestion(data.question);
+    } catch (e: any) {
+      toast.error("Failed to generate question: " + e.message);
+    } finally {
+      setIsInterviewThinking(false);
+    }
+  };
+
+  const handleInterviewSubmit = async () => {
+    if (!interviewAnswer.trim() || isInterviewThinking) return;
+    setIsInterviewThinking(true);
+
+    const userMsg: ChatMsg = { role: "user", content: `Q: ${currentQuestion}\nA: ${interviewAnswer.trim()}` };
+    const newHistory = [...interviewChatHistory, userMsg];
+
+    try {
+      const { data, error } = await supabase.functions.invoke("campaign-chat", {
+        body: {
+          mode: "submit_answer",
+          answer: interviewAnswer.trim(),
+          question: currentQuestion,
+          chat_history: newHistory,
+          context: getInterviewContext(),
+        },
+      });
+      if (error) throw error;
+
+      const { next_question, clarification } = data;
+
+      if (clarification) {
+        const assistantMsg: ChatMsg = { role: "assistant", content: clarification };
+        const finalHistory = [...newHistory, assistantMsg];
+        setInterviewChatHistory(finalHistory);
+        setCurrentQuestion(next_question);
+        setInterviewAnswer("");
+        await supabase.from("campaigns" as any).update({ chat_history: finalHistory }).eq("id", id!);
+      } else {
+        const assistantMsg: ChatMsg = { role: "assistant", content: `Noted. Next question: ${next_question}` };
+        const finalHistory = [...newHistory, assistantMsg];
+        setInterviewChatHistory(finalHistory);
+        setCurrentQuestion(next_question);
+        setInterviewAnswer("");
+        await supabase.from("campaigns" as any).update({ chat_history: finalHistory }).eq("id", id!);
+      }
+      queryClient.invalidateQueries({ queryKey: ["campaign", id] });
+    } catch (e: any) {
+      toast.error("Failed: " + e.message);
+    } finally {
+      setIsInterviewThinking(false);
+      setTimeout(() => textareaRef.current?.focus(), 50);
+    }
+  };
+
+  const handleForgePlaybook = async () => {
+    setIsForging(true);
+    try {
+      const { data, error } = await supabase.functions.invoke("campaign-chat", {
+        body: {
+          mode: "forge_playbook",
+          chat_history: interviewChatHistory,
+          context: getInterviewContext(),
+        },
+      });
+      if (error) throw error;
+
+      const { playbook, sales_model, primary_channel, tasks } = data;
+
+      // Update campaign
+      await supabase.from("campaigns" as any).update({
+        playbook,
+        sales_model: sales_model || "",
+        primary_channel: primary_channel || "",
+        interview_completed: true,
+        chat_history: interviewChatHistory,
+      }).eq("id", id!);
+
+      // Create tasks
+      if (tasks && Array.isArray(tasks)) {
+        for (let i = 0; i < tasks.length; i++) {
+          const t = tasks[i];
+          await supabase.from("campaign_tasks" as any).insert({
+            campaign_id: id!,
+            user_id: user!.id,
+            title: t.title || "",
+            description: t.description || "",
+            status_column: t.status_column || "asset_creation",
+            sort_order: i,
+          });
+        }
+      }
+
+      queryClient.invalidateQueries({ queryKey: ["campaign", id] });
+      queryClient.invalidateQueries({ queryKey: ["campaign-tasks", id] });
+      queryClient.invalidateQueries({ queryKey: ["sidebar-items"] });
+      toast.success("Campaign Playbook forged!");
+    } catch (e: any) {
+      toast.error("Failed to forge playbook: " + e.message);
+    } finally {
+      setIsForging(false);
+    }
+  };
 
   const updateCampaign = useMutation({
     mutationFn: async (fields: Record<string, any>) => {
@@ -179,7 +328,6 @@ export default function CampaignWorkspace() {
 
   const deleteCampaign = useMutation({
     mutationFn: async () => {
-      // Unlink the project
       if (campaign?.project_id) {
         await supabase.from("projects").update({ campaign_id: null } as any).eq("id", campaign.project_id);
       }
@@ -225,40 +373,39 @@ export default function CampaignWorkspace() {
     updateCampaign.mutate({ marketing_links: updated });
   };
 
-  const handleChatSubmit = async () => {
-    if (!chatInput.trim() || isChatThinking) return;
-    const userMsg = { role: "user" as const, content: chatInput.trim() };
-    const newHistory = [...chatHistory, userMsg];
-    setChatHistory(newHistory);
-    setChatInput("");
-    setIsChatThinking(true);
+  const handleToggleTask = async (taskId: string, completed: boolean) => {
+    await supabase.from("campaign_tasks" as any).update({ completed: !completed }).eq("id", taskId);
+    refetchTasks();
+  };
 
-    const tasksStr = projectTasks.map((t: any) => `[${t.completed ? "✓" : "○"}] ${t.title} (${t.priority}${t.due_date ? `, due ${t.due_date}` : ""})`).join("\n") || "None";
-    const notesStr = projectNotes.map((n: any) => `${n.title}: ${n.description || ""}`).join("\n") || "None";
+  const handleDeleteTask = async (taskId: string) => {
+    await supabase.from("campaign_tasks" as any).delete().eq("id", taskId);
+    refetchTasks();
+  };
 
-    try {
-      const { data, error } = await supabase.functions.invoke("project-chat", {
-        body: {
-          messages: newHistory,
-          context: {
-            title: campaign?.title || "",
-            description: `Campaign for project "${linkedProject?.name || ""}". Sales model: ${campaign?.sales_model || "not set"}. Channel: ${campaign?.primary_channel || "not set"}. Revenue: $${campaign?.revenue || 0}. Units sold: ${campaign?.units_sold || 0}. Target price: $${campaign?.target_price || 0}. Category: ${campaign?.category || "none"}. Tags: ${(campaign?.tags || []).join(", ") || "none"}.`,
-            tasks: tasksStr,
-            notes: notesStr,
-            execution_strategy: (linkedProject as any)?.execution_strategy || "",
-            bullet_breakdown: (linkedProject as any)?.bullet_breakdown || "",
-            project_description: (linkedProject as any)?.compiled_description || "",
-          },
-        },
-      });
-      if (error) throw error;
-      setChatHistory([...newHistory, { role: "assistant", content: data.message || "Done." }]);
-    } catch (e: any) {
-      toast.error("Chat failed: " + e.message);
-    } finally {
-      setIsChatThinking(false);
+  const handleAddTask = async (column: string) => {
+    if (!newTaskTitle.trim()) return;
+    await supabase.from("campaign_tasks" as any).insert({
+      campaign_id: id!,
+      user_id: user!.id,
+      title: newTaskTitle.trim(),
+      status_column: column,
+      sort_order: campaignTasks.filter((t: any) => t.status_column === column).length,
+    });
+    setNewTaskTitle("");
+    setAddingTaskColumn(null);
+    refetchTasks();
+  };
+
+  const handleInterviewKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (e.key === "Enter" && !e.shiftKey) {
+      e.preventDefault();
+      handleInterviewSubmit();
     }
   };
+
+  // Count Q&A exchanges (user messages)
+  const exchangeCount = interviewChatHistory.filter(m => m.role === "user").length;
 
   if (isLoading) {
     return <div className="flex items-center justify-center py-20"><Skeleton className="h-8 w-8" /></div>;
@@ -273,6 +420,141 @@ export default function CampaignWorkspace() {
     );
   }
 
+  // =================== STATE 1: GTM INTERVIEW ===================
+  if (!interviewCompleted) {
+    return (
+      <div className="space-y-6 max-w-3xl mx-auto">
+        {/* Header */}
+        <div className="flex items-center gap-3">
+          <Button variant="ghost" size="icon" onClick={() => navigate("/campaigns")}>
+            <ArrowLeft className="h-4 w-4" />
+          </Button>
+          <div>
+            <h1 className="text-2xl font-bold">{campaign.title}</h1>
+            <p className="text-xs text-muted-foreground">Go-To-Market Strategy Interview</p>
+          </div>
+        </div>
+
+        {/* Project context summary */}
+        {linkedProject && (
+          <Card className="border-border/50 bg-card/50">
+            <CardContent className="p-4">
+              <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-2">Project Context</p>
+              <div className="flex items-center gap-2 flex-wrap">
+                <Badge variant="outline" className="text-xs gap-1">
+                  <FolderOpen className="h-3 w-3 text-blue-400" /> {linkedProject.name}
+                </Badge>
+                {campaign.category && (
+                  <Badge className={`text-xs border ${CATEGORY_COLORS[campaign.category] || "bg-secondary text-secondary-foreground"}`}>
+                    {campaign.category}
+                  </Badge>
+                )}
+                {campaign.tags?.map((tag: string) => (
+                  <Badge key={tag} variant="secondary" className="text-xs">{tag}</Badge>
+                ))}
+              </div>
+            </CardContent>
+          </Card>
+        )}
+
+        {/* Interview Q&A Card */}
+        <Card className="border-border bg-muted/30">
+          <CardContent className="p-6 space-y-4">
+            <div className="flex items-center gap-2 mb-2">
+              <Rocket className="h-5 w-5 text-primary" />
+              <h2 className="text-lg font-semibold">GTM Strategy Interview</h2>
+            </div>
+
+            {/* Previous Q&A history */}
+            {interviewChatHistory.length > 0 && (
+              <div className="space-y-3 max-h-[300px] overflow-y-auto pr-2">
+                {interviewChatHistory.map((msg, i) => (
+                  <div key={i} className={`flex items-start gap-2 ${msg.role === "user" ? "justify-end" : ""}`}>
+                    {msg.role === "assistant" && (
+                      <div className="h-6 w-6 rounded-full bg-primary/10 flex items-center justify-center shrink-0 mt-0.5">
+                        <Bot className="h-3 w-3 text-primary" />
+                      </div>
+                    )}
+                    <div className={`rounded-lg px-3 py-2 text-sm max-w-[85%] ${msg.role === "user" ? "bg-primary text-primary-foreground" : "bg-muted"}`}>
+                      {msg.role === "assistant" ? (
+                        <div className="prose prose-invert prose-sm max-w-none [&_ul]:list-disc [&_ol]:list-decimal [&_ul]:pl-5 [&_ol]:pl-5 [&_li]:my-0.5 [&_p]:my-1.5">
+                          <ReactMarkdown components={markdownComponents}>{msg.content}</ReactMarkdown>
+                        </div>
+                      ) : (
+                        msg.content.replace(/^Q:.*\nA:\s*/, "")
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {interviewChatHistory.length > 0 && <Separator />}
+
+            {/* Current question */}
+            {isInterviewThinking && !currentQuestion ? (
+              <div className="space-y-2">
+                <Skeleton className="h-4 w-3/4" />
+                <Skeleton className="h-4 w-1/2" />
+              </div>
+            ) : currentQuestion ? (
+              <div className="space-y-3">
+                <div className="flex items-start gap-2">
+                  <div className="h-6 w-6 rounded-full bg-primary/10 flex items-center justify-center shrink-0 mt-0.5">
+                    <Bot className="h-3 w-3 text-primary" />
+                  </div>
+                  <p className="text-sm font-medium leading-relaxed">{currentQuestion}</p>
+                </div>
+                <Textarea
+                  ref={textareaRef}
+                  value={interviewAnswer}
+                  onChange={(e) => setInterviewAnswer(e.target.value)}
+                  onKeyDown={handleInterviewKeyDown}
+                  placeholder="Type your answer… (Enter to send, Shift+Enter for newline)"
+                  className="min-h-[80px] resize-none text-sm"
+                  disabled={isInterviewThinking}
+                />
+                <Button
+                  onClick={handleInterviewSubmit}
+                  disabled={!interviewAnswer.trim() || isInterviewThinking}
+                  className="w-full gap-2"
+                >
+                  {isInterviewThinking ? (
+                    <><Loader2 className="h-4 w-4 animate-spin" /> Thinking…</>
+                  ) : (
+                    <><Send className="h-4 w-4" /> Submit Answer</>
+                  )}
+                </Button>
+              </div>
+            ) : (
+              <div className="flex flex-col items-center justify-center py-4 text-center">
+                <Bot className="h-8 w-8 text-muted-foreground/50 mb-2" />
+                <p className="text-xs text-muted-foreground">Loading interview questions…</p>
+              </div>
+            )}
+          </CardContent>
+        </Card>
+
+        {/* Forge Playbook button -- appears after 3+ exchanges */}
+        {exchangeCount >= 3 && (
+          <Button
+            onClick={handleForgePlaybook}
+            disabled={isForging}
+            size="lg"
+            className="w-full gap-2 h-14 text-base"
+          >
+            {isForging ? (
+              <><Loader2 className="h-5 w-5 animate-spin" /> Forging Campaign Playbook…</>
+            ) : (
+              <><Sparkles className="h-5 w-5" /> Forge Campaign Playbook</>
+            )}
+          </Button>
+        )}
+      </div>
+    );
+  }
+
+  // =================== STATE 2: DASHBOARD ===================
   const metricCards = [
     { key: "revenue", label: "Revenue", icon: DollarSign, prefix: "$", value: campaign.revenue || 0 },
     { key: "units_sold", label: "Units Sold", icon: ShoppingCart, prefix: "", value: campaign.units_sold || 0 },
@@ -421,6 +703,9 @@ export default function CampaignWorkspace() {
         ))}
       </div>
 
+      {/* Campaign Playbook */}
+      <EditablePlaybook campaignId={id!} initialValue={campaign.playbook || ""} updateCampaign={updateCampaign} />
+
       {/* Two-column layout */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         {/* Distribution Strategy */}
@@ -474,12 +759,7 @@ export default function CampaignWorkspace() {
                 {marketingLinks.map((link, i) => (
                   <div key={i} className="flex items-center gap-2 p-2 rounded-lg border border-border/50 bg-background/50">
                     <ExternalLink className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
-                    <a
-                      href={link.url}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="text-sm text-primary hover:underline truncate flex-1"
-                    >
+                    <a href={link.url} target="_blank" rel="noopener noreferrer" className="text-sm text-primary hover:underline truncate flex-1">
                       {link.label}
                     </a>
                     <Button variant="ghost" size="icon" className="h-6 w-6 text-muted-foreground hover:text-destructive shrink-0" onClick={() => handleDeleteLink(i)}>
@@ -491,6 +771,68 @@ export default function CampaignWorkspace() {
             )}
           </CardContent>
         </Card>
+      </div>
+
+      {/* Kanban Task Board */}
+      <div>
+        <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-3">Go-To-Market Pipeline</p>
+        <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-5 gap-3">
+          {KANBAN_COLUMNS.map(col => {
+            const colTasks = campaignTasks.filter((t: any) => t.status_column === col.key);
+            return (
+              <div key={col.key} className="rounded-lg border border-border/50 bg-card/30 p-3 min-h-[150px]">
+                <div className="flex items-center justify-between mb-3">
+                  <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">{col.label}</p>
+                  <Badge variant="secondary" className="text-[10px]">{colTasks.length}</Badge>
+                </div>
+                <div className="space-y-2">
+                  {colTasks.map((task: any) => (
+                    <div key={task.id} className={`flex items-start gap-2 p-2 rounded-md border border-border/30 bg-background/50 ${task.completed ? "opacity-60" : ""}`}>
+                      <Checkbox
+                        checked={task.completed}
+                        onCheckedChange={() => handleToggleTask(task.id, task.completed)}
+                        className="mt-0.5"
+                      />
+                      <div className="flex-1 min-w-0">
+                        <p className={`text-xs font-medium ${task.completed ? "line-through text-muted-foreground" : ""}`}>{task.title}</p>
+                        {task.description && (
+                          <p className="text-[10px] text-muted-foreground mt-0.5 line-clamp-2">{task.description}</p>
+                        )}
+                      </div>
+                      <Button variant="ghost" size="icon" className="h-5 w-5 text-muted-foreground hover:text-destructive shrink-0" onClick={() => handleDeleteTask(task.id)}>
+                        <X className="h-3 w-3" />
+                      </Button>
+                    </div>
+                  ))}
+                </div>
+                {/* Add task */}
+                {addingTaskColumn === col.key ? (
+                  <div className="mt-2 space-y-1">
+                    <Input
+                      value={newTaskTitle}
+                      onChange={(e) => setNewTaskTitle(e.target.value)}
+                      placeholder="Task title…"
+                      className="h-7 text-xs"
+                      autoFocus
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") handleAddTask(col.key);
+                        if (e.key === "Escape") { setAddingTaskColumn(null); setNewTaskTitle(""); }
+                      }}
+                    />
+                    <div className="flex gap-1">
+                      <Button size="sm" className="h-6 text-[10px]" onClick={() => handleAddTask(col.key)} disabled={!newTaskTitle.trim()}>Add</Button>
+                      <Button size="sm" variant="ghost" className="h-6 text-[10px]" onClick={() => { setAddingTaskColumn(null); setNewTaskTitle(""); }}>Cancel</Button>
+                    </div>
+                  </div>
+                ) : (
+                  <Button variant="ghost" size="sm" className="w-full mt-2 h-7 text-xs gap-1 text-muted-foreground" onClick={() => setAddingTaskColumn(col.key)}>
+                    <Plus className="h-3 w-3" /> Add Task
+                  </Button>
+                )}
+              </div>
+            );
+          })}
+        </div>
       </div>
 
       {/* Add Link Dialog */}
@@ -517,40 +859,6 @@ export default function CampaignWorkspace() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
-
-      {/* Floating Chat */}
-      <FloatingChatWidget
-        storageKey="chat-widget-campaign"
-        chatHistory={chatHistory}
-        chatInput={chatInput}
-        isThinking={isChatThinking}
-        onInputChange={setChatInput}
-        onSubmit={handleChatSubmit}
-        onKeyDown={(e) => {
-          if (e.key === "Enter" && !e.shiftKey) {
-            e.preventDefault();
-            handleChatSubmit();
-          }
-        }}
-        title="Campaign Assistant"
-        placeholder="Ask about your campaign…"
-        renderMessage={(msg, i) => (
-          <div key={i} className={`flex items-start gap-2 ${msg.role === "user" ? "justify-end" : ""}`}>
-            {msg.role === "assistant" && (
-              <div className="h-6 w-6 rounded-full bg-primary/10 flex items-center justify-center shrink-0 mt-0.5">
-                <Bot className="h-3 w-3 text-primary" />
-              </div>
-            )}
-            <div className={`rounded-lg px-3 py-2 text-sm max-w-[80%] ${msg.role === "user" ? "bg-primary text-primary-foreground" : "bg-muted"}`}>
-              {msg.role === "assistant" ? (
-                <div className="prose prose-invert prose-sm max-w-none [&_ul]:list-disc [&_ol]:list-decimal [&_ul]:pl-5 [&_ol]:pl-5 [&_li]:my-0.5 [&_p]:my-1.5">
-                  <ReactMarkdown components={markdownComponents}>{msg.content}</ReactMarkdown>
-                </div>
-              ) : msg.content}
-            </div>
-          </div>
-        )}
-      />
 
       {/* Linked Idea Overlay */}
       {linkedIdea && (
@@ -602,6 +910,32 @@ export default function CampaignWorkspace() {
           </DialogContent>
         </Dialog>
       )}
+    </div>
+  );
+}
+
+// Separate component for editable playbook to handle its own state
+function EditablePlaybook({ campaignId, initialValue, updateCampaign }: { campaignId: string; initialValue: string; updateCampaign: any }) {
+  const [playbook, setPlaybook] = useState(initialValue);
+
+  useEffect(() => {
+    setPlaybook(initialValue);
+  }, [initialValue]);
+
+  return (
+    <div>
+      <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-1">Campaign Playbook</p>
+      <EditableMarkdown
+        value={playbook}
+        onChange={setPlaybook}
+        onSave={() => {
+          if (playbook !== initialValue) {
+            updateCampaign.mutate({ playbook });
+          }
+        }}
+        placeholder="No playbook generated yet…"
+        minHeight="120px"
+      />
     </div>
   );
 }
