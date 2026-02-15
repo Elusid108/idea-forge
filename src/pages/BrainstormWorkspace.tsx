@@ -4,7 +4,7 @@ import { useParams, useNavigate } from "react-router-dom";
 import {
   ArrowLeft, Plus, Link as LinkIcon, Image, Film, StickyNote, X, Pencil,
   Loader2, Rocket, Lightbulb, Bot, Send, CheckCircle2,
-  Grid3X3, List, ChevronDown, ChevronRight, ArrowUpDown, FolderOpen,
+  Grid3X3, List, ChevronDown, ChevronRight, ArrowUpDown, FolderOpen, Megaphone,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -176,6 +176,22 @@ export default function BrainstormWorkspace() {
       return data;
     },
     enabled: !!id,
+  });
+
+  // Query for linked campaign (through linked project)
+  const { data: linkedCampaign } = useQuery({
+    queryKey: ["brainstorm-linked-campaign", linkedProject?.id],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("campaigns" as any)
+        .select("id, title")
+        .eq("project_id", linkedProject!.id)
+        .is("deleted_at", null)
+        .maybeSingle();
+      if (error) throw error;
+      return data as any;
+    },
+    enabled: !!linkedProject?.id,
   });
 
   useEffect(() => {
@@ -816,6 +832,15 @@ export default function BrainstormWorkspace() {
             onClick={() => navigate(`/projects/${linkedProject.id}`)}
           >
             <FolderOpen className="h-3 w-3" /> Linked Project
+          </Badge>
+        )}
+        {linkedCampaign && (
+          <Badge
+            variant="outline"
+            className="text-xs gap-1 cursor-pointer hover:bg-accent transition-colors"
+            onClick={() => navigate(`/campaigns/${linkedCampaign.id}`)}
+          >
+            <Megaphone className="h-3 w-3" /> Linked Campaign
           </Badge>
         )}
       </div>

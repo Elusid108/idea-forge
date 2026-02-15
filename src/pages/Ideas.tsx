@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { Plus, Lightbulb, Grid3X3, List, Mic, MicOff, Loader2, Brain, ChevronDown, ChevronRight, ChevronLeft, Ban, FolderOpen, X } from "lucide-react";
+import { Plus, Lightbulb, Grid3X3, List, Mic, MicOff, Loader2, Brain, ChevronDown, ChevronRight, ChevronLeft, Ban, FolderOpen, X, Megaphone } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
@@ -157,6 +157,21 @@ function IdeaDetailModal({
     enabled: !!linkedBrainstorm?.id,
   });
 
+  const { data: linkedCampaign } = useQuery({
+    queryKey: ["idea-linked-campaign", linkedProject?.id],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("campaigns" as any)
+        .select("id, title")
+        .eq("project_id", linkedProject!.id)
+        .is("deleted_at", null)
+        .maybeSingle();
+      if (error) throw error;
+      return data as any;
+    },
+    enabled: !!linkedProject?.id,
+  });
+
   if (!idea) return null;
 
   return (
@@ -206,6 +221,15 @@ function IdeaDetailModal({
                 onClick={() => { onOpenChange(false); navigate(`/projects/${linkedProject.id}`); }}
               >
                 <FolderOpen className="h-3 w-3" /> Linked Project
+              </Badge>
+            )}
+            {linkedCampaign && (
+              <Badge
+                variant="outline"
+                className="text-xs gap-1 cursor-pointer hover:bg-accent transition-colors"
+                onClick={() => { onOpenChange(false); navigate(`/campaigns/${linkedCampaign.id}`); }}
+              >
+                <Megaphone className="h-3 w-3" /> Linked Campaign
               </Badge>
             )}
           </div>

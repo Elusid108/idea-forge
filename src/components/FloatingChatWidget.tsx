@@ -31,7 +31,14 @@ export default function FloatingChatWidget({
   placeholder,
   onKeyDown,
 }: FloatingChatWidgetProps) {
-  const [state, setState] = useState<WidgetState>("expanded");
+  const [state, setState] = useState<WidgetState>(() => {
+    const saved = localStorage.getItem("chat-widget-state");
+    return (saved === "collapsed") ? "collapsed" : "expanded";
+  });
+
+  useEffect(() => {
+    localStorage.setItem("chat-widget-state", state);
+  }, [state]);
   const scrollRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
