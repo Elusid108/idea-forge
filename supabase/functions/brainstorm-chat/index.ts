@@ -26,7 +26,9 @@ serve(async (req) => {
     // --- chat_query mode (post-promotion read-only Q&A) ---
     if (mode === "chat_query") {
       const ctx = context || {};
-      const systemPrompt = `You are a helpful read-only assistant for a brainstorm project. You answer questions about the brainstorm content below. You do NOT modify anything — just answer clearly and concisely. Format your responses using markdown for readability (use bold, lists, headers as appropriate).
+      const systemPrompt = `You are a helpful assistant for a brainstorm project. You answer questions about the brainstorm content below and can create notes to compile research, book lists, resource lists, etc. Format your responses using markdown for readability (use bold, lists, headers as appropriate).
+
+IMPORTANT: When the user asks for resources, research, book recommendations, or notes, FIRST ask them how extensive they want the list to be (e.g., "Would you like a quick list of 3-5 top resources, or a comprehensive list of 15-30?"). Only generate after they specify.
 
 Brainstorm content:
 - Title: ${ctx.title || "Untitled"}
@@ -37,6 +39,24 @@ Brainstorm content:
 - References: ${ctx.references || "None"}
 - Raw idea dump: ${ctx.idea_raw || "N/A"}
 - AI-processed summary: ${ctx.idea_summary || "N/A"}`;
+
+      const tools = [
+        {
+          type: "function",
+          function: {
+            name: "create_note",
+            description: "Create a new note/reference for the brainstorm. Use this to compile research, book lists, resource lists, etc.",
+            parameters: {
+              type: "object",
+              properties: {
+                title: { type: "string", description: "Note title" },
+                content: { type: "string", description: "Note content in HTML format. Use <ul><li> for lists, <b> for bold, etc." },
+              },
+              required: ["title", "content"],
+            },
+          },
+        },
+      ];
 
       const messages: any[] = [
         { role: "system", content: systemPrompt },
@@ -52,6 +72,8 @@ Brainstorm content:
         body: JSON.stringify({
           model: "google/gemini-3-flash-preview",
           messages,
+          tools,
+          max_tokens: 4000,
         }),
       });
 
@@ -65,8 +87,20 @@ Brainstorm content:
       }
 
       const data = await response.json();
-      const answerText = data.choices?.[0]?.message?.content || "I couldn't generate an answer.";
-      return new Response(JSON.stringify({ answer: answerText }), {
+      const msg = data.choices?.[0]?.message;
+      const answerText = msg?.content || "";
+      
+      // Extract tool calls (note creation)
+      const toolCalls = msg?.tool_calls || [];
+      const actions: any[] = [];
+      for (const tc of toolCalls) {
+        try {
+          const args = JSON.parse(tc.function.arguments);
+          actions.push({ action: tc.function.name, ...args });
+        } catch {}
+      }
+
+      return new Response(JSON.stringify({ answer: answerText, actions }), {
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }

@@ -19,6 +19,7 @@ import { toast } from "sonner";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import FloatingChatWidget from "@/components/FloatingChatWidget";
 import ReactMarkdown from "react-markdown";
+import { markdownComponents } from "@/lib/markdownComponents";
 import { format } from "date-fns";
 
 const STATUS_OPTIONS = ["asset_creation", "pre_launch", "active_campaign", "fulfillment", "evergreen"];
@@ -61,7 +62,9 @@ export default function CampaignWorkspace() {
   const [showLinkedIdea, setShowLinkedIdea] = useState(false);
 
   // Chat states
-  const [chatHistory, setChatHistory] = useState<{ role: "user" | "assistant"; content: string }[]>([]);
+  const [chatHistory, setChatHistory] = useState<{ role: "user" | "assistant"; content: string }[]>([
+    { role: "assistant", content: "👋 I'm your campaign assistant. I can help you:\n\n- **Plan marketing strategy** and distribution channels\n- **Create tasks** for campaign execution\n- **Generate research notes** with competitor analysis, pricing strategies, and more\n- **Provide actionable recommendations** for growth\n\nHow can I help with your campaign?" }
+  ]);
   const [chatInput, setChatInput] = useState("");
   const [isChatThinking, setIsChatThinking] = useState(false);
 
@@ -540,7 +543,7 @@ export default function CampaignWorkspace() {
             <div className={`rounded-lg px-3 py-2 text-sm max-w-[80%] ${msg.role === "user" ? "bg-primary text-primary-foreground" : "bg-muted"}`}>
               {msg.role === "assistant" ? (
                 <div className="prose prose-invert prose-sm max-w-none [&_ul]:list-disc [&_ol]:list-decimal [&_ul]:pl-5 [&_ol]:pl-5 [&_li]:my-0.5 [&_p]:my-1.5">
-                  <ReactMarkdown>{msg.content}</ReactMarkdown>
+                  <ReactMarkdown components={markdownComponents}>{msg.content}</ReactMarkdown>
                 </div>
               ) : msg.content}
             </div>

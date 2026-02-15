@@ -30,6 +30,7 @@ import EditableMarkdown from "@/components/EditableMarkdown";
 import ReferenceViewer, { getVideoThumbnail } from "@/components/ReferenceViewer";
 import RichTextNoteEditor from "@/components/RichTextNoteEditor";
 import ReactMarkdown from "react-markdown";
+import { markdownComponents } from "@/lib/markdownComponents";
 import { format, formatDistanceToNow } from "date-fns";
 
 type RefType = "link" | "image" | "video" | "note" | "file";
@@ -138,7 +139,9 @@ export default function ProjectWorkspace() {
   const [receiptFile, setReceiptFile] = useState<File | null>(null);
 
   // Chatbot states
-  const [chatHistory, setChatHistory] = useState<ChatMsg[]>([]);
+  const [chatHistory, setChatHistory] = useState<ChatMsg[]>([
+    { role: "assistant", content: "👋 I'm your project assistant. I can help you:\n\n- **Create tasks & subtasks** with priorities and due dates\n- **Generate research notes** with book lists, resources, and recommendations\n- **Update your execution strategy**\n- **Recommend specific resources** (websites, tools, articles)\n\nWhat would you like to work on?" }
+  ]);
   const [chatInput, setChatInput] = useState("");
   const [isChatThinking, setIsChatThinking] = useState(false);
   const chatScrollRef = useRef<HTMLDivElement>(null);
@@ -643,25 +646,73 @@ export default function ProjectWorkspace() {
       let createdNoteId: string | null = null;
       let createdNoteTitle: string | null = null;
       if (data.actions && data.actions.length > 0) {
-        for (const action of data.actions) {
+        // Separate parent tasks and subtasks for two-pass insertion
+        const taskActions = data.actions.filter((a: any) => a.action === "add_task");
+        const parentTasks = taskActions.filter((a: any) => !a.parent_task_id);
+        const subtasks = taskActions.filter((a: any) => !!a.parent_task_id);
+        const otherActions = data.actions.filter((a: any) => a.action !== "add_task");
+
+        // Pass 1: Insert parent tasks and build title->id mapping
+        const titleToIdMap = new Map<string, string>();
+        for (const action of parentTasks) {
+          const { data: taskData } = await supabase.from("project_tasks").insert({
+            project_id: id!,
+            user_id: user!.id,
+            title: action.title,
+            description: action.description || "",
+            priority: action.priority || "medium",
+            due_date: action.due_date || null,
+            parent_task_id: null,
+            sort_order: tasks.length,
+          } as any).select("id").single();
+          if (taskData) titleToIdMap.set(action.title, taskData.id);
+          toast.success(`Task added: ${action.title}`);
+        }
+
+        // Pass 2: Insert subtasks, resolving parent_task_id by title
+        for (const action of subtasks) {
+          // Try to resolve parent_task_id: first check if it's a real UUID in existing tasks, then try title match
+          let resolvedParentId = action.parent_task_id;
+          const existingTask = tasks.find((t: any) => t.id === action.parent_task_id);
+          if (!existingTask) {
+            // Try matching by title from just-created parents
+            const fromMap = titleToIdMap.get(action.parent_task_id);
+            if (fromMap) {
+              resolvedParentId = fromMap;
+            } else {
+              // Try fuzzy match - maybe the AI used a slightly different title
+              for (const [title, taskId] of titleToIdMap.entries()) {
+                if (title.toLowerCase().includes(action.parent_task_id.toLowerCase()) || action.parent_task_id.toLowerCase().includes(title.toLowerCase())) {
+                  resolvedParentId = taskId;
+                  break;
+                }
+              }
+            }
+          }
+          await supabase.from("project_tasks").insert({
+            project_id: id!,
+            user_id: user!.id,
+            title: action.title,
+            description: action.description || "",
+            priority: action.priority || "medium",
+            due_date: action.due_date || null,
+            parent_task_id: resolvedParentId,
+            sort_order: tasks.length,
+          } as any);
+          toast.success(`Subtask added: ${action.title}`);
+        }
+
+        if (taskActions.length > 0) {
+          queryClient.invalidateQueries({ queryKey: ["project-tasks", id] });
+        }
+
+        // Process other actions
+        for (const action of otherActions) {
           if (action.action === "update_strategy" && action.strategy) {
             setExecutionStrategy(action.strategy);
             await supabase.from("projects").update({ execution_strategy: action.strategy } as any).eq("id", id!);
             queryClient.invalidateQueries({ queryKey: ["project", id] });
             toast.success("Execution strategy updated");
-          } else if (action.action === "add_task" && action.title) {
-            await supabase.from("project_tasks").insert({
-              project_id: id!,
-              user_id: user!.id,
-              title: action.title,
-              description: action.description || "",
-              priority: action.priority || "medium",
-              due_date: action.due_date || null,
-              parent_task_id: action.parent_task_id || null,
-              sort_order: tasks.length,
-            } as any);
-            queryClient.invalidateQueries({ queryKey: ["project-tasks", id] });
-            toast.success(`Task added: ${action.title}`);
           } else if (action.action === "create_note" && action.title) {
             const { data: noteData } = await supabase.from("project_references").insert({
               project_id: id!,
@@ -1258,7 +1309,7 @@ export default function ProjectWorkspace() {
                     {readmeContent ? (
                       <div className="rounded-lg bg-muted/30 border border-border/30 p-3 max-h-[400px] overflow-y-auto">
                         <div className="prose prose-invert prose-sm max-w-none [&_ul]:list-disc [&_ol]:list-decimal [&_ul]:pl-5 [&_ol]:pl-5 [&_li]:my-0.5 [&_p]:my-1.5">
-                          <ReactMarkdown>{readmeContent}</ReactMarkdown>
+                          <ReactMarkdown components={markdownComponents}>{readmeContent}</ReactMarkdown>
                         </div>
                       </div>
                     ) : (
@@ -1647,7 +1698,7 @@ export default function ProjectWorkspace() {
               {msg.role === "assistant" ? (
                 <div>
                   <div className="prose prose-invert prose-sm max-w-none [&_ul]:list-disc [&_ol]:list-decimal [&_ul]:pl-5 [&_ol]:pl-5 [&_li]:my-0.5 [&_p]:my-1.5">
-                    <ReactMarkdown>{msg.content}</ReactMarkdown>
+                    <ReactMarkdown components={markdownComponents}>{msg.content}</ReactMarkdown>
                   </div>
                   {msg.noteId && (
                     <button
