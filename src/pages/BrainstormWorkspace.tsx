@@ -3,7 +3,7 @@ import { useParams, useNavigate } from "react-router-dom";
 import {
   ArrowLeft, Plus, Link as LinkIcon, Image, Film, StickyNote, X, Pencil,
   Loader2, Rocket, Lightbulb, Bot, Send, CheckCircle2,
-  Grid3X3, List, ChevronDown, ChevronRight, ArrowUpDown,
+  Grid3X3, List, ChevronDown, ChevronRight, ArrowUpDown, FolderOpen,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -24,6 +24,7 @@ import { toast } from "sonner";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import EditableMarkdown from "@/components/EditableMarkdown";
 import ReferenceViewer, { getVideoThumbnail } from "@/components/ReferenceViewer";
+import RichTextNoteEditor from "@/components/RichTextNoteEditor";
 import { useUndoRedo } from "@/hooks/useUndoRedo";
 import { format } from "date-fns";
 
@@ -36,6 +37,13 @@ const REF_ICONS: Record<string, any> = {
   image: Image,
   video: Film,
   note: StickyNote,
+};
+
+const REF_ICON_COLORS: Record<string, string> = {
+  note: "text-yellow-400",
+  link: "text-blue-400",
+  image: "text-emerald-400",
+  video: "text-red-400",
 };
 
 const REF_TYPE_ORDER: RefType[] = ["note", "link", "image", "video"];
@@ -102,7 +110,7 @@ export default function BrainstormWorkspace() {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const lastLoadedIdRef = useRef<string | null>(null);
 
-  // Chatbot state (post-promotion)
+  // Chatbot state (post-promotion or scrapped)
   const [queryChatHistory, setQueryChatHistory] = useState<ChatMsg[]>([]);
   const [chatInput, setChatInput] = useState("");
   const [isChatThinking, setIsChatThinking] = useState(false);
@@ -152,6 +160,22 @@ export default function BrainstormWorkspace() {
     enabled: !!id,
   });
 
+  // Query for linked project
+  const { data: linkedProject } = useQuery({
+    queryKey: ["brainstorm-linked-project", id],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("projects")
+        .select("id, name")
+        .eq("brainstorm_id", id!)
+        .is("deleted_at", null)
+        .maybeSingle();
+      if (error) throw error;
+      return data;
+    },
+    enabled: !!id,
+  });
+
   useEffect(() => {
     if (brainstorm) {
       setDescription(brainstorm.compiled_description || "");
@@ -161,6 +185,8 @@ export default function BrainstormWorkspace() {
   }, [brainstorm]);
 
   const isCompleted = brainstorm?.status === "completed";
+  const isScrapped = brainstorm?.status === "scrapped";
+  const isLocked = isCompleted || isScrapped;
 
   // --- Undo/Redo ---
   const handleRevert = useCallback(async (fieldName: string, value: string | null, metadata: any) => {
@@ -205,13 +231,12 @@ export default function BrainstormWorkspace() {
     userId: user?.id,
     onRevert: handleRevert,
     onReapply: handleReapply,
-    enabled: !isCompleted,
+    enabled: !isLocked,
   });
 
   useEffect(() => {
-    if (brainstorm && !questionLoaded && !isThinking && !isCompleted) {
+    if (brainstorm && !questionLoaded && !isThinking && !isLocked) {
       setQuestionLoaded(true);
-      // Try to extract remembered question from chat_history
       const history: ChatMsg[] = (brainstorm?.chat_history as ChatMsg[]) || [];
       if (history.length > 0) {
         const lastAssistant = [...history].reverse().find(m => m.role === "assistant");
@@ -225,7 +250,7 @@ export default function BrainstormWorkspace() {
       }
       generateFirstQuestion();
     }
-  }, [brainstorm, questionLoaded, isCompleted]);
+  }, [brainstorm, questionLoaded, isLocked]);
 
   const chatHistory: ChatMsg[] = (brainstorm?.chat_history as ChatMsg[]) || [];
 
@@ -581,7 +606,7 @@ export default function BrainstormWorkspace() {
     }
   };
 
-  // Chatbot handler (post-promotion)
+  // Chatbot handler (post-promotion or scrapped)
   const handleChatSubmit = async () => {
     if (!chatInput.trim() || isChatThinking) return;
     const userMsg: ChatMsg = { role: "user", content: chatInput.trim() };
@@ -661,7 +686,7 @@ export default function BrainstormWorkspace() {
           <ArrowLeft className="h-4 w-4" />
         </Button>
 
-        {editingTitle && !isCompleted ? (
+        {editingTitle && !isLocked ? (
           <Input
             value={titleDraft}
             onChange={(e) => setTitleDraft(e.target.value)}
@@ -672,25 +697,11 @@ export default function BrainstormWorkspace() {
           />
         ) : (
           <h1
-            className={`text-2xl font-bold ${!isCompleted ? "cursor-pointer hover:text-primary transition-colors" : ""}`}
-            onClick={() => !isCompleted && setEditingTitle(true)}
+            className={`text-2xl font-bold ${!isLocked ? "cursor-pointer hover:text-primary transition-colors" : ""}`}
+            onClick={() => !isLocked && setEditingTitle(true)}
           >
             {brainstorm.title}
           </h1>
-        )}
-
-        {brainstormCategory && (
-          <Badge className={`text-xs border ${categoryBadgeClass}`}>{brainstormCategory}</Badge>
-        )}
-
-        {brainstorm.idea_id && (
-          <Badge
-            variant="outline"
-            className="text-xs gap-1 cursor-pointer hover:bg-accent transition-colors"
-            onClick={() => setShowLinkedIdea(true)}
-          >
-            <Lightbulb className="h-3 w-3" /> Linked Idea
-          </Badge>
         )}
 
         {/* Status selector for non-completed brainstorms */}
@@ -712,7 +723,7 @@ export default function BrainstormWorkspace() {
             <Badge className="bg-emerald-500/20 text-emerald-400 border-emerald-500/30 border gap-1">
               <CheckCircle2 className="h-3 w-3" /> Completed
             </Badge>
-          ) : (
+          ) : !isLocked ? (
             <>
               <AlertDialog>
                 <AlertDialogTrigger asChild>
@@ -740,14 +751,37 @@ export default function BrainstormWorkspace() {
                 {promoteToProject.isPending ? "Promoting…" : "Promote to Project"}
               </Button>
             </>
-          )}
+          ) : null}
         </div>
       </div>
 
-      {/* Created date */}
-      <p className="text-xs text-muted-foreground">
-        Created {format(new Date(brainstorm.created_at), "MMM d, yyyy 'at' h:mm a")}
-      </p>
+      {/* Created date + badges */}
+      <div className="flex items-center gap-2 flex-wrap">
+        <p className="text-xs text-muted-foreground">
+          Created {format(new Date(brainstorm.created_at), "MMM d, yyyy 'at' h:mm a")}
+        </p>
+        {brainstormCategory && (
+          <Badge className={`text-xs border ${categoryBadgeClass}`}>{brainstormCategory}</Badge>
+        )}
+        {brainstorm.idea_id && (
+          <Badge
+            variant="outline"
+            className="text-xs gap-1 cursor-pointer hover:bg-accent transition-colors"
+            onClick={() => setShowLinkedIdea(true)}
+          >
+            <Lightbulb className="h-3 w-3" /> Linked Idea
+          </Badge>
+        )}
+        {linkedProject && (
+          <Badge
+            variant="outline"
+            className="text-xs gap-1 cursor-pointer hover:bg-accent transition-colors"
+            onClick={() => navigate(`/projects/${linkedProject.id}`)}
+          >
+            <FolderOpen className="h-3 w-3" /> Linked Project
+          </Badge>
+        )}
+      </div>
 
       <Separator />
 
@@ -758,11 +792,11 @@ export default function BrainstormWorkspace() {
           {/* AI Interview or Chatbot */}
           <div>
             <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-2">
-              {isCompleted ? "AI Assistant" : "AI Interview"}
+              {isLocked ? "AI Assistant" : "AI Interview"}
             </p>
             <Card className="border-border bg-muted/30">
               <CardContent className="p-4 space-y-3">
-                {isCompleted ? (
+                {isLocked ? (
                   <>
                     <div ref={chatScrollRef} className="max-h-64 overflow-y-auto space-y-3">
                       {queryChatHistory.length === 0 && (
@@ -868,7 +902,7 @@ export default function BrainstormWorkspace() {
               onSave={handleSaveDescription}
               placeholder="Synthesize your idea description here…"
               minHeight="100px"
-              readOnly={isCompleted}
+              readOnly={isLocked}
             />
           </div>
 
@@ -895,7 +929,7 @@ export default function BrainstormWorkspace() {
                 <Button variant="ghost" size="icon" className={`h-8 w-8 ${refViewMode === "list" ? "text-primary" : ""}`} onClick={() => toggleRefViewMode("list")}>
                   <List className="h-3.5 w-3.5" />
                 </Button>
-                {!isCompleted && (
+                {!isLocked && (
                   <Popover>
                     <PopoverTrigger asChild>
                       <Button variant="outline" size="sm" className="gap-1 h-8">
@@ -905,13 +939,14 @@ export default function BrainstormWorkspace() {
                     <PopoverContent className="w-44 p-1" align="end">
                       {(["link", "image", "video", "note"] as RefType[]).map((type) => {
                         const Icon = REF_ICONS[type];
+                        const iconColor = REF_ICON_COLORS[type];
                         return (
                           <button
                             key={type}
                             onClick={() => setAddRefType(type)}
                             className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-sm hover:bg-accent capitalize"
                           >
-                            <Icon className="h-4 w-4" /> {type}
+                            <Icon className={`h-4 w-4 ${iconColor}`} /> {type}
                           </button>
                         );
                       })}
@@ -930,12 +965,13 @@ export default function BrainstormWorkspace() {
               <div className="space-y-3">
                 {groupedRefs.map((group) => {
                   const GroupIcon = REF_ICONS[group.type] || StickyNote;
+                  const groupIconColor = REF_ICON_COLORS[group.type] || "text-muted-foreground";
                   const isGroupCollapsed = collapsedGroups.has(group.type);
                   return (
                     <Collapsible key={group.type} open={!isGroupCollapsed} onOpenChange={() => toggleGroupCollapse(group.type)}>
                       <CollapsibleTrigger className="flex items-center gap-2 w-full text-left py-1 hover:text-primary transition-colors">
                         {isGroupCollapsed ? <ChevronRight className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
-                        <GroupIcon className="h-3.5 w-3.5 text-muted-foreground" />
+                        <GroupIcon className={`h-3.5 w-3.5 ${groupIconColor}`} />
                         <span className="text-sm font-medium">{group.label}</span>
                         <Badge variant="secondary" className="text-[10px] ml-1">{group.items.length}</Badge>
                       </CollapsibleTrigger>
@@ -943,6 +979,7 @@ export default function BrainstormWorkspace() {
                         <div className={refViewMode === "grid" ? "grid grid-cols-1 gap-3 sm:grid-cols-2" : "space-y-2"}>
                           {group.items.map((ref: any) => {
                             const Icon = REF_ICONS[ref.type] || StickyNote;
+                            const iconColor = REF_ICON_COLORS[ref.type] || "text-muted-foreground";
                             const thumbnail = getRefThumbnail(ref);
 
                             if (refViewMode === "list") {
@@ -952,12 +989,12 @@ export default function BrainstormWorkspace() {
                                   className="flex items-center gap-3 p-2 rounded-lg border border-border/50 bg-card/50 cursor-pointer hover:border-primary/30 transition-colors"
                                   onClick={() => handleRefClick(ref)}
                                 >
-                                  <Icon className="h-4 w-4 text-muted-foreground shrink-0" />
+                                  <Icon className={`h-4 w-4 ${iconColor} shrink-0`} />
                                   <span className="text-sm font-medium truncate flex-1">{ref.title}</span>
                                   {ref.description && (
                                     <span className="text-xs text-muted-foreground truncate max-w-[200px] hidden sm:inline">{ref.description}</span>
                                   )}
-                                  {!isCompleted && (
+                                  {!isLocked && (
                                     <div className="flex items-center gap-0.5 shrink-0">
                                       <Button variant="ghost" size="icon" className="h-6 w-6 text-muted-foreground hover:text-primary" onClick={(e) => { e.stopPropagation(); handleEditRef(ref); }}>
                                         <Pencil className="h-3 w-3" />
@@ -985,7 +1022,7 @@ export default function BrainstormWorkspace() {
                                       </div>
                                     ) : (
                                       <div className="h-12 w-16 rounded bg-muted/50 flex items-center justify-center shrink-0">
-                                        <Icon className="h-5 w-5 text-muted-foreground/50" />
+                                        <Icon className={`h-5 w-5 ${iconColor}/50`} />
                                       </div>
                                     )}
                                     <div className="flex-1 min-w-0">
@@ -994,7 +1031,7 @@ export default function BrainstormWorkspace() {
                                         <p className="text-xs text-muted-foreground line-clamp-2">{ref.description}</p>
                                       )}
                                     </div>
-                                    {!isCompleted && (
+                                    {!isLocked && (
                                       <div className="flex flex-col gap-0.5 shrink-0">
                                         <Button variant="ghost" size="icon" className="h-6 w-6 text-muted-foreground hover:text-primary" onClick={(e) => { e.stopPropagation(); handleEditRef(ref); }}>
                                           <Pencil className="h-3 w-3" />
@@ -1044,7 +1081,7 @@ export default function BrainstormWorkspace() {
               onSave={handleSaveBullets}
               placeholder="- Key point 1&#10;- Key point 2&#10;- Key point 3"
               minHeight="80px"
-              readOnly={isCompleted}
+              readOnly={isLocked}
             />
           </div>
         </div>
@@ -1137,12 +1174,20 @@ export default function BrainstormWorkspace() {
                 onChange={(e) => setRefForm(p => ({ ...p, url: e.target.value }))}
               />
             ) : null}
-            <Textarea
-              placeholder="Description (optional)"
-              value={refForm.description}
-              onChange={(e) => setRefForm(p => ({ ...p, description: e.target.value }))}
-              className="resize-none"
-            />
+            {addRefType === "note" ? (
+              <RichTextNoteEditor
+                value={refForm.description}
+                onChange={(val) => setRefForm(p => ({ ...p, description: val }))}
+                placeholder="Write your note…"
+              />
+            ) : (
+              <Textarea
+                placeholder="Description (optional)"
+                value={refForm.description}
+                onChange={(e) => setRefForm(p => ({ ...p, description: e.target.value }))}
+                className="resize-none"
+              />
+            )}
           </div>
           <DialogFooter>
             <Button variant="ghost" onClick={() => setAddRefType(null)}>Cancel</Button>
@@ -1176,12 +1221,20 @@ export default function BrainstormWorkspace() {
                 onChange={(e) => setRefForm(p => ({ ...p, url: e.target.value }))}
               />
             )}
-            <Textarea
-              placeholder="Description (optional)"
-              value={refForm.description}
-              onChange={(e) => setRefForm(p => ({ ...p, description: e.target.value }))}
-              className="resize-none"
-            />
+            {editingRef?.type === "note" ? (
+              <RichTextNoteEditor
+                value={refForm.description}
+                onChange={(val) => setRefForm(p => ({ ...p, description: val }))}
+                placeholder="Write your note…"
+              />
+            ) : (
+              <Textarea
+                placeholder="Description (optional)"
+                value={refForm.description}
+                onChange={(e) => setRefForm(p => ({ ...p, description: e.target.value }))}
+                className="resize-none"
+              />
+            )}
           </div>
           <DialogFooter>
             <Button variant="ghost" onClick={() => setEditingRef(null)}>Cancel</Button>
