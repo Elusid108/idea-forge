@@ -32,7 +32,7 @@ import { format, formatDistanceToNow } from "date-fns";
 
 type RefType = "link" | "image" | "video" | "note" | "file";
 type SortMode = "az" | "za" | "newest" | "oldest";
-type ChatMsg = { role: "user" | "assistant"; content: string };
+type ChatMsg = { role: "user" | "assistant"; content: string; noteId?: string; noteTitle?: string };
 
 const REF_ICONS: Record<string, any> = { link: LinkIcon, image: Image, video: Film, note: StickyNote, file: FileText };
 const REF_ICON_COLORS: Record<string, string> = {
@@ -74,6 +74,17 @@ const PRIORITY_COLORS: Record<string, string> = {
   critical: "bg-red-500/20 text-red-400 border-red-500/30",
 };
 
+const PRIORITY_WEIGHT: Record<string, number> = { critical: 0, high: 1, medium: 2, low: 3 };
+
+const sortTasks = (list: any[]) => [...list].sort((a, b) => {
+  if (a.due_date && b.due_date) {
+    const diff = new Date(a.due_date).getTime() - new Date(b.due_date).getTime();
+    if (diff !== 0) return diff;
+  } else if (a.due_date) return -1;
+  else if (b.due_date) return 1;
+  return (PRIORITY_WEIGHT[a.priority] ?? 2) - (PRIORITY_WEIGHT[b.priority] ?? 2);
+});
+
 const EXPENSE_CATEGORIES = ["General", "Materials", "Software", "Hardware", "Services", "Shipping", "Other"];
 
 const stripHtml = (html: string) => html?.replace(/<[^>]*>/g, "").trim() || "";
@@ -114,8 +125,9 @@ export default function ProjectWorkspace() {
   // Task states
   const [showTaskDialog, setShowTaskDialog] = useState(false);
   const [editingTask, setEditingTask] = useState<any>(null);
-  const [taskForm, setTaskForm] = useState({ title: "", description: "", priority: "medium", due_date: "" });
+  const [taskForm, setTaskForm] = useState({ title: "", description: "", priority: "medium", due_date: "", parent_task_id: "" });
   const [completedTasksOpen, setCompletedTasksOpen] = useState(false);
+  const [viewingTask, setViewingTask] = useState<any>(null);
 
   // Expense states
   const [showExpenseDialog, setShowExpenseDialog] = useState(false);
@@ -206,8 +218,8 @@ export default function ProjectWorkspace() {
 
   const totalExpenses = useMemo(() => expenses.reduce((sum: number, e: any) => sum + Number(e.amount || 0), 0), [expenses]);
 
-  const activeTasks = useMemo(() => tasks.filter((t: any) => !t.completed), [tasks]);
-  const completedTasks = useMemo(() => tasks.filter((t: any) => t.completed), [tasks]);
+  const activeTasks = useMemo(() => sortTasks(tasks.filter((t: any) => !t.completed)), [tasks]);
+  const completedTasks = useMemo(() => sortTasks(tasks.filter((t: any) => t.completed)), [tasks]);
 
   useEffect(() => {
     if (project) {
@@ -294,7 +306,7 @@ export default function ProjectWorkspace() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["project-tasks", id] });
       setShowTaskDialog(false);
-      setTaskForm({ title: "", description: "", priority: "medium", due_date: "" });
+      setTaskForm({ title: "", description: "", priority: "medium", due_date: "", parent_task_id: "" });
     },
   });
 
@@ -306,7 +318,7 @@ export default function ProjectWorkspace() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["project-tasks", id] });
       setEditingTask(null);
-      setTaskForm({ title: "", description: "", priority: "medium", due_date: "" });
+      setTaskForm({ title: "", description: "", priority: "medium", due_date: "", parent_task_id: "" });
     },
   });
 
@@ -579,6 +591,8 @@ export default function ProjectWorkspace() {
       if (error) throw error;
 
       // Process actions
+      let createdNoteId: string | null = null;
+      let createdNoteTitle: string | null = null;
       if (data.actions && data.actions.length > 0) {
         for (const action of data.actions) {
           if (action.action === "update_strategy" && action.strategy) {
@@ -594,26 +608,33 @@ export default function ProjectWorkspace() {
               description: action.description || "",
               priority: action.priority || "medium",
               due_date: action.due_date || null,
+              parent_task_id: action.parent_task_id || null,
               sort_order: tasks.length,
-            });
+            } as any);
             queryClient.invalidateQueries({ queryKey: ["project-tasks", id] });
             toast.success(`Task added: ${action.title}`);
           } else if (action.action === "create_note" && action.title) {
-            await supabase.from("project_references").insert({
+            const { data: noteData } = await supabase.from("project_references").insert({
               project_id: id!,
               user_id: user!.id,
               type: "note",
               title: action.title,
               description: action.content || "",
               sort_order: references.length,
-            });
+            }).select("id").single();
+            createdNoteId = noteData?.id || null;
+            createdNoteTitle = action.title;
             queryClient.invalidateQueries({ queryKey: ["project-refs", id] });
             toast.success(`Note created: ${action.title}`);
           }
         }
       }
 
-      const assistantMsg: ChatMsg = { role: "assistant", content: data.message || "Done." };
+      const assistantMsg: ChatMsg = {
+        role: "assistant",
+        content: data.message || "Done.",
+        ...(createdNoteId ? { noteId: createdNoteId, noteTitle: createdNoteTitle! } : {}),
+      };
       setChatHistory([...newHistory, assistantMsg]);
     } catch (e: any) {
       toast.error("Chat failed: " + e.message);
@@ -631,16 +652,19 @@ export default function ProjectWorkspace() {
   };
 
   // Task row renderer
-  const renderTaskRow = (task: any) => (
+  const renderTaskRow = (task: any, indent = false) => (
     <div
       key={task.id}
-      className={`flex items-center gap-3 p-2.5 rounded-lg border border-border/50 bg-card/50 transition-colors hover:border-primary/20 ${task.completed ? "opacity-60" : ""}`}
+      className={`flex items-center gap-3 p-2.5 rounded-lg border border-border/50 bg-card/50 transition-colors hover:border-primary/20 ${task.completed ? "opacity-60" : ""} ${indent ? "ml-6" : ""}`}
     >
       <Checkbox
         checked={task.completed}
         onCheckedChange={(checked) => toggleTaskComplete.mutate({ taskId: task.id, completed: !!checked })}
       />
-      <div className="flex-1 min-w-0">
+      <div
+        className="flex-1 min-w-0 cursor-pointer"
+        onClick={() => setViewingTask(task)}
+      >
         <p className={`text-sm font-medium ${task.completed ? "line-through text-muted-foreground" : ""}`}>{task.title}</p>
         {task.description && <p className="text-xs text-muted-foreground line-clamp-1">{task.description}</p>}
       </div>
@@ -654,9 +678,18 @@ export default function ProjectWorkspace() {
         </span>
       )}
       <div className="flex items-center gap-0.5 shrink-0">
+        {!task.completed && !indent && (
+          <Button variant="ghost" size="icon" className="h-6 w-6 text-muted-foreground hover:text-primary" title="Add subtask" onClick={() => {
+            setEditingTask(null);
+            setTaskForm({ title: "", description: "", priority: "medium", due_date: "", parent_task_id: task.id });
+            setShowTaskDialog(true);
+          }}>
+            <Plus className="h-3 w-3" />
+          </Button>
+        )}
         <Button variant="ghost" size="icon" className="h-6 w-6 text-muted-foreground hover:text-primary" onClick={() => {
           setEditingTask(task);
-          setTaskForm({ title: task.title, description: task.description || "", priority: task.priority, due_date: task.due_date || "" });
+          setTaskForm({ title: task.title, description: task.description || "", priority: task.priority, due_date: task.due_date || "", parent_task_id: (task as any).parent_task_id || "" });
           setShowTaskDialog(true);
         }}>
           <Pencil className="h-3 w-3" />
@@ -667,6 +700,22 @@ export default function ProjectWorkspace() {
       </div>
     </div>
   );
+
+  // Render tasks with subtasks grouped under parents
+  const renderTaskList = (taskList: any[]) => {
+    const topLevel = taskList.filter((t: any) => !(t as any).parent_task_id);
+    const subtaskMap = new Map<string, any[]>();
+    taskList.filter((t: any) => (t as any).parent_task_id).forEach((t: any) => {
+      const pid = (t as any).parent_task_id;
+      if (!subtaskMap.has(pid)) subtaskMap.set(pid, []);
+      subtaskMap.get(pid)!.push(t);
+    });
+
+    return topLevel.flatMap((task: any) => {
+      const subs = sortTasks(subtaskMap.get(task.id) || []);
+      return [renderTaskRow(task, false), ...subs.map((s: any) => renderTaskRow(s, true))];
+    });
+  };
 
   if (isLoading) {
     return <div className="flex items-center justify-center py-20"><Skeleton className="h-8 w-8" /></div>;
@@ -818,8 +867,29 @@ export default function ProjectWorkspace() {
                       )}
                       <div className={`rounded-lg px-3 py-2 text-sm max-w-[80%] ${msg.role === "user" ? "bg-primary text-primary-foreground" : "bg-muted"}`}>
                         {msg.role === "assistant" ? (
-                          <div className="prose prose-invert prose-sm max-w-none [&_ul]:list-disc [&_ol]:list-decimal [&_ul]:pl-5 [&_ol]:pl-5 [&_li]:my-0.5 [&_p]:my-1.5">
-                            <ReactMarkdown>{msg.content}</ReactMarkdown>
+                          <div>
+                            <div className="prose prose-invert prose-sm max-w-none [&_ul]:list-disc [&_ol]:list-decimal [&_ul]:pl-5 [&_ol]:pl-5 [&_li]:my-0.5 [&_p]:my-1.5">
+                              <ReactMarkdown>{msg.content}</ReactMarkdown>
+                            </div>
+                            {msg.noteId && (
+                              <button
+                                className="mt-2 inline-flex items-center gap-1.5 text-xs px-2.5 py-1 rounded-full bg-yellow-500/20 text-yellow-400 border border-yellow-500/30 hover:bg-yellow-500/30 transition-colors"
+                                onClick={() => {
+                                  const note = references.find((r: any) => r.id === msg.noteId);
+                                  if (note) setViewingRef(note);
+                                  else queryClient.invalidateQueries({ queryKey: ["project-refs", id] }).then(() => {
+                                    // Try again after refresh
+                                    setTimeout(() => {
+                                      const freshNote = references.find((r: any) => r.id === msg.noteId);
+                                      if (freshNote) setViewingRef(freshNote);
+                                    }, 500);
+                                  });
+                                }}
+                              >
+                                <StickyNote className="h-3 w-3" />
+                                View: {msg.noteTitle}
+                              </button>
+                            )}
                           </div>
                         ) : msg.content}
                       </div>
@@ -866,7 +936,7 @@ export default function ProjectWorkspace() {
                   {completedTasks.length}/{tasks.length}
                 </Badge>
               </div>
-              <Button variant="outline" size="sm" className="gap-1 h-8" onClick={() => { setEditingTask(null); setTaskForm({ title: "", description: "", priority: "medium", due_date: "" }); setShowTaskDialog(true); }}>
+              <Button variant="outline" size="sm" className="gap-1 h-8" onClick={() => { setEditingTask(null); setTaskForm({ title: "", description: "", priority: "medium", due_date: "", parent_task_id: "" }); setShowTaskDialog(true); }}>
                 <Plus className="h-3 w-3" /> Add Task
               </Button>
             </div>
@@ -878,7 +948,7 @@ export default function ProjectWorkspace() {
               </div>
             ) : (
               <div className="space-y-1.5">
-                {activeTasks.map(renderTaskRow)}
+                {renderTaskList(activeTasks)}
 
                 {completedTasks.length > 0 && (
                   <Collapsible open={completedTasksOpen} onOpenChange={setCompletedTasksOpen}>
@@ -887,7 +957,7 @@ export default function ProjectWorkspace() {
                       <span className="text-xs font-medium">Completed ({completedTasks.length})</span>
                     </CollapsibleTrigger>
                     <CollapsibleContent className="space-y-1.5 mt-1">
-                      {completedTasks.map(renderTaskRow)}
+                      {renderTaskList(completedTasks)}
                     </CollapsibleContent>
                   </Collapsible>
                 )}
@@ -1304,14 +1374,87 @@ export default function ProjectWorkspace() {
         </DialogContent>
       </Dialog>
 
+      {/* Task Preview Dialog */}
+      <Dialog open={!!viewingTask} onOpenChange={(open) => { if (!open) setViewingTask(null); }}>
+        <DialogContent className="sm:max-w-lg">
+          <DialogHeader>
+            <DialogTitle>{viewingTask?.title}</DialogTitle>
+            <DialogDescription className="sr-only">Task details</DialogDescription>
+          </DialogHeader>
+          {viewingTask && (
+            <div className="space-y-4">
+              <div className="flex items-center gap-2 flex-wrap">
+                <Badge className={`text-xs border ${PRIORITY_COLORS[viewingTask.priority] || PRIORITY_COLORS.medium}`}>
+                  {viewingTask.priority}
+                </Badge>
+                <Badge variant={viewingTask.completed ? "default" : "secondary"} className="text-xs">
+                  {viewingTask.completed ? "Completed" : "Active"}
+                </Badge>
+                {viewingTask.due_date && (
+                  <span className="text-xs text-muted-foreground flex items-center gap-1">
+                    <Calendar className="h-3 w-3" />
+                    {format(new Date(viewingTask.due_date), "MMM d, yyyy")}
+                  </span>
+                )}
+              </div>
+              {viewingTask.description && (
+                <div>
+                  <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-1">Description</p>
+                  <p className="text-sm whitespace-pre-wrap">{viewingTask.description}</p>
+                </div>
+              )}
+              {/* Show subtasks */}
+              {(() => {
+                const subs = tasks.filter((t: any) => (t as any).parent_task_id === viewingTask.id);
+                if (subs.length === 0) return null;
+                return (
+                  <div>
+                    <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-1">Subtasks</p>
+                    <div className="space-y-1">
+                      {subs.map((s: any) => (
+                        <div key={s.id} className="flex items-center gap-2 text-sm">
+                          <Checkbox checked={s.completed} onCheckedChange={(checked) => toggleTaskComplete.mutate({ taskId: s.id, completed: !!checked })} />
+                          <span className={s.completed ? "line-through text-muted-foreground" : ""}>{s.title}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                );
+              })()}
+              <p className="text-xs text-muted-foreground">Created {format(new Date(viewingTask.created_at), "MMM d, yyyy 'at' h:mm a")}</p>
+            </div>
+          )}
+          <DialogFooter>
+            <Button variant="ghost" onClick={() => {
+              setViewingTask(null);
+              if (viewingTask) {
+                setEditingTask(viewingTask);
+                setTaskForm({ title: viewingTask.title, description: viewingTask.description || "", priority: viewingTask.priority, due_date: viewingTask.due_date || "", parent_task_id: (viewingTask as any).parent_task_id || "" });
+                setShowTaskDialog(true);
+              }
+            }}>
+              <Pencil className="h-3 w-3 mr-1" /> Edit
+            </Button>
+            <Button variant="ghost" className="text-destructive" onClick={() => { deleteTask.mutate(viewingTask.id); setViewingTask(null); }}>
+              <Trash2 className="h-3 w-3 mr-1" /> Delete
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
       {/* Task Dialog */}
       <Dialog open={showTaskDialog} onOpenChange={(open) => { if (!open) { setShowTaskDialog(false); setEditingTask(null); } }}>
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
-            <DialogTitle>{editingTask ? "Edit Task" : "Add Task"}</DialogTitle>
+            <DialogTitle>{editingTask ? "Edit Task" : taskForm.parent_task_id ? "Add Subtask" : "Add Task"}</DialogTitle>
             <DialogDescription className="sr-only">{editingTask ? "Edit task details" : "Create a new task"}</DialogDescription>
           </DialogHeader>
           <div className="space-y-3">
+            {taskForm.parent_task_id && (
+              <div className="text-xs text-muted-foreground bg-muted/50 rounded-md px-3 py-2">
+                Subtask of: <span className="font-medium text-foreground">{tasks.find((t: any) => t.id === taskForm.parent_task_id)?.title || "Unknown"}</span>
+              </div>
+            )}
             <Input placeholder="Task title" value={taskForm.title} onChange={(e) => setTaskForm(p => ({ ...p, title: e.target.value }))} />
             <Textarea placeholder="Description (optional)" value={taskForm.description} onChange={(e) => setTaskForm(p => ({ ...p, description: e.target.value }))} className="resize-none min-h-[80px]" />
             <div className="grid grid-cols-2 gap-3">
@@ -1340,12 +1483,12 @@ export default function ProjectWorkspace() {
                 if (editingTask) {
                   updateTask.mutate({ taskId: editingTask.id, fields: { title: taskForm.title, description: taskForm.description, priority: taskForm.priority, due_date: taskForm.due_date || null } });
                 } else {
-                  addTask.mutate({ title: taskForm.title, description: taskForm.description, priority: taskForm.priority, due_date: taskForm.due_date || null });
+                  addTask.mutate({ title: taskForm.title, description: taskForm.description, priority: taskForm.priority, due_date: taskForm.due_date || null, ...(taskForm.parent_task_id ? { parent_task_id: taskForm.parent_task_id } : {}) });
                 }
               }}
               disabled={!taskForm.title.trim()}
             >
-              {editingTask ? "Save Changes" : "Add Task"}
+              {editingTask ? "Save Changes" : taskForm.parent_task_id ? "Add Subtask" : "Add Task"}
             </Button>
           </DialogFooter>
         </DialogContent>
