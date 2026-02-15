@@ -1,154 +1,64 @@
+**UX Fixes: Ideas Refresh, Mobile Widget, GTM Interview Cleanup, and Icon Consistency**
 
+This plan addresses 7 distinct issues across the application.
 
-# Combined Plan: Brainstorm Assistant Upgrade + Campaign GTM Interview Overhaul
+**1. Brainstorm Deletion Should Scrap the Linked Idea (Not Reset to Fresh)** Currently, deleting a brainstorm sets the linked idea's status to "new" (Fresh). Instead, it should set it to "scrapped". *File: src/pages/BrainstormWorkspace.tsx (~line 345)*
 
-This plan combines all pending changes into a single implementation pass.
+- Change `{ status: "new" }` to `{ status: "scrapped" }` in the deleteBrainstorm mutation.
 
----
+**2. Fix Idea Card Not Showing Title, Tags, and Correct Category Color After Status Change** When an idea goes from "brainstorming" back to another status (like "scrapped"), the card may not refresh its display because the query cache has stale data. The fix is to ensure the ideas query is invalidated properly and the IdeaCard component correctly renders for scrapped ideas. *File: src/pages/BrainstormWorkspace.tsx (~line 349-352)*
 
-## Part A: Brainstorm Workspace Changes
+- The onSuccess already invalidates ["ideas"] -- this is correct. The real issue is that the first card in Screenshot 1 (the cup holder idea) has no title, no tags, and a dark/unstyled category badge. This happens because the idea was never fully processed (its status was "new" or it was reset before AI processing completed).
+- No additional code change needed beyond fix #1 -- once ideas are scrapped instead of reset to "new", the IdeaCard renders with the "Scrapped" badge correctly.
 
-### A1. Merge Welcome Message into First Interview Question
+**3. Orphaned Ideas Cleanup: Scrap Ideas Whose Brainstorms No Longer Exist** Some ideas are stuck in "brainstorming" status but their linked brainstorms have been deleted. Add a cleanup check on the Ideas page load. *File: src/pages/Ideas.tsx*
 
-Remove the separate `showWelcomeIntro` state and UI block. Instead, update the `brainstorm-chat` edge function's `generate_question` system prompt to instruct the AI to blend a brief intro into the first question when chat history is empty (e.g., "Let's flesh out this idea of yours. [question]").
+- Add a `useEffect` after the ideas query loads that:
+  - Filters ideas with `status === "brainstorming"`
+  - For each, queries brainstorms table for any brainstorm with `idea_id = idea.id` and `deleted_at IS NULL`
+  - If no brainstorm exists, updates the idea's status to "scrapped"
+  - Invalidates the ideas cache after any updates
 
-**Files:**
-- `supabase/functions/brainstorm-chat/index.ts` -- Add to the `generate_question` system prompt: "For the FIRST question (when chat history is empty), blend a brief, friendly introduction into the question itself. Start with something like 'Let's flesh out this idea of yours.' then seamlessly transition into your question. Do NOT separate the intro from the question."
-- `src/pages/BrainstormWorkspace.tsx` -- Remove the `showWelcomeIntro` state (line 113), remove `setShowWelcomeIntro(true)` from `generateFirstQuestion` (line 310), and remove any welcome block rendering in the interview card UI.
+**4. Mobile: Fix Floating Chat Widget Being Cut Off** The widget uses fixed `bottom-4 right-4 w-[400px]` which overflows on mobile screens. The collapsed flag button also gets cut off. *File: src/components/FloatingChatWidget.tsx*
 
-### A2. Show Brainstorm Assistant Always (Not Just When Locked)
+- Change the expanded container class from `w-[400px]` to `w-[calc(100vw-2rem)] sm:w-[400px]` (or similar responsive approach) so it fits within mobile viewport.
+- For the collapsed button, ensure it doesn't overflow by constraining its max-width.
 
-Remove the `{isLocked && (...)}` wrapper (line 1318) around the `FloatingChatWidget` so it renders unconditionally -- during active brainstorming and after completion/scrapping.
+**5. Remove the Mobile Floating "+" (Dump Idea) FAB** The user wants to remove the floating + button that appears on every page on mobile. *File: src/components/AppLayout.tsx*
 
-### A3. Give Assistant Editing Capabilities When Active
+- Remove the `<MobileDumpIdea />` component from the layout.
+- The import can also be removed.
 
-When the brainstorm is active (not locked), the assistant gains three tools: `create_note`, `update_description`, and `update_bullets`. When locked, it remains read-only (no tools).
+**6. GTM Interview UI Overhaul** Several changes to the GTM Strategy Interview (State 1 in CampaignWorkspace):
 
-**File: `supabase/functions/brainstorm-chat/index.ts` (chat_query mode)**
-- Accept an optional `is_locked` boolean in the request body
-- When `is_locked` is false (active), pass three tools to the AI:
-  - `create_note` -- existing tool, creates research notes
-  - `update_description` -- takes `{ description: string }`, signals the frontend to update the compiled description
-  - `update_bullets` -- takes `{ bullets: string }`, signals the frontend to update the bullet breakdown
-- When `is_locked` is true, pass no tools (read-only mode)
-- Update the system prompt to explain capabilities based on lock state:
-  - Active: "You can answer questions, create research notes, and update the compiled description and bullet breakdown when asked."
-  - Locked: "You can answer questions about this brainstorm's content and help explore ideas."
+**6a. Project Context: Add Timestamp, Lineage Badges, Remove Tag Badges** *File: src/pages/CampaignWorkspace.tsx (~lines 438-458)*
 
-**File: `src/pages/BrainstormWorkspace.tsx`**
-- Pass `is_locked: isLocked` in the `handleChatSubmit` request body
-- Handle `update_description` actions: call `setDescription(action.description)`, save to DB via `supabase.from("brainstorms").update(...)`, push undo entry, invalidate queries, show toast
-- Handle `update_bullets` actions: same pattern as above for `setBullets`
-- Keep existing `create_note` action handling
-- Update the initial welcome message in `queryChatHistory` to reflect the dual-mode nature:
-  - Active: "I'm your brainstorm assistant. I can answer questions, help you dig deeper, create research notes, and update the description and bullet breakdown."
-  - Locked: "I'm your brainstorm assistant. I can answer questions about this brainstorm's content and help you explore ideas."
+- Add the creation timestamp to the Project Context card
+- Add category badge (already present -- keep it)
+- Add Linked Idea badge (clickable, opens the same read-only Linked Idea overlay dialog that the dashboard state uses)
+- Add Linked Brainstorm badge (clickable, navigates to brainstorm)
+- Add Linked Project badge (clickable, navigates to project) -- use Wrench icon instead of FolderOpen
+- Remove the tag badges from the Project Context section (currently lines 452-454 render each tag as a badge)
 
-### A4. Update Welcome Message Based on Lock State
+**6b. Add Linked Idea Overlay to GTM Interview State** Currently `showLinkedIdea` and the Linked Idea dialog only exist in the dashboard state (State 2). Move the state and dialog to be available in both states, so clicking "Linked Idea" in the interview context opens the overlay on top of the interview.
 
-Since the widget is now always visible, the initial `queryChatHistory` welcome message (lines 118-119 and 135-136) should be set dynamically based on `isLocked`. Use a `useEffect` that watches `isLocked` and `brainstorm` to set the appropriate welcome message on first load.
+**6c. Remove Chat History Log from Interview** *File: src/pages/CampaignWorkspace.tsx (~lines 468-492)*
 
----
+- Remove the `interviewChatHistory` scrollable log and the separator below it. The interview should only show the current question and answer box (like the brainstorm interview).
 
-## Part B: Campaign GTM Interview Overhaul
+**6d. Add Dynamic Topic-Based Progress Indicator** Instead of a hardcoded question counter, the AI should dictate what topics are left to discuss. *Backend Update:* Update the Edge Function/AI Prompt handling the GTM interview. Instruct the AI to include a `topics_remaining` array (e.g., `["Pricing Strategy", "Target Audience"]`) in its JSON response. *UI Update:* Add a small text line above or below the question area. If the `topics_remaining` array has items, display: *"To forge your playbook, we still need to discuss: [Topic 1], [Topic 2]..."* *Ready State:* If the array is empty (or the AI determines it has enough info), change the text to: *"You can now forge your playbook, or continue answering to refine it."*
 
-### B1. Database Migration
+**7. Fix "Linked Project" Icon: Use Wrench Instead of FolderOpen** The sidebar and Projects page use a wrench icon for projects, but the "Linked Project" badges use FolderOpen. Change all "Linked Project" badges to use Wrench. *Files:*
 
-Add columns to `campaigns` table:
-- `interview_completed` (boolean, default false) -- gate flag for showing interview vs dashboard
-- `chat_history` (jsonb, default '[]') -- stores the GTM interview Q&A
-- `playbook` (text, default '') -- the generated Campaign Playbook markdown
+- `src/pages/CampaignWorkspace.tsx` (~line 656): Change FolderOpen to Wrench
+- `src/pages/BrainstormWorkspace.tsx` (~line 896): Change FolderOpen to Wrench
+- `src/pages/Ideas.tsx` (~line 224): Change FolderOpen to Wrench
 
-Create new `campaign_tasks` table:
-- `id` (uuid, PK, default gen_random_uuid())
-- `campaign_id` (uuid, not null)
-- `user_id` (uuid, not null)
-- `title` (text, not null, default '')
-- `description` (text, default '')
-- `status_column` (text, default 'asset_creation') -- Kanban column name
-- `completed` (boolean, default false)
-- `sort_order` (integer, default 0)
-- `created_at` (timestamptz, default now())
+**Technical Summary**
 
-RLS policies on `campaign_tasks`: standard user-owns-row pattern (SELECT, INSERT, UPDATE, DELETE where `auth.uid() = user_id`).
-
-### B2. New Edge Function: `campaign-chat`
-
-Create `supabase/functions/campaign-chat/index.ts` with three modes:
-
-**Mode: `generate_question`**
-- System prompt: Act as a Go-To-Market Strategist. Review inherited project/brainstorm context (compiled description, tags, category, whether there are CAD/STL files or GitHub repos). Ask targeted questions about:
-  - Product type (physical hardware run, 3D-printed product, digital asset, software)
-  - Business structure (LLC, hobby piece)
-  - Fulfillment method (in-house, 3PL, dropshipper, digital delivery)
-  - Target audience and pricing
-- Returns `{ question }`
-
-**Mode: `submit_answer`**
-- Processes user's answer against interview context
-- Returns `{ next_question }` (and optionally `clarification` if user asks a question back)
-
-**Mode: `forge_playbook`**
-- Takes the full interview chat history + project context
-- Returns structured JSON:
-```text
-{
-  "playbook": "markdown strategy covering IP protection, target audience, pricing, marketing copy, distribution",
-  "sales_model": "B2C" (or other recommended model),
-  "primary_channel": "Etsy" (or other recommended channel),
-  "tasks": [
-    { "title": "...", "status_column": "asset_creation", "description": "..." },
-    ...4-6 tasks total
-  ]
-}
-```
-
-Register in `supabase/config.toml`:
-```text
-[functions.campaign-chat]
-verify_jwt = false
-```
-
-### B3. Rewrite CampaignWorkspace.tsx -- Two-State UI
-
-**State 1: GTM Interview (interview_completed = false)**
-- Hide the existing dashboard (metrics, distribution, links)
-- Show a focused, centered flashcard Q&A component (same pattern as brainstorm interview):
-  - Project context summary at top (title, category, tags from linked project)
-  - Sequential AI questions about business model, fulfillment, audience
-  - Chat history displayed as Q&A cards
-  - After 3+ exchanges, show a prominent "Forge Campaign Playbook" button
-- On "Forge Campaign Playbook" click:
-  - Call `campaign-chat` with mode `forge_playbook`
-  - Save returned `playbook` to the campaign
-  - Set `sales_model` and `primary_channel` from the response
-  - Create `campaign_tasks` rows from the returned tasks array
-  - Set `interview_completed = true`
-  - Save `chat_history` to the campaign
-
-**State 2: Dashboard (interview_completed = true)**
-- Remove the floating "Campaign Assistant" chat widget
-- Add a "Campaign Playbook" section using `EditableMarkdown`, showing the generated playbook (editable like execution strategy in projects)
-- Keep existing metrics row, distribution strategy dropdowns, and campaign links
-- Add a Kanban-style task board below, showing `campaign_tasks` grouped by `status_column`:
-  - Columns: Asset Creation, Pre-Launch, Active Campaign, Fulfillment, Evergreen
-  - Tasks can be toggled complete, title edited inline, or deleted
-  - Manual "Add Task" button to add tasks to any column
-
-### B4. No Changes Needed to ProjectWorkspace Launch
-
-The existing `launchCampaign` mutation creates campaigns with default values. Since `interview_completed` defaults to `false`, newly promoted campaigns will automatically enter the GTM interview gate.
-
----
-
-## Technical Summary
-
-| File | Changes |
-|---|---|
-| `supabase/functions/brainstorm-chat/index.ts` | Update `generate_question` prompt to blend welcome into first question; add `update_description` and `update_bullets` tools to `chat_query` mode (conditionally based on `is_locked`); remove tools when locked |
-| `src/pages/BrainstormWorkspace.tsx` | Remove `showWelcomeIntro` state/UI; show FloatingChatWidget unconditionally; handle `update_description`/`update_bullets` actions; pass `is_locked` to edge function; dynamic welcome message |
-| **New:** `supabase/functions/campaign-chat/index.ts` | GTM interview edge function with `generate_question`, `submit_answer`, and `forge_playbook` modes |
-| `supabase/config.toml` | Add `[functions.campaign-chat]` entry |
-| `src/pages/CampaignWorkspace.tsx` | Major rewrite: two-state UI with GTM interview gate and auto-populated dashboard with playbook + Kanban task board |
-| **DB Migration** | Add `interview_completed`, `chat_history`, `playbook` columns to `campaigns`; create `campaign_tasks` table with RLS |
-
+- **src/pages/BrainstormWorkspace.tsx:** Change idea reset from "new" to "scrapped" on brainstorm delete; change Linked Project icon from FolderOpen to Wrench.
+- **src/pages/Ideas.tsx:** Add orphaned idea cleanup useEffect; change Linked Project icon from FolderOpen to Wrench.
+- **src/components/FloatingChatWidget.tsx:** Make widget responsive on mobile (constrain width to viewport).
+- **src/components/AppLayout.tsx:** Remove MobileDumpIdea component.
+- **src/pages/CampaignWorkspace.tsx:** GTM interview: add timestamp + lineage badges to Project Context, remove tag badges, remove chat history log, add dynamic `topics_remaining` progress indicator, move Linked Idea overlay to work in both states, change Linked Project icon to Wrench.
+- **Supabase Edge Functions:** Update GTM Interview AI prompt to return a `topics_remaining` array in the JSON response.
