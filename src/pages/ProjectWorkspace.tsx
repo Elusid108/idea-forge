@@ -7,7 +7,7 @@ import {
   Grid3X3, List, ChevronDown, ChevronRight, ArrowUpDown, Trash2,
   Plus, Lightbulb, Brain, FileText, FolderOpen, Github, Star, GitFork, AlertCircle, GitCommit,
   CheckSquare, DollarSign, Calendar, ExternalLink, Receipt, Upload, Loader2,
-  Bot, Send,
+  Bot, Send, Rocket, Megaphone,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -302,6 +302,34 @@ export default function ProjectWorkspace() {
       queryClient.invalidateQueries({ queryKey: ["sidebar-items"] });
       navigate("/projects");
     },
+  });
+
+  const launchCampaign = useMutation({
+    mutationFn: async () => {
+      const { data: campaignData, error: createErr } = await supabase
+        .from("campaigns" as any)
+        .insert({
+          project_id: id!,
+          user_id: user!.id,
+          title: project?.name || "Untitled Campaign",
+        })
+        .select()
+        .single();
+      if (createErr) throw createErr;
+      const { error: linkErr } = await supabase
+        .from("projects")
+        .update({ campaign_id: (campaignData as any).id } as any)
+        .eq("id", id!);
+      if (linkErr) throw linkErr;
+      return campaignData as any;
+    },
+    onSuccess: (data) => {
+      toast.success("Campaign launched!");
+      queryClient.invalidateQueries({ queryKey: ["project", id] });
+      queryClient.invalidateQueries({ queryKey: ["sidebar-items"] });
+      navigate(`/campaigns/${data.id}`);
+    },
+    onError: (e: Error) => toast.error(e.message),
   });
 
   // Task mutations
@@ -774,18 +802,29 @@ export default function ProjectWorkspace() {
           </h1>
         )}
 
-        <Select value={project.status} onValueChange={(val) => updateProject.mutate({ status: val })}>
-          <SelectTrigger className="w-[140px] h-8 text-xs">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            {STATUS_OPTIONS.map(s => (
-              <SelectItem key={s} value={s}>{STATUS_LABELS[s]}</SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
+        {!(project as any).campaign_id && (
+          <Select value={project.status} onValueChange={(val) => updateProject.mutate({ status: val })}>
+            <SelectTrigger className="w-[140px] h-8 text-xs">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {STATUS_OPTIONS.map(s => (
+                <SelectItem key={s} value={s}>{STATUS_LABELS[s]}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        )}
 
-        <div className="ml-auto">
+        <div className="ml-auto flex items-center gap-2">
+          {project.status === "done" && !(project as any).campaign_id && (
+            <Button
+              className="gap-2"
+              onClick={() => launchCampaign.mutate()}
+              disabled={launchCampaign.isPending}
+            >
+              <Rocket className="h-4 w-4" /> Launch Campaign
+            </Button>
+          )}
           <AlertDialog>
             <AlertDialogTrigger asChild>
               <Button variant="destructive" className="gap-2">
@@ -830,6 +869,15 @@ export default function ProjectWorkspace() {
             onClick={() => navigate(`/brainstorms/${linkedBrainstorm.id}`)}
           >
             <Brain className="h-3 w-3" /> Linked Brainstorm
+          </Badge>
+        )}
+        {(project as any).campaign_id && (
+          <Badge
+            variant="outline"
+            className="text-xs gap-1 cursor-pointer hover:bg-accent transition-colors"
+            onClick={() => navigate(`/campaigns/${(project as any).campaign_id}`)}
+          >
+            <Megaphone className="h-3 w-3" /> Linked Campaign
           </Badge>
         )}
       </div>

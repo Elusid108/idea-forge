@@ -14,6 +14,8 @@ import BrainstormWorkspace from "@/pages/BrainstormWorkspace";
 import ProjectsPage from "@/pages/Projects";
 import ProjectWorkspace from "@/pages/ProjectWorkspace";
 import TrashPage from "@/pages/Trash";
+import CampaignsPage from "@/pages/Campaigns";
+import CampaignWorkspace from "@/pages/CampaignWorkspace";
 import NotFound from "@/pages/NotFound";
 
 const queryClient = new QueryClient();
@@ -84,6 +86,26 @@ const App = () => (
                 <ProtectedRoute>
                   <AppLayout>
                     <ProjectWorkspace />
+                  </AppLayout>
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/campaigns"
+              element={
+                <ProtectedRoute>
+                  <AppLayout>
+                    <CampaignsPage />
+                  </AppLayout>
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/campaigns/:id"
+              element={
+                <ProtectedRoute>
+                  <AppLayout>
+                    <CampaignWorkspace />
                   </AppLayout>
                 </ProtectedRoute>
               }
