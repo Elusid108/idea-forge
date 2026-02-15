@@ -32,8 +32,8 @@ const STATUS_BADGES: Record<string, { label: string; className: string }> = {
 const BRAINSTORM_GROUPS = [
   { key: "active", label: "Active", statuses: ["active"] },
   { key: "backburner", label: "Backburner", statuses: ["backburner"] },
-  { key: "scrapped", label: "Scrap", statuses: ["scrapped"] },
   { key: "completed", label: "Complete", statuses: ["completed"] },
+  { key: "scrapped", label: "SCRAPPED", statuses: ["scrapped"] },
 ];
 
 export default function BrainstormsPage() {

@@ -29,6 +29,8 @@ export default function ReferenceViewer({ reference, open, onOpenChange }: Refer
   if (!reference) return null;
 
   if (reference.type === "note") {
+    const content = reference.description || "No content";
+    const hasHtml = /<[a-z][\s\S]*>/i.test(content);
     return (
       <Dialog open={open} onOpenChange={onOpenChange}>
         <DialogContent className="sm:max-w-lg">
@@ -36,9 +38,11 @@ export default function ReferenceViewer({ reference, open, onOpenChange }: Refer
             <DialogTitle>{reference.title}</DialogTitle>
             <DialogDescription className="sr-only">Note details</DialogDescription>
           </DialogHeader>
-          <div className="text-sm text-muted-foreground whitespace-pre-wrap">
-            {reference.description || "No content"}
-          </div>
+          {hasHtml ? (
+            <div className="text-sm text-muted-foreground prose prose-invert prose-sm max-w-none" dangerouslySetInnerHTML={{ __html: content }} />
+          ) : (
+            <div className="text-sm text-muted-foreground whitespace-pre-wrap">{content}</div>
+          )}
         </DialogContent>
       </Dialog>
     );
