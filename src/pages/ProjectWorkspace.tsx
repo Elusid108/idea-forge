@@ -285,6 +285,7 @@ export default function ProjectWorkspace() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["project", id] });
+      queryClient.invalidateQueries({ queryKey: ["campaigns"] });
       queryClient.invalidateQueries({ queryKey: ["sidebar-items"] });
     },
   });

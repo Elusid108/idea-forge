@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
-import { Lightbulb, ChevronRight, ChevronDown, LogOut, User, Trash2 } from "lucide-react";
+import { ChevronRight, ChevronDown, LogOut, User, Trash2 } from "lucide-react";
+import IdeaForgeLogo from "@/components/IdeaForgeLogo";
 import { useAuth } from "@/contexts/AuthContext";
 import { NavLink } from "@/components/NavLink";
 import { supabase } from "@/integrations/supabase/client";
@@ -97,10 +98,10 @@ export function AppSidebar() {
     <Sidebar className="border-r border-sidebar-border">
       <div className="flex h-14 items-center gap-2 border-b border-sidebar-border px-4">
         <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary/10">
-          <Lightbulb className="h-4 w-4 text-primary" />
+          <IdeaForgeLogo className="h-5 w-5 text-primary" />
         </div>
         <span className="font-semibold text-sidebar-foreground">IdeaForge.AI</span>
-        <span className="text-[10px] text-muted-foreground font-medium bg-muted px-1.5 py-0.5 rounded">v0.2</span>
+        <span className="text-[10px] text-muted-foreground font-medium bg-muted px-1.5 py-0.5 rounded">v0.3</span>
       </div>
 
       <SidebarContent className="px-2 py-3">
