@@ -1,176 +1,152 @@
 
 
-# Brainstorm Page Reorder, WYSIWYG Notes, Sidebar Filtering, GitHub UX, Tasks, Expenses, and Execution Strategy
+# Execution Strategy Fix, Expense Receipts, Task Grouping, Note HTML Cleanup, Project Layout Restructure, and Project AI Chatbot
 
-This plan covers 8 areas of work across multiple files, including 2 new database tables.
-
----
-
-## 1. Brainstorms Dashboard: Reorder Groups and Rename "Scrap" to "Scrapped"
-
-**File**: `src/pages/Brainstorms.tsx`
-
-Change the `BRAINSTORM_GROUPS` array order so "Complete" comes before "Scrapped", and rename the label:
-
-```
-Active -> Backburner -> Complete -> Scrapped
-```
+This plan covers 7 areas of work, including a new edge function and a database migration.
 
 ---
 
-## 2. WYSIWYG Rich Text Note Editor
+## 1. Fix Execution Strategy Not Generating on Promote
 
-**Problem**: The current `RichTextNoteEditor` uses a plain `<Textarea>` that shows raw markdown/HTML (e.g., `<u>text</u>`). The user wants it to function like Windows Sticky Notes -- true rich text editing.
+**Problem**: The `generate-strategy` edge function is invoked but logs show no activity, suggesting the call may be silently failing. The function also doesn't include notes from brainstorm references.
 
-**Approach**: Replace the `<Textarea>` with a `contentEditable` div that renders formatting in real-time. The toolbar actions will use `document.execCommand` for bold, italic, underline, strikethrough, and list operations. The underlying value stored remains HTML (which `ReactMarkdown` or `dangerouslySetInnerHTML` can render). Keyboard shortcuts (`Ctrl+B`, `Ctrl+I`, `Ctrl+U`, `Ctrl+Shift+X`, `Tab`, `Shift+Tab`) will call `e.preventDefault()` and `e.stopPropagation()` to prevent sidebar toggling.
+**Changes**:
 
-**File**: `src/components/RichTextNoteEditor.tsx` -- full rewrite to use `contentEditable` div instead of `<Textarea>`.
+**`src/pages/BrainstormWorkspace.tsx`** (promote mutation, ~line 388):
+- Fetch brainstorm references (notes specifically) before invoking the edge function.
+- Pass `notes` in the body alongside `title`, `description`, `bullets`, `tags`, `category`.
+- Add `.catch(err => console.error("Strategy generation failed:", err))` for debugging.
+- Await the function invocation so we can catch errors properly.
 
-**Rendering impact**: The `ReferenceViewer` and `EditableMarkdown` components already render note descriptions. They will need to render HTML content using `dangerouslySetInnerHTML` instead of `ReactMarkdown` for notes created with the new editor. A check will be added: if the content contains HTML tags, render as HTML; otherwise fall back to ReactMarkdown.
-
----
-
-## 3. Sidebar: Filter Out Inactive Items from Nested Lists
-
-**Problem**: Scrapped/completed brainstorms, brainstorming/scrapped ideas, and completed projects all show in the sidebar nested list.
-
-**File**: `src/components/AppSidebar.tsx`
-
-Update `useSectionItems` to add status filters per table:
-- **Ideas**: exclude `status IN ('brainstorming', 'scrapped')`
-- **Brainstorms**: exclude `status IN ('completed', 'scrapped')`
-- **Projects**: exclude `status = 'done'`
-
-Add `.not("status", "in", ...)` filters to each query.
+**`supabase/functions/generate-strategy/index.ts`**:
+- Accept `notes` parameter in the request body.
+- Include notes in the prompt: `Notes/Research: ${notes || "None"}`.
+- Update CORS headers to include full list (matching other functions).
 
 ---
 
-## 4. GitHub Repo URL: Click-to-Edit and GitHub Pages Link
+## 2. Fix Expense Receipt Retrieval
 
-**File**: `src/pages/ProjectWorkspace.tsx`
+**Problem**: The `project-assets` storage bucket is set to `is_public: No`, so `getPublicUrl()` returns a URL that 403s.
 
-**Click-to-edit**: Add an `editingGithub` state. When not editing, display the URL as text (clickable link). When clicked, switch to the input field. On blur/Enter, save and switch back.
+**Fix**: Either make the bucket public (like `brainstorm-references`) or use `createSignedUrl()` instead.
 
-**GitHub Pages detection**: The GitHub API response (`githubData.repo`) includes a `has_pages` boolean and `homepage` field. If `has_pages` is true or `homepage` exists, display a "View Site" link badge next to the repo name in the GitHub widget. The homepage URL is typically `https://{owner}.github.io/{repo}` but the API's `homepage` field is more reliable.
-
----
-
-## 5. Project Tasks Section (New Database Table + UI)
-
-### Database Migration
-
-Create a `project_tasks` table:
-
+**Database migration**: Make the `project-assets` bucket public:
 ```sql
-CREATE TABLE public.project_tasks (
-  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  project_id UUID NOT NULL REFERENCES public.projects(id) ON DELETE CASCADE,
-  user_id UUID NOT NULL,
-  title TEXT NOT NULL DEFAULT '',
-  description TEXT DEFAULT '',
-  priority TEXT NOT NULL DEFAULT 'medium',
-  due_date DATE,
-  completed BOOLEAN NOT NULL DEFAULT false,
-  sort_order INTEGER NOT NULL DEFAULT 0,
-  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
-);
-
-ALTER TABLE public.project_tasks ENABLE ROW LEVEL SECURITY;
-
-CREATE POLICY "Users can view own tasks" ON public.project_tasks FOR SELECT USING (auth.uid() = user_id);
-CREATE POLICY "Users can insert own tasks" ON public.project_tasks FOR INSERT WITH CHECK (auth.uid() = user_id);
-CREATE POLICY "Users can update own tasks" ON public.project_tasks FOR UPDATE USING (auth.uid() = user_id);
-CREATE POLICY "Users can delete own tasks" ON public.project_tasks FOR DELETE USING (auth.uid() = user_id);
+UPDATE storage.buckets SET public = true WHERE id = 'project-assets';
 ```
+
+**Also add vendor field**:
+- Add a `vendor` column to `project_expenses` table.
+- Update expense form in `ProjectWorkspace.tsx` to include a Vendor input field.
+- Display vendor in the expense row.
+
+---
+
+## 3. Completed Tasks in Collapsible Group
+
+**Changes in `src/pages/ProjectWorkspace.tsx`** (Tasks section, ~line 666-724):
+- Split tasks into `activeTasks` (not completed) and `completedTasks` (completed).
+- Render active tasks in the main list.
+- Render completed tasks inside a `Collapsible` component (default closed) with header "Completed ({count})".
+- Add a `completedTasksOpen` state defaulting to `false`.
+
+---
+
+## 4. Strip HTML from Note Preview in List/Tile View
+
+**Problem**: Notes stored as HTML show raw `<ol><li>` tags in the reference list preview (screenshot confirms this).
+
+**Changes in both `src/pages/ProjectWorkspace.tsx` and `src/pages/BrainstormWorkspace.tsx`**:
+- Create a `stripHtml` utility function: `(html: string) => html.replace(/<[^>]*>/g, "").trim()`.
+- In the reference list/tile rendering, where `ref.description` is displayed as preview text, wrap with `stripHtml()` for note-type references:
+  - Grid view (line ~829 in ProjectWorkspace): `{ref.type === "note" ? stripHtml(ref.description) : ref.description}`
+  - List view (line ~1021 in BrainstormWorkspace): same treatment.
+
+---
+
+## 5. Restructure Project Page Layout
+
+**Problem**: The user wants to remove the brainstorm callout and redistribute its elements. New layout:
+
+**Left column** (top to bottom):
+1. Description (always shown -- carried from brainstorm if linked)
+2. Execution Strategy
+3. Project AI Chatbot (new -- see section 7)
+4. Tasks
+5. Resources
+6. Expenses
+
+**Right column** (top to bottom):
+1. Tags
+2. GitHub (URL + widget)
+3. References from brainstorm (if linked) -- displayed as a standalone section, not inside a collapsible callout
+4. Bullet Breakdown (always shown, from brainstorm if linked, editable if standalone)
+
+**Changes in `src/pages/ProjectWorkspace.tsx`**:
+- Remove the brainstorm callout `Collapsible` component entirely.
+- Always show Description (left) and Bullet Breakdown (right), removing the `!brainstormId &&` conditions.
+- Move brainstorm references to the right column as "Brainstorm References" section (between GitHub and Bullet Breakdown).
+- Keep the description editable -- it saves to `compiled_description` on the project.
+
+---
+
+## 6. Note List Formatting in Rich Text Editor
+
+**Problem**: Bullet and numbered lists created via toolbar buttons don't render in the `contentEditable` editor, only appearing after save. This is likely because `document.execCommand("insertUnorderedList")` requires a selection/cursor to be inside the editor, and the `onMouseDown` with `preventDefault` may cause the editor to lose focus.
+
+**Changes in `src/components/RichTextNoteEditor.tsx`**:
+- The `execCmd` function already calls `editorRef.current?.focus()` before `execCommand`. Verify this works. If the issue persists, ensure `handleInput` is called after `execCmd` to sync state.
+- The real issue may be that `handleInput` reads `innerHTML` but the DOM hasn't updated yet after `execCommand`. Add a `requestAnimationFrame` wrapper around the `handleInput()` call inside `execCmd` to ensure the DOM has updated.
+
+---
+
+## 7. Project AI Chatbot (New Feature)
+
+**Purpose**: An AI assistant below the Execution Strategy that can modify strategy, manage tasks, and create notes. It takes in description, bullet breakdown, brainstorm notes (if linked), and project notes as context.
+
+### New Edge Function: `supabase/functions/project-chat/index.ts`
+
+System prompt instructs the AI to:
+- Help the user plan and execute their project
+- Suggest resources (websites, books, articles) with specific titles/authors/dates
+- Return structured tool calls for actions: `update_strategy`, `add_task`, `update_task`, `remove_task`, `create_note`
+
+Uses tool calling with these tools:
+- `update_strategy`: `{ strategy: string }` -- replaces execution strategy
+- `add_task`: `{ title, description, priority, due_date }` -- creates a task
+- `create_note`: `{ title, content }` -- creates a project reference note
+- `respond`: `{ message }` -- plain text response
+
+Input context includes: description, bullet_breakdown, notes (from brainstorm refs + project refs), execution_strategy, tasks list.
 
 ### UI in `src/pages/ProjectWorkspace.tsx`
 
-Place a "Tasks" section above "Resources" in the left column:
-- Task list with checkboxes, priority badge (Low/Medium/High/Critical with color coding), due date, and title
-- Completed tasks show with strikethrough and muted styling
-- "+ Add Task" button opens a dialog with fields: Title, Description (textarea), Priority (select), Due Date (date input)
-- Tasks can be edited (click to open edit dialog) and deleted
-- Query: `useQuery` on `project_tasks` filtered by `project_id`
+Place below the Execution Strategy section:
+- Chat interface with message history (stored in component state, not persisted)
+- Input field + Send button
+- Streaming responses using SSE (same pattern as brainstorm chat)
+- When tool calls are returned, execute them:
+  - `update_strategy`: update the project's `execution_strategy` via mutation
+  - `add_task`: insert into `project_tasks` via mutation
+  - `create_note`: insert into `project_references` with type "note"
+  - `respond`: display the message in chat
+- Messages from the AI that include links should be rendered with ReactMarkdown
+
+### Config update: `supabase/config.toml`
+Add `[functions.project-chat]` with `verify_jwt = false`.
 
 ---
 
-## 6. Project Expense Tracker (New Database Table + UI)
-
-### Database Migration
-
-Create a `project_expenses` table:
-
-```sql
-CREATE TABLE public.project_expenses (
-  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  project_id UUID NOT NULL REFERENCES public.projects(id) ON DELETE CASCADE,
-  user_id UUID NOT NULL,
-  title TEXT NOT NULL DEFAULT '',
-  description TEXT DEFAULT '',
-  amount NUMERIC(10,2) NOT NULL DEFAULT 0,
-  category TEXT DEFAULT 'General',
-  receipt_url TEXT DEFAULT '',
-  date DATE DEFAULT CURRENT_DATE,
-  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
-);
-
-ALTER TABLE public.project_expenses ENABLE ROW LEVEL SECURITY;
-
-CREATE POLICY "Users can view own expenses" ON public.project_expenses FOR SELECT USING (auth.uid() = user_id);
-CREATE POLICY "Users can insert own expenses" ON public.project_expenses FOR INSERT WITH CHECK (auth.uid() = user_id);
-CREATE POLICY "Users can update own expenses" ON public.project_expenses FOR UPDATE USING (auth.uid() = user_id);
-CREATE POLICY "Users can delete own expenses" ON public.project_expenses FOR DELETE USING (auth.uid() = user_id);
-```
-
-### UI in `src/pages/ProjectWorkspace.tsx`
-
-Place an "Expenses" section below "Resources" in the left column:
-- Running total displayed in the section header
-- Each expense row shows: date, title, amount, category badge, and receipt icon (if receipt attached)
-- "+ Add Expense" button opens a dialog with: Title, Amount, Category (select), Date, Description, Receipt upload (image/PDF to `project-assets` bucket)
-- Clicking a receipt thumbnail opens it in a new tab
-- Expenses can be edited and deleted
-
----
-
-## 7. AI-Generated Execution Strategy
-
-### Database
-
-Add an `execution_strategy` text column to the `projects` table:
-
-```sql
-ALTER TABLE public.projects ADD COLUMN IF NOT EXISTS execution_strategy TEXT DEFAULT '';
-```
-
-### Auto-Generation on Promote
-
-In `BrainstormWorkspace.tsx`, after the promote-to-project mutation succeeds, invoke a backend function (or inline AI call) to generate an execution strategy based on the brainstorm's description, bullets, tags, and category. Store the result in `execution_strategy`.
-
-### Backend Function
-
-Create `supabase/functions/generate-strategy/index.ts` that takes the project context and returns a structured execution strategy using the Lovable AI (e.g., `google/gemini-2.5-flash`).
-
-### UI in `src/pages/ProjectWorkspace.tsx`
-
-Place "Execution Strategy" section above "Tasks" in the left column:
-- Rendered as `EditableMarkdown` so it can be viewed and edited
-- For manually created projects (no brainstorm), the field is empty and editable -- the user fills it out manually
-- For promoted projects, it's auto-populated but still editable
-
----
-
-## 8. Summary of All File Changes
+## Summary of All File Changes
 
 | File | Changes |
 |---|---|
-| `src/pages/Brainstorms.tsx` | Reorder groups: Complete before Scrapped; rename "Scrap" to "Scrapped" |
-| `src/components/RichTextNoteEditor.tsx` | Full rewrite to WYSIWYG using `contentEditable` div with `execCommand` |
-| `src/components/AppSidebar.tsx` | Add status filters to `useSectionItems` queries per table |
-| `src/pages/ProjectWorkspace.tsx` | Click-to-edit GitHub URL; GitHub Pages link; Tasks section; Expenses section; Execution Strategy section |
-| `src/pages/BrainstormWorkspace.tsx` | Trigger strategy generation on promote-to-project |
-| `src/components/ReferenceViewer.tsx` | Support HTML content rendering for notes |
-| `supabase/functions/generate-strategy/index.ts` | New edge function for AI execution strategy generation |
-| Database migration | Create `project_tasks` and `project_expenses` tables; add `execution_strategy` column to `projects` |
+| `src/pages/ProjectWorkspace.tsx` | Restructure layout (remove callout, always show desc/bullets); completed tasks collapsible; strip HTML from note previews; vendor field on expenses; project AI chatbot UI |
+| `src/pages/BrainstormWorkspace.tsx` | Fix strategy generation call (include notes); strip HTML from note previews |
+| `src/components/RichTextNoteEditor.tsx` | Fix list rendering with `requestAnimationFrame` in `execCmd` |
+| `supabase/functions/generate-strategy/index.ts` | Accept and include notes in prompt; fix CORS headers |
+| `supabase/functions/project-chat/index.ts` | New edge function for project AI assistant with tool calling |
+| `supabase/config.toml` | Add project-chat function entry |
+| Database migration | Make `project-assets` bucket public; add `vendor` column to `project_expenses` |
 
