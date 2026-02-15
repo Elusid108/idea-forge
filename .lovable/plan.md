@@ -1,102 +1,103 @@
 
 
-# Task Sorting, Subtasks, Task Preview, and AI Chat Note Links
+# AI Quality Improvements, Task Preview Completion, Link Auto-Prefix, Progress Bar, and Floating Chat Widget
 
-This plan covers 4 areas: task sorting by due date/priority, subtask support, task detail preview popup, and improved AI chat note linking.
-
----
-
-## 1. Task Sorting by Due Date then Priority
-
-**File**: `src/pages/ProjectWorkspace.tsx`
-
-Currently `activeTasks` and `completedTasks` are split from `tasks` (ordered by `sort_order` from DB). Change the sorting logic:
-
-- Sort active tasks: first by `due_date` ascending (nulls last), then by priority weight (`critical=0, high=1, medium=2, low=3`).
-- Same sorting for completed tasks.
-
-```
-const PRIORITY_WEIGHT = { critical: 0, high: 1, medium: 2, low: 3 };
-
-const sortTasks = (list) => [...list].sort((a, b) => {
-  // Due date first (nulls last)
-  if (a.due_date && b.due_date) {
-    const diff = new Date(a.due_date).getTime() - new Date(b.due_date).getTime();
-    if (diff !== 0) return diff;
-  } else if (a.due_date) return -1;
-  else if (b.due_date) return 1;
-  // Then priority
-  return (PRIORITY_WEIGHT[a.priority] ?? 2) - (PRIORITY_WEIGHT[b.priority] ?? 2);
-});
-```
-
-Update `activeTasks` and `completedTasks` useMemo to use `sortTasks`.
+This plan covers 5 areas of work across both the Project and Brainstorm workspaces.
 
 ---
 
-## 2. Subtask Support
+## 1. Improve AI Task Generation Quality
 
-### Database Migration
-
-Add a `parent_task_id` column to `project_tasks`:
-
-```sql
-ALTER TABLE public.project_tasks
-  ADD COLUMN parent_task_id UUID REFERENCES public.project_tasks(id) ON DELETE CASCADE;
-```
-
-### UI Changes in `src/pages/ProjectWorkspace.tsx`
-
-- Filter `activeTasks` into top-level tasks (`parent_task_id IS NULL`) and subtasks.
-- Render subtasks indented below their parent task with `ml-6` or similar.
-- The task form dialog gets an optional "Parent Task" select dropdown (only shown when adding subtasks).
-- Add a small "+" button on each task row to create a subtask under that task (opens the task dialog with `parent_task_id` pre-set).
-- Subtasks appear directly below their parent in the sorted list, also sorted by due date/priority within a parent.
-
-### AI Tool Update
+**Problem**: The AI created tasks with dates in 2024, only used the 14th/29th, created no subtasks, and didn't put much thought into the plan.
 
 **File**: `supabase/functions/project-chat/index.ts`
 
-- Add `parent_task_id` as an optional parameter to the `add_task` tool.
-- Update the system prompt to instruct the AI:
-  - It can create subtasks by specifying `parent_task_id`.
-  - It should set due dates based on estimated task length and desired timeline.
-  - If the user hasn't stated a timeline, the AI should ask about it.
-  - If no timeline is given after asking, order tasks by logical sequence of operations.
+Changes to the system prompt:
+- Add explicit instruction: "Today's date is ${new Date().toISOString().split('T')[0]}. NEVER use dates in the past."
+- Emphasize that when given a timeline (e.g. "3 months"), the AI must:
+  - Calculate the actual end date from today
+  - Distribute tasks across the full timeline with realistic, varied dates
+  - Create parent tasks for major phases/milestones
+  - Create subtasks under each parent for the actual work items
+  - Each subtask should have its own estimated due date
+- Add instruction: "Think carefully about dependencies -- what needs to happen before what. Group related work into parent tasks with subtasks for the specific steps."
+- Increase `max_tokens` from 2000 to 4000 to allow for more thorough task generation
 
 ---
 
-## 3. Task Detail Preview Popup
+## 2. Complete a Task from the Preview Dialog
+
+**Problem**: You can view a task in the preview popup but cannot mark it complete from there.
+
+**File**: `src/pages/ProjectWorkspace.tsx` (Task Preview Dialog, ~line 1427)
+
+- Add a "Mark Complete" / "Mark Active" button to the dialog footer
+- When clicked, toggle the task's `completed` status and close the dialog (or update the viewingTask state)
+
+---
+
+## 3. Auto-Prefix `https://` on Link References
+
+**Problem**: Links without `https://` don't load when clicked.
 
 **File**: `src/pages/ProjectWorkspace.tsx`
+- In `handleAddRef` (~line 450): when `addRefType === "link"`, auto-prefix `https://` to `refForm.url` if it doesn't already start with `http://` or `https://`
+- In `handleRefClick` (~line 434): the code already handles this for click navigation. Also apply it when saving/updating references via `updateReference`.
 
-- Add a `viewingTask` state (initially null).
-- Clicking a task row (not the checkbox or action buttons) sets `viewingTask`.
-- Render a `Dialog` showing full task details: Title, Description, Priority badge, Due Date, Completion status, Created date, Subtasks list (if any).
-- Include Edit and Delete buttons in the dialog footer.
+**File**: `src/pages/BrainstormWorkspace.tsx`
+- Same treatment for brainstorm reference add/edit flows.
 
 ---
 
-## 4. AI Chat: Link to Generated Notes
+## 4. Task Progress Bar
 
-**Problem**: When the AI creates a note via `create_note`, the chat just shows a toast. The user wants a clickable link in the chat to open the note.
+**File**: `src/pages/ProjectWorkspace.tsx` (Tasks section header, ~line 930-941)
 
-**Changes in `src/pages/ProjectWorkspace.tsx`** (handleChatSubmit, ~line 601):
+- Import `Progress` from `@/components/ui/progress`
+- Add a progress bar below the Tasks header showing `completedTasks.length / tasks.length * 100`
+- Show percentage text next to the bar: "X% complete"
+- Only show when there are tasks
 
-When a `create_note` action is processed:
-- After inserting the note, capture the returned note `id`.
-- Append a special marker to the assistant message content indicating a note was created, e.g. append `\n\n[View Note: {title}](#note-{id})` to the message.
-- When rendering assistant messages, detect these `#note-{id}` links and make them clickable. On click, find the note in `references` and open it in `ReferenceViewer` (set `viewingRef`).
+---
 
-Alternatively, simpler approach: after inserting the note and getting the ID, add a separate "system" style message in chat with a clickable button/badge to open the note. This avoids parsing markdown links.
+## 5. Floating Chat Widget (Gmail-style Flag)
 
-Implementation: Add a `noteId` field to `ChatMsg` type. When a note is created, the assistant message includes `noteId` and `noteTitle`. In the chat renderer, if `msg.noteId` exists, render a clickable badge below the message text that opens the note viewer.
+**Problem**: The AI chat is currently inline in both BrainstormWorkspace and ProjectWorkspace. The user wants it as a floating widget in the bottom-right corner, similar to Gmail's "New Message" compose window.
 
-### Note Viewer Spacing Fix
+### New Component: `src/components/FloatingChatWidget.tsx`
 
-The screenshot shows the note content is cramped. In `ReferenceViewer.tsx`, ensure the note content rendering has proper spacing:
-- Add `[&_li]:my-1` and `[&_ul]:my-2 [&_ol]:my-2` classes to the prose wrapper for better list spacing.
-- Ensure `[&_p]:my-2` for paragraph spacing.
+A reusable floating chat widget with three states:
+- **Collapsed (flag)**: A small button/flag in the bottom-right corner showing "AI Assistant" with a Bot icon. Positioned so it doesn't overlap page content (fixed position, bottom-right, with appropriate margins).
+- **Minimized**: Just the title bar visible (like Gmail minimized compose).
+- **Expanded**: Full chat panel (~400px wide, ~500px tall) with title bar, message area, and input. Title bar has minimize (-), expand, and close (X) buttons.
+
+Props:
+- `title`: string (e.g. "Project Assistant" or "Brainstorm Assistant")
+- `chatHistory`: ChatMsg[]
+- `chatInput`: string
+- `onInputChange`: (val: string) => void
+- `onSubmit`: () => void
+- `isThinking`: boolean
+- `renderMessage`: (msg: ChatMsg, i: number) => ReactNode (custom message renderer for note badges etc.)
+- `placeholder`: string
+
+The widget renders with `fixed` positioning at `bottom-4 right-4` with a high z-index. When collapsed, it's just a small button. When expanded, it's a card-like panel with shadow.
+
+### Update `src/pages/ProjectWorkspace.tsx`
+- Remove the inline "Project Assistant" card from the left column
+- Render `FloatingChatWidget` at the bottom of the component with all existing chat state/handlers
+- Pass a custom `renderMessage` that includes the note badge for AI-generated notes
+
+### Update `src/pages/BrainstormWorkspace.tsx`
+- Remove the inline AI chat section (the "AI Assistant" card shown when `isLocked`)
+- Render `FloatingChatWidget` for the brainstorm chatbot when the brainstorm is locked (promoted/scrapped)
+- The AI interview UI (when brainstorm is active) stays inline -- only the post-promotion chatbot becomes floating
+- Pass existing chat state/handlers
+
+### Layout Consideration
+- The widget uses `fixed` positioning so it floats above all content
+- The flag button is small enough (about 48px tall) that it sits in the corner without blocking content
+- When expanded, it overlays the page content (like Gmail compose) rather than pushing it
 
 ---
 
@@ -104,8 +105,10 @@ The screenshot shows the note content is cramped. In `ReferenceViewer.tsx`, ensu
 
 | File | Changes |
 |---|---|
-| `src/pages/ProjectWorkspace.tsx` | Task sorting by due date/priority; subtask rendering with indentation; task preview dialog; AI chat note links; subtask "+" button on task rows |
-| `supabase/functions/project-chat/index.ts` | Add `parent_task_id` to `add_task` tool; update system prompt for timeline awareness and subtask creation |
-| `src/components/ReferenceViewer.tsx` | Improve note content spacing (list margins, paragraph margins) |
-| Database migration | Add `parent_task_id` column to `project_tasks` |
+| `supabase/functions/project-chat/index.ts` | Improve system prompt with today's date, subtask generation emphasis, and higher max_tokens |
+| `src/components/FloatingChatWidget.tsx` | New reusable floating chat widget component |
+| `src/pages/ProjectWorkspace.tsx` | Remove inline chat, add FloatingChatWidget, add task completion button in preview, auto-prefix https on links, add progress bar |
+| `src/pages/BrainstormWorkspace.tsx` | Remove inline chat for locked brainstorms, add FloatingChatWidget, auto-prefix https on links |
+
+No database migrations needed.
 
