@@ -1,11 +1,14 @@
-import { Wrench, LayoutGrid, List } from "lucide-react";
+import { Wrench, LayoutGrid, List, Plus } from "lucide-react";
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
+import { useAuth } from "@/contexts/AuthContext";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { toast } from "sonner";
+import { format } from "date-fns";
 
 const CATEGORY_COLORS: Record<string, string> = {
   "Product": "bg-blue-500/20 text-blue-400 border-blue-500/30",
@@ -29,6 +32,8 @@ const statusLabels: Record<string, string> = {
 export default function ProjectsPage() {
   const [viewMode, setViewMode] = useState<"kanban" | "list">("kanban");
   const navigate = useNavigate();
+  const { user } = useAuth();
+  const queryClient = useQueryClient();
 
   const { data: projects = [], isLoading } = useQuery({
     queryKey: ["projects"],
@@ -41,6 +46,24 @@ export default function ProjectsPage() {
       if (error) throw error;
       return data;
     },
+  });
+
+  const createProject = useMutation({
+    mutationFn: async () => {
+      const { data, error } = await supabase
+        .from("projects")
+        .insert({ user_id: user!.id, name: "Untitled Project" })
+        .select()
+        .single();
+      if (error) throw error;
+      return data;
+    },
+    onSuccess: (data) => {
+      queryClient.invalidateQueries({ queryKey: ["projects"] });
+      queryClient.invalidateQueries({ queryKey: ["sidebar-items"] });
+      navigate(`/projects/${data.id}`);
+    },
+    onError: (e: Error) => toast.error(e.message),
   });
 
   const renderProjectCard = (p: any) => {
@@ -80,6 +103,9 @@ export default function ProjectsPage() {
               )}
             </div>
           )}
+          <p className="text-[10px] text-muted-foreground/60">
+            {format(new Date(p.created_at), "MMM d, yyyy")}
+          </p>
         </CardContent>
       </Card>
     );
@@ -98,6 +124,9 @@ export default function ProjectsPage() {
           </Button>
           <Button variant="ghost" size="icon" onClick={() => setViewMode("list")} className={viewMode === "list" ? "text-primary" : ""}>
             <List className="h-4 w-4" />
+          </Button>
+          <Button onClick={() => createProject.mutate()} disabled={createProject.isPending} className="gap-2">
+            <Plus className="h-4 w-4" /> New Project
           </Button>
         </div>
       </div>

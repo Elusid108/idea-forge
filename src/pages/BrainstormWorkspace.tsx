@@ -25,6 +25,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import EditableMarkdown from "@/components/EditableMarkdown";
 import ReferenceViewer, { getVideoThumbnail } from "@/components/ReferenceViewer";
 import { useUndoRedo } from "@/hooks/useUndoRedo";
+import { format } from "date-fns";
 
 type RefType = "link" | "image" | "video" | "note";
 type ChatMsg = { role: "user" | "assistant"; content: string };
@@ -55,6 +56,12 @@ const CATEGORY_COLORS: Record<string, string> = {
   "Software/App": "bg-violet-500/20 text-violet-400 border-violet-500/30",
   "Environment/Space": "bg-teal-500/20 text-teal-400 border-teal-500/30",
 };
+
+const BRAINSTORM_STATUS_OPTIONS = [
+  { value: "active", label: "Active", className: "bg-sky-500/20 text-sky-400 border-sky-500/30" },
+  { value: "backburner", label: "Backburner", className: "bg-amber-500/20 text-amber-400 border-amber-500/30" },
+  { value: "scrapped", label: "Scrapped", className: "bg-zinc-500/20 text-zinc-400 border-zinc-500/30" },
+];
 
 export default function BrainstormWorkspace() {
   const { id } = useParams<{ id: string }>();
@@ -93,6 +100,7 @@ export default function BrainstormWorkspace() {
   const [isThinking, setIsThinking] = useState(false);
   const [questionLoaded, setQuestionLoaded] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const lastLoadedIdRef = useRef<string | null>(null);
 
   // Chatbot state (post-promotion)
   const [queryChatHistory, setQueryChatHistory] = useState<ChatMsg[]>([]);
@@ -102,6 +110,18 @@ export default function BrainstormWorkspace() {
 
   // Reference viewer state
   const [viewingRef, setViewingRef] = useState<any>(null);
+
+  // --- Reset state when brainstorm ID changes ---
+  useEffect(() => {
+    if (id && id !== lastLoadedIdRef.current) {
+      lastLoadedIdRef.current = id;
+      setQuestionLoaded(false);
+      setCurrentQuestion("");
+      setAnswer("");
+      setQueryChatHistory([]);
+      setChatInput("");
+    }
+  }, [id]);
 
   // --- Queries ---
   const { data: brainstorm, isLoading } = useQuery({
@@ -155,7 +175,6 @@ export default function BrainstormWorkspace() {
       queryClient.invalidateQueries({ queryKey: ["brainstorm", id] });
       toast.info("Undo: bullets reverted");
     } else if (fieldName === "deleted_reference" && metadata) {
-      // Re-insert the deleted reference
       const { id: _id, ...rest } = metadata;
       await supabase.from("brainstorm_references").insert({ ...rest, id: metadata.id });
       queryClient.invalidateQueries({ queryKey: ["brainstorm-refs", id] });
@@ -192,6 +211,18 @@ export default function BrainstormWorkspace() {
   useEffect(() => {
     if (brainstorm && !questionLoaded && !isThinking && !isCompleted) {
       setQuestionLoaded(true);
+      // Try to extract remembered question from chat_history
+      const history: ChatMsg[] = (brainstorm?.chat_history as ChatMsg[]) || [];
+      if (history.length > 0) {
+        const lastAssistant = [...history].reverse().find(m => m.role === "assistant");
+        if (lastAssistant) {
+          const match = lastAssistant.content.match(/Next question:\s*(.+)/);
+          if (match) {
+            setCurrentQuestion(match[1].trim());
+            return;
+          }
+        }
+      }
       generateFirstQuestion();
     }
   }, [brainstorm, questionLoaded, isCompleted]);
@@ -294,7 +325,6 @@ export default function BrainstormWorkspace() {
 
   const deleteReference = useMutation({
     mutationFn: async (ref: any) => {
-      // Record history before deleting
       await pushEntry("deleted_reference", null, null, ref);
       const { error } = await supabase.from("brainstorm_references").delete().eq("id", ref.id);
       if (error) throw error;
@@ -322,7 +352,6 @@ export default function BrainstormWorkspace() {
         .single();
       if (error) throw error;
 
-      // Copy references to project_references
       if (references.length > 0) {
         const refCopies = references.map((r: any) => ({
           project_id: data.id,
@@ -403,7 +432,6 @@ export default function BrainstormWorkspace() {
         thumbnail_url: urlData.publicUrl,
       });
     } else if (addRefType === "link" || addRefType === "video") {
-      // Fetch thumbnail for links and videos
       let thumbnail_url: string | null = null;
       if (addRefType === "video" && refForm.url) {
         thumbnail_url = getVideoThumbnail(refForm.url);
@@ -623,6 +651,8 @@ export default function BrainstormWorkspace() {
     return null;
   };
 
+  const currentStatusOption = BRAINSTORM_STATUS_OPTIONS.find(o => o.value === brainstorm.status);
+
   return (
     <div className="space-y-6">
       {/* 1. Title Bar */}
@@ -663,6 +693,20 @@ export default function BrainstormWorkspace() {
           </Badge>
         )}
 
+        {/* Status selector for non-completed brainstorms */}
+        {!isCompleted && (
+          <Select value={brainstorm.status} onValueChange={(val) => updateBrainstorm.mutate({ status: val })}>
+            <SelectTrigger className="w-[130px] h-8 text-xs">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {BRAINSTORM_STATUS_OPTIONS.map(opt => (
+                <SelectItem key={opt.value} value={opt.value}>{opt.label}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        )}
+
         <div className="ml-auto flex items-center gap-2">
           {isCompleted ? (
             <Badge className="bg-emerald-500/20 text-emerald-400 border-emerald-500/30 border gap-1">
@@ -699,6 +743,11 @@ export default function BrainstormWorkspace() {
           )}
         </div>
       </div>
+
+      {/* Created date */}
+      <p className="text-xs text-muted-foreground">
+        Created {format(new Date(brainstorm.created_at), "MMM d, yyyy 'at' h:mm a")}
+      </p>
 
       <Separator />
 
