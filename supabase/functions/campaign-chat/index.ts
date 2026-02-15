@@ -38,24 +38,28 @@ Project/Product Context:
 
     // --- forge_playbook mode ---
     if (mode === "forge_playbook") {
-      const systemPrompt = `You are a Go-To-Market Strategist. Based on the interview conversation and project context below, generate a comprehensive campaign playbook.
+      const systemPrompt = `You are an expert Go-To-Market Consultant. Based on the interview conversation and project context below, compile the user's chosen strategies into a comprehensive campaign playbook.
 
 ${projectContext}
 
 Interview history is provided. Analyze everything discussed and generate a structured response using the tool call.
 
-The playbook should be in markdown format with these sections:
-1. **Executive Summary** - Brief overview of the GTM strategy
-2. **Target Audience** - Who we're selling to, demographics, psychographics
-3. **Pricing Strategy** - Recommended pricing, bundles, tiers
-4. **Distribution & Fulfillment** - How the product reaches customers
-5. **Marketing & Launch Plan** - Key marketing channels, content strategy, launch timeline
-6. **IP & Legal Considerations** - Relevant IP protection, licensing, compliance
+You must generate FOUR separate playbook sections as individual markdown documents:
+
+1. **ip_strategy** — Discovery & IP Strategy: Summarize the user's goals (Profit, Portfolio, Open-Source), chosen licensing approach, and any IP protections discussed.
+
+2. **monetization_plan** — Monetization Strategy: Detail the chosen revenue model (SaaS, freemium, wholesale, etc.), pricing tiers, and any upsell/cross-sell strategies discussed.
+
+3. **marketing_plan** — Distribution & Marketing Plan: List the committed marketing channels, platforms, content strategy, and launch timeline discussed.
+
+4. **operations_plan** — Logistics & Operations Plan: Cover fulfillment method, hosting/infrastructure needs, maintenance capacity, and operational considerations discussed.
+
+Also generate a combined "playbook" field that merges all four sections into a single markdown document with clear headings.
 
 For sales_model, choose from: B2B, B2C, Open Source, Marketplace, Direct, Other
 For primary_channel, choose from: Shopify, Etsy, GitHub, Gumroad, Amazon, Website, Other
 
-Generate 4-6 specific, actionable tasks. Map each to either "asset_creation" or "pre_launch" status_column. Tasks should be concrete and tailored to THIS specific product/project.`;
+Generate 4-8 specific, actionable tasks. Map each to one of these status columns: "foundation_ip", "infrastructure_production", "asset_creation_prelaunch", "active_campaign", or "operations_fulfillment". Tasks should be concrete and tailored to THIS specific product/project.`;
 
       const messages: any[] = [
         { role: "system", content: systemPrompt },
@@ -72,7 +76,11 @@ Generate 4-6 specific, actionable tasks. Map each to either "asset_creation" or 
             parameters: {
               type: "object",
               properties: {
-                playbook: { type: "string", description: "The full campaign playbook in markdown format." },
+                playbook: { type: "string", description: "The full combined campaign playbook in markdown format." },
+                ip_strategy: { type: "string", description: "Discovery & IP Strategy section in markdown." },
+                monetization_plan: { type: "string", description: "Monetization Strategy section in markdown." },
+                marketing_plan: { type: "string", description: "Distribution & Marketing Plan section in markdown." },
+                operations_plan: { type: "string", description: "Logistics & Operations Plan section in markdown." },
                 sales_model: { type: "string", description: "Recommended sales model (B2B, B2C, Open Source, Marketplace, Direct, Other)." },
                 primary_channel: { type: "string", description: "Recommended primary sales channel (Shopify, Etsy, GitHub, Gumroad, Amazon, Website, Other)." },
                 tasks: {
@@ -82,14 +90,14 @@ Generate 4-6 specific, actionable tasks. Map each to either "asset_creation" or 
                     properties: {
                       title: { type: "string", description: "Task title" },
                       description: { type: "string", description: "Brief task description" },
-                      status_column: { type: "string", description: "Either 'asset_creation' or 'pre_launch'" },
+                      status_column: { type: "string", description: "One of: foundation_ip, infrastructure_production, asset_creation_prelaunch, active_campaign, operations_fulfillment" },
                     },
                     required: ["title", "status_column"],
                   },
-                  description: "4-6 actionable tasks for the campaign.",
+                  description: "4-8 actionable tasks for the campaign.",
                 },
               },
-              required: ["playbook", "sales_model", "primary_channel", "tasks"],
+              required: ["playbook", "ip_strategy", "monetization_plan", "marketing_plan", "operations_plan", "sales_model", "primary_channel", "tasks"],
             },
           },
         },
@@ -130,24 +138,27 @@ Generate 4-6 specific, actionable tasks. Map each to either "asset_creation" or 
     }
 
     // --- generate_question and submit_answer modes ---
-    const systemPrompt = `You are a Go-To-Market Strategist conducting a focused interview to define a campaign's business model. You have access to the project context below and should ask targeted, sequential questions.
+    const systemPrompt = `You are an expert Go-To-Market Consultant. Your job is to help the user build a launch strategy by asking questions and providing them with industry-standard options they might not know exist. Do not ask broad, open-ended questions. Instead, ask a question and provide 2 to 3 contextual examples of how they could answer it based on their specific project.
 
 ${projectContext}
 
-Focus your questions on these areas (ask about the most critical gaps first):
-1. Product type: Is this a physical hardware run, 3D-printed product, digital asset, software, or something else?
-2. Business structure: Will it be sold under an LLC, as a hobby piece, or via another structure?
-3. Fulfillment: Will orders be fulfilled in-house, via a 3PL/dropshipper, or is this digital delivery?
-4. Target audience: Who specifically is this for? What's the ideal customer profile?
-5. Pricing: What price range are you considering? Any competitive benchmarks?
+Guide the conversation through these 4 exploratory phases:
 
-Ask ONE question at a time. Be conversational but focused. Reference the project context to make your questions specific and relevant.
+1. Discovery & IP: Ask what the ultimate goal is (Profit, Portfolio, Open-Source). Suggest relevant licensing (e.g., MIT, Apache) or proprietary IP protections.
 
-For the FIRST question (when chat history is empty), blend a brief, friendly introduction. Start with something like "Great, let's build a go-to-market strategy for this." then seamlessly transition into your first question. Do NOT separate the intro from the question.
+2. Monetization Strategy: Pitch revenue models. If it's software, suggest SaaS subscriptions, freemium tiers, or usage-based pricing. If it's open-source, suggest open-core, paid hosting, or premium support. If it's physical, suggest direct-to-consumer vs B2B wholesale.
+
+3. Distribution & Marketing: Suggest specific platforms for their niche (e.g., Product Hunt, Etsy, Tindie, Reddit, LinkedIn Ads) and ask which marketing channels they want to commit to.
+
+4. Logistics & Operations: Ask about their capacity for maintenance. Introduce concepts like SaaS server hosting costs, dropshipping, or third-party logistics (3PL) to see how hands-on they want to be.
+
+Keep your responses conversational and encouraging. Wait for the user to select an option or provide their own before moving to the next phase.
+
+For the FIRST question (when chat history is empty), blend a brief, friendly introduction. Start with something like "Great, let's build a go-to-market strategy for this." then seamlessly transition into your first question about Discovery & IP.
 
 The user may respond with questions or express uncertainty. When this happens, provide helpful guidance and then re-ask or refine your question.
 
-IMPORTANT: You must also return a "topics_remaining" array listing the key topics you still need to discuss (e.g. ["Pricing Strategy", "Target Audience", "Fulfillment Method"]). As the conversation progresses and topics are covered, remove them from the list. When you believe you have enough information to generate a comprehensive playbook, return an empty array.`;
+IMPORTANT: You must also return a "topics_remaining" array listing the phases you still need to discuss. The phases are: "Discovery & IP", "Monetization Strategy", "Distribution & Marketing", "Logistics & Operations". As the conversation progresses and phases are covered, remove them from the list. When you believe you have enough information to generate a comprehensive playbook, return an empty array.`;
 
     const messages: any[] = [
       { role: "system", content: systemPrompt },
@@ -170,7 +181,7 @@ IMPORTANT: You must also return a "topics_remaining" array listing the key topic
               type: "object",
               properties: {
                 question: { type: "string", description: "The next critical question to ask." },
-                topics_remaining: { type: "array", items: { type: "string" }, description: "List of topics still needing discussion. Empty array if enough info gathered." },
+                topics_remaining: { type: "array", items: { type: "string" }, description: "List of phases still needing discussion. Empty array if enough info gathered." },
               },
               required: ["question", "topics_remaining"],
               additionalProperties: false,
@@ -209,7 +220,7 @@ IMPORTANT: You must also return a "topics_remaining" array listing the key topic
             properties: {
               clarification: { type: "string", description: "Helpful response if user asked a question or was uncertain." },
               next_question: { type: "string", description: "The next question to ask." },
-              topics_remaining: { type: "array", items: { type: "string" }, description: "List of topics still needing discussion. Empty array if enough info gathered." },
+              topics_remaining: { type: "array", items: { type: "string" }, description: "List of phases still needing discussion. Empty array if enough info gathered." },
             },
             required: ["next_question", "topics_remaining"],
             additionalProperties: false,

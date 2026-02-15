@@ -164,13 +164,77 @@ export default function TrashPage() {
   const restoreCampaign = restore("campaigns", "trash-campaigns");
   const deleteCampaign = permanentDelete("campaigns", "trash-campaigns");
 
+  const totalTrashed = ideas.length + brainstorms.length + projects.length + campaigns.length;
+
+  const emptyTrash = useMutation({
+    mutationFn: async () => {
+      // Unlink projects for trashed campaigns
+      for (const c of campaigns) {
+        if ((c as any).project_id) {
+          await supabase.from("projects").update({ campaign_id: null } as any).eq("id", (c as any).project_id);
+        }
+      }
+      // Delete all trashed items
+      if (campaigns.length > 0) {
+        const { error } = await supabase.from("campaigns" as any).delete().not("deleted_at", "is", null);
+        if (error) throw error;
+      }
+      if (projects.length > 0) {
+        const { error } = await supabase.from("projects").delete().not("deleted_at", "is", null);
+        if (error) throw error;
+      }
+      if (brainstorms.length > 0) {
+        const { error } = await supabase.from("brainstorms").delete().not("deleted_at", "is", null);
+        if (error) throw error;
+      }
+      if (ideas.length > 0) {
+        const { error } = await supabase.from("ideas").delete().not("deleted_at", "is", null);
+        if (error) throw error;
+      }
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["trash-ideas"] });
+      queryClient.invalidateQueries({ queryKey: ["trash-brainstorms"] });
+      queryClient.invalidateQueries({ queryKey: ["trash-projects"] });
+      queryClient.invalidateQueries({ queryKey: ["trash-campaigns"] });
+      queryClient.invalidateQueries({ queryKey: ["ideas"] });
+      queryClient.invalidateQueries({ queryKey: ["brainstorms"] });
+      queryClient.invalidateQueries({ queryKey: ["projects"] });
+      queryClient.invalidateQueries({ queryKey: ["campaigns"] });
+      queryClient.invalidateQueries({ queryKey: ["sidebar-items"] });
+      toast.success("Trash emptied");
+    },
+    onError: (e: Error) => toast.error(e.message),
+  });
+
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-3xl font-bold flex items-center gap-2">
-          <Trash2 className="h-7 w-7" /> Trash
-        </h1>
-        <p className="text-muted-foreground">Restore or permanently delete trashed items</p>
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-3xl font-bold flex items-center gap-2">
+            <Trash2 className="h-7 w-7" /> Trash
+          </h1>
+          <p className="text-muted-foreground">Restore or permanently delete trashed items</p>
+        </div>
+        <AlertDialog>
+          <AlertDialogTrigger asChild>
+            <Button variant="destructive" className="gap-2" disabled={totalTrashed === 0}>
+              <Trash2 className="h-4 w-4" /> Empty Trash
+            </Button>
+          </AlertDialogTrigger>
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>Empty trash?</AlertDialogTitle>
+              <AlertDialogDescription>
+                This will permanently delete all {totalTrashed} trashed item{totalTrashed !== 1 ? "s" : ""}. This cannot be undone.
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel>Cancel</AlertDialogCancel>
+              <AlertDialogAction onClick={() => emptyTrash.mutate()}>Delete All Forever</AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
       </div>
 
       <div className="space-y-6">
