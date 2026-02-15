@@ -1,10 +1,11 @@
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useRef } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import {
   ArrowLeft, Link as LinkIcon, Image, Film, StickyNote, X, Pencil,
   Grid3X3, List, ChevronDown, ChevronRight, ArrowUpDown, Trash2,
   Plus, Lightbulb, Brain, FileText, FolderOpen, Github, Star, GitFork, AlertCircle, GitCommit,
   CheckSquare, DollarSign, Calendar, ExternalLink, Receipt, Upload, Loader2,
+  Bot, Send,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -31,6 +32,7 @@ import { format, formatDistanceToNow } from "date-fns";
 
 type RefType = "link" | "image" | "video" | "note" | "file";
 type SortMode = "az" | "za" | "newest" | "oldest";
+type ChatMsg = { role: "user" | "assistant"; content: string };
 
 const REF_ICONS: Record<string, any> = { link: LinkIcon, image: Image, video: Film, note: StickyNote, file: FileText };
 const REF_ICON_COLORS: Record<string, string> = {
@@ -74,6 +76,8 @@ const PRIORITY_COLORS: Record<string, string> = {
 
 const EXPENSE_CATEGORIES = ["General", "Materials", "Software", "Hardware", "Services", "Shipping", "Other"];
 
+const stripHtml = (html: string) => html?.replace(/<[^>]*>/g, "").trim() || "";
+
 export default function ProjectWorkspace() {
   const { id } = useParams<{ id: string }>();
   const { user } = useAuth();
@@ -106,22 +110,26 @@ export default function ProjectWorkspace() {
       return saved ? new Set(JSON.parse(saved)) : new Set();
     } catch { return new Set(); }
   });
-  const [brainstormCalloutOpen, setBrainstormCalloutOpen] = useState<boolean>(() => {
-    try {
-      return localStorage.getItem(`proj-brainstorm-callout-${id}`) === "true";
-    } catch { return false; }
-  });
 
   // Task states
   const [showTaskDialog, setShowTaskDialog] = useState(false);
   const [editingTask, setEditingTask] = useState<any>(null);
   const [taskForm, setTaskForm] = useState({ title: "", description: "", priority: "medium", due_date: "" });
+  const [completedTasksOpen, setCompletedTasksOpen] = useState(false);
 
   // Expense states
   const [showExpenseDialog, setShowExpenseDialog] = useState(false);
   const [editingExpense, setEditingExpense] = useState<any>(null);
-  const [expenseForm, setExpenseForm] = useState({ title: "", description: "", amount: "", category: "General", date: format(new Date(), "yyyy-MM-dd") });
+  const [expenseForm, setExpenseForm] = useState({ title: "", description: "", amount: "", category: "General", date: format(new Date(), "yyyy-MM-dd"), vendor: "" });
   const [receiptFile, setReceiptFile] = useState<File | null>(null);
+
+  // Chatbot states
+  const [chatHistory, setChatHistory] = useState<ChatMsg[]>([]);
+  const [chatInput, setChatInput] = useState("");
+  const [isChatThinking, setIsChatThinking] = useState(false);
+  const chatScrollRef = useRef<HTMLDivElement>(null);
+
+  const [showReadme, setShowReadme] = useState(false);
 
   const { data: project, isLoading } = useQuery({
     queryKey: ["project", id],
@@ -174,7 +182,6 @@ export default function ProjectWorkspace() {
         .from("project_tasks")
         .select("*")
         .eq("project_id", id!)
-        .order("completed")
         .order("sort_order");
       if (error) throw error;
       return data;
@@ -198,6 +205,9 @@ export default function ProjectWorkspace() {
   });
 
   const totalExpenses = useMemo(() => expenses.reduce((sum: number, e: any) => sum + Number(e.amount || 0), 0), [expenses]);
+
+  const activeTasks = useMemo(() => tasks.filter((t: any) => !t.completed), [tasks]);
+  const completedTasks = useMemo(() => tasks.filter((t: any) => t.completed), [tasks]);
 
   useEffect(() => {
     if (project) {
@@ -230,7 +240,6 @@ export default function ProjectWorkspace() {
     retry: false,
   });
 
-  const [showReadme, setShowReadme] = useState(false);
   const { data: readmeContent } = useQuery({
     queryKey: ["github-readme", githubParsed?.owner, githubParsed?.repo],
     queryFn: async () => {
@@ -330,7 +339,7 @@ export default function ProjectWorkspace() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["project-expenses", id] });
       setShowExpenseDialog(false);
-      setExpenseForm({ title: "", description: "", amount: "", category: "General", date: format(new Date(), "yyyy-MM-dd") });
+      setExpenseForm({ title: "", description: "", amount: "", category: "General", date: format(new Date(), "yyyy-MM-dd"), vendor: "" });
       setReceiptFile(null);
     },
   });
@@ -343,7 +352,7 @@ export default function ProjectWorkspace() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["project-expenses", id] });
       setEditingExpense(null);
-      setExpenseForm({ title: "", description: "", amount: "", category: "General", date: format(new Date(), "yyyy-MM-dd") });
+      setExpenseForm({ title: "", description: "", amount: "", category: "General", date: format(new Date(), "yyyy-MM-dd"), vendor: "" });
     },
   });
 
@@ -464,6 +473,7 @@ export default function ProjectWorkspace() {
       category: expenseForm.category,
       date: expenseForm.date || undefined,
       receipt_url: receiptUrl,
+      vendor: expenseForm.vendor,
     });
   };
 
@@ -530,6 +540,133 @@ export default function ProjectWorkspace() {
     if (githubData.repo.has_pages) return `https://${githubParsed?.owner}.github.io/${githubParsed?.repo}`;
     return null;
   }, [githubData, githubParsed]);
+
+  // Chatbot handler
+  const handleChatSubmit = async () => {
+    if (!chatInput.trim() || isChatThinking) return;
+    const userMsg: ChatMsg = { role: "user", content: chatInput.trim() };
+    const newHistory = [...chatHistory, userMsg];
+    setChatHistory(newHistory);
+    setChatInput("");
+    setIsChatThinking(true);
+
+    try {
+      // Gather context
+      const brainstormNotes = brainstormRefs
+        .filter((r: any) => r.type === "note")
+        .map((r: any) => `${r.title}: ${stripHtml(r.description || "")}`)
+        .join("\n");
+      const projectNotes = references
+        .filter((r: any) => r.type === "note")
+        .map((r: any) => `${r.title}: ${stripHtml(r.description || "")}`)
+        .join("\n");
+      const allNotes = [brainstormNotes, projectNotes].filter(Boolean).join("\n");
+      const tasksList = tasks.map((t: any) => `[${t.completed ? "✓" : " "}] ${t.title} (${t.priority}${t.due_date ? ", due " + t.due_date : ""})`).join("\n");
+
+      const { data, error } = await supabase.functions.invoke("project-chat", {
+        body: {
+          messages: newHistory,
+          context: {
+            title: project?.name || "",
+            description,
+            bullet_breakdown: bullets,
+            execution_strategy: executionStrategy,
+            notes: allNotes,
+            tasks: tasksList,
+          },
+        },
+      });
+      if (error) throw error;
+
+      // Process actions
+      if (data.actions && data.actions.length > 0) {
+        for (const action of data.actions) {
+          if (action.action === "update_strategy" && action.strategy) {
+            setExecutionStrategy(action.strategy);
+            await supabase.from("projects").update({ execution_strategy: action.strategy } as any).eq("id", id!);
+            queryClient.invalidateQueries({ queryKey: ["project", id] });
+            toast.success("Execution strategy updated");
+          } else if (action.action === "add_task" && action.title) {
+            await supabase.from("project_tasks").insert({
+              project_id: id!,
+              user_id: user!.id,
+              title: action.title,
+              description: action.description || "",
+              priority: action.priority || "medium",
+              due_date: action.due_date || null,
+              sort_order: tasks.length,
+            });
+            queryClient.invalidateQueries({ queryKey: ["project-tasks", id] });
+            toast.success(`Task added: ${action.title}`);
+          } else if (action.action === "create_note" && action.title) {
+            await supabase.from("project_references").insert({
+              project_id: id!,
+              user_id: user!.id,
+              type: "note",
+              title: action.title,
+              description: action.content || "",
+              sort_order: references.length,
+            });
+            queryClient.invalidateQueries({ queryKey: ["project-refs", id] });
+            toast.success(`Note created: ${action.title}`);
+          }
+        }
+      }
+
+      const assistantMsg: ChatMsg = { role: "assistant", content: data.message || "Done." };
+      setChatHistory([...newHistory, assistantMsg]);
+    } catch (e: any) {
+      toast.error("Chat failed: " + e.message);
+    } finally {
+      setIsChatThinking(false);
+      setTimeout(() => chatScrollRef.current?.scrollTo({ top: chatScrollRef.current.scrollHeight, behavior: "smooth" }), 100);
+    }
+  };
+
+  const handleChatKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (e.key === "Enter" && !e.shiftKey) {
+      e.preventDefault();
+      handleChatSubmit();
+    }
+  };
+
+  // Task row renderer
+  const renderTaskRow = (task: any) => (
+    <div
+      key={task.id}
+      className={`flex items-center gap-3 p-2.5 rounded-lg border border-border/50 bg-card/50 transition-colors hover:border-primary/20 ${task.completed ? "opacity-60" : ""}`}
+    >
+      <Checkbox
+        checked={task.completed}
+        onCheckedChange={(checked) => toggleTaskComplete.mutate({ taskId: task.id, completed: !!checked })}
+      />
+      <div className="flex-1 min-w-0">
+        <p className={`text-sm font-medium ${task.completed ? "line-through text-muted-foreground" : ""}`}>{task.title}</p>
+        {task.description && <p className="text-xs text-muted-foreground line-clamp-1">{task.description}</p>}
+      </div>
+      <Badge className={`text-[10px] border ${PRIORITY_COLORS[task.priority] || PRIORITY_COLORS.medium}`}>
+        {task.priority}
+      </Badge>
+      {task.due_date && (
+        <span className="text-[10px] text-muted-foreground flex items-center gap-1">
+          <Calendar className="h-3 w-3" />
+          {format(new Date(task.due_date), "MMM d")}
+        </span>
+      )}
+      <div className="flex items-center gap-0.5 shrink-0">
+        <Button variant="ghost" size="icon" className="h-6 w-6 text-muted-foreground hover:text-primary" onClick={() => {
+          setEditingTask(task);
+          setTaskForm({ title: task.title, description: task.description || "", priority: task.priority, due_date: task.due_date || "" });
+          setShowTaskDialog(true);
+        }}>
+          <Pencil className="h-3 w-3" />
+        </Button>
+        <Button variant="ghost" size="icon" className="h-6 w-6 text-muted-foreground hover:text-destructive" onClick={() => deleteTask.mutate(task.id)}>
+          <X className="h-3 w-3" />
+        </Button>
+      </div>
+    </div>
+  );
 
   if (isLoading) {
     return <div className="flex items-center justify-center py-20"><Skeleton className="h-8 w-8" /></div>;
@@ -636,19 +773,17 @@ export default function ProjectWorkspace() {
       <div className="grid grid-cols-1 lg:grid-cols-5 gap-6">
         {/* Left column */}
         <div className="lg:col-span-3 space-y-6">
-          {/* Compiled Description - only show if no linked brainstorm */}
-          {!brainstormId && (
-            <div>
-              <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-1">Description</p>
-              <EditableMarkdown
-                value={description}
-                onChange={setDescription}
-                onSave={() => updateProject.mutate({ compiled_description: description })}
-                placeholder="Project description…"
-                minHeight="100px"
-              />
-            </div>
-          )}
+          {/* Description - always shown */}
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-1">Description</p>
+            <EditableMarkdown
+              value={description}
+              onChange={setDescription}
+              onSave={() => updateProject.mutate({ compiled_description: description })}
+              placeholder="Project description…"
+              minHeight="100px"
+            />
+          </div>
 
           {/* Execution Strategy */}
           <div>
@@ -662,6 +797,65 @@ export default function ProjectWorkspace() {
             />
           </div>
 
+          {/* Project AI Chatbot */}
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-2">Project Assistant</p>
+            <Card className="border-border bg-muted/30">
+              <CardContent className="p-4 space-y-3">
+                <div ref={chatScrollRef} className="max-h-64 overflow-y-auto space-y-3">
+                  {chatHistory.length === 0 && (
+                    <div className="flex flex-col items-center justify-center py-4 text-center">
+                      <Bot className="h-8 w-8 text-muted-foreground/50 mb-2" />
+                      <p className="text-xs text-muted-foreground">Ask for help planning, finding resources, adding tasks, or refining your strategy…</p>
+                    </div>
+                  )}
+                  {chatHistory.map((msg, i) => (
+                    <div key={i} className={`flex items-start gap-2 ${msg.role === "user" ? "justify-end" : ""}`}>
+                      {msg.role === "assistant" && (
+                        <div className="h-6 w-6 rounded-full bg-primary/10 flex items-center justify-center shrink-0 mt-0.5">
+                          <Bot className="h-3 w-3 text-primary" />
+                        </div>
+                      )}
+                      <div className={`rounded-lg px-3 py-2 text-sm max-w-[80%] ${msg.role === "user" ? "bg-primary text-primary-foreground" : "bg-muted"}`}>
+                        {msg.role === "assistant" ? (
+                          <div className="prose prose-invert prose-sm max-w-none [&_ul]:list-disc [&_ol]:list-decimal [&_ul]:pl-5 [&_ol]:pl-5 [&_li]:my-0.5 [&_p]:my-1.5">
+                            <ReactMarkdown>{msg.content}</ReactMarkdown>
+                          </div>
+                        ) : msg.content}
+                      </div>
+                    </div>
+                  ))}
+                  {isChatThinking && (
+                    <div className="flex items-start gap-2">
+                      <div className="h-6 w-6 rounded-full bg-primary/10 flex items-center justify-center shrink-0">
+                        <Bot className="h-3 w-3 text-primary" />
+                      </div>
+                      <Skeleton className="h-8 w-40 rounded-lg" />
+                    </div>
+                  )}
+                </div>
+                <div className="flex gap-2">
+                  <Textarea
+                    value={chatInput}
+                    onChange={(e) => setChatInput(e.target.value)}
+                    onKeyDown={handleChatKeyDown}
+                    placeholder="Ask about your project… (Enter to send)"
+                    className="min-h-[60px] resize-none text-sm flex-1"
+                    disabled={isChatThinking}
+                  />
+                  <Button
+                    onClick={handleChatSubmit}
+                    disabled={!chatInput.trim() || isChatThinking}
+                    size="icon"
+                    className="shrink-0 self-end"
+                  >
+                    {isChatThinking ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
+                  </Button>
+                </div>
+              </CardContent>
+            </Card>
+          </div>
+
           {/* Tasks Section */}
           <div className="space-y-3">
             <div className="flex items-center justify-between">
@@ -669,7 +863,7 @@ export default function ProjectWorkspace() {
                 <CheckSquare className="h-4 w-4 text-primary" />
                 <h2 className="text-lg font-semibold">Tasks</h2>
                 <Badge variant="secondary" className="text-[10px]">
-                  {tasks.filter((t: any) => t.completed).length}/{tasks.length}
+                  {completedTasks.length}/{tasks.length}
                 </Badge>
               </div>
               <Button variant="outline" size="sm" className="gap-1 h-8" onClick={() => { setEditingTask(null); setTaskForm({ title: "", description: "", priority: "medium", due_date: "" }); setShowTaskDialog(true); }}>
@@ -684,42 +878,19 @@ export default function ProjectWorkspace() {
               </div>
             ) : (
               <div className="space-y-1.5">
-                {tasks.map((task: any) => (
-                  <div
-                    key={task.id}
-                    className={`flex items-center gap-3 p-2.5 rounded-lg border border-border/50 bg-card/50 transition-colors hover:border-primary/20 ${task.completed ? "opacity-60" : ""}`}
-                  >
-                    <Checkbox
-                      checked={task.completed}
-                      onCheckedChange={(checked) => toggleTaskComplete.mutate({ taskId: task.id, completed: !!checked })}
-                    />
-                    <div className="flex-1 min-w-0">
-                      <p className={`text-sm font-medium ${task.completed ? "line-through text-muted-foreground" : ""}`}>{task.title}</p>
-                      {task.description && <p className="text-xs text-muted-foreground line-clamp-1">{task.description}</p>}
-                    </div>
-                    <Badge className={`text-[10px] border ${PRIORITY_COLORS[task.priority] || PRIORITY_COLORS.medium}`}>
-                      {task.priority}
-                    </Badge>
-                    {task.due_date && (
-                      <span className="text-[10px] text-muted-foreground flex items-center gap-1">
-                        <Calendar className="h-3 w-3" />
-                        {format(new Date(task.due_date), "MMM d")}
-                      </span>
-                    )}
-                    <div className="flex items-center gap-0.5 shrink-0">
-                      <Button variant="ghost" size="icon" className="h-6 w-6 text-muted-foreground hover:text-primary" onClick={() => {
-                        setEditingTask(task);
-                        setTaskForm({ title: task.title, description: task.description || "", priority: task.priority, due_date: task.due_date || "" });
-                        setShowTaskDialog(true);
-                      }}>
-                        <Pencil className="h-3 w-3" />
-                      </Button>
-                      <Button variant="ghost" size="icon" className="h-6 w-6 text-muted-foreground hover:text-destructive" onClick={() => deleteTask.mutate(task.id)}>
-                        <X className="h-3 w-3" />
-                      </Button>
-                    </div>
-                  </div>
-                ))}
+                {activeTasks.map(renderTaskRow)}
+
+                {completedTasks.length > 0 && (
+                  <Collapsible open={completedTasksOpen} onOpenChange={setCompletedTasksOpen}>
+                    <CollapsibleTrigger className="flex items-center gap-2 w-full text-left py-1.5 hover:text-primary transition-colors text-muted-foreground">
+                      {completedTasksOpen ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" />}
+                      <span className="text-xs font-medium">Completed ({completedTasks.length})</span>
+                    </CollapsibleTrigger>
+                    <CollapsibleContent className="space-y-1.5 mt-1">
+                      {completedTasks.map(renderTaskRow)}
+                    </CollapsibleContent>
+                  </Collapsible>
+                )}
               </div>
             )}
           </div>
@@ -793,12 +964,16 @@ export default function ProjectWorkspace() {
                             const Icon = REF_ICONS[ref.type] || StickyNote;
                             const iconColor = REF_ICON_COLORS[ref.type] || "text-muted-foreground";
                             const thumbnail = getRefThumbnail(ref);
+                            const previewText = ref.type === "note" ? stripHtml(ref.description) : ref.description;
 
                             if (refViewMode === "list") {
                               return (
                                 <div key={ref.id} className="flex items-center gap-3 p-2 rounded-lg border border-border/50 bg-card/50 cursor-pointer hover:border-primary/30 transition-colors" onClick={() => handleRefClick(ref)}>
                                   <Icon className={`h-4 w-4 ${iconColor} shrink-0`} />
                                   <span className="text-sm font-medium truncate flex-1">{ref.title}</span>
+                                  {previewText && (
+                                    <span className="text-xs text-muted-foreground truncate max-w-[200px] hidden sm:inline">{previewText}</span>
+                                  )}
                                   <div className="flex items-center gap-0.5 shrink-0">
                                     <Button variant="ghost" size="icon" className="h-6 w-6 text-muted-foreground hover:text-primary" onClick={(e) => { e.stopPropagation(); handleEditRef(ref); }}>
                                       <Pencil className="h-3 w-3" />
@@ -826,7 +1001,9 @@ export default function ProjectWorkspace() {
                                     )}
                                     <div className="flex-1 min-w-0">
                                       <p className="text-sm font-medium truncate">{ref.title}</p>
-                                      {ref.description && <p className="text-xs text-muted-foreground line-clamp-2">{ref.description}</p>}
+                                      {previewText && (
+                                        <p className="text-xs text-muted-foreground line-clamp-2">{previewText}</p>
+                                      )}
                                     </div>
                                     <div className="flex flex-col gap-0.5 shrink-0">
                                       <Button variant="ghost" size="icon" className="h-6 w-6 text-muted-foreground hover:text-primary" onClick={(e) => { e.stopPropagation(); handleEditRef(ref); }}>
@@ -850,17 +1027,15 @@ export default function ProjectWorkspace() {
             )}
           </div>
 
-          {/* Expenses Section */}
+          {/* Expenses */}
           <div className="space-y-3">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2">
                 <DollarSign className="h-4 w-4 text-primary" />
                 <h2 className="text-lg font-semibold">Expenses</h2>
-                {totalExpenses > 0 && (
-                  <Badge variant="secondary" className="text-xs">${totalExpenses.toFixed(2)}</Badge>
-                )}
+                <Badge variant="secondary" className="text-[10px]">${totalExpenses.toFixed(2)}</Badge>
               </div>
-              <Button variant="outline" size="sm" className="gap-1 h-8" onClick={() => { setEditingExpense(null); setExpenseForm({ title: "", description: "", amount: "", category: "General", date: format(new Date(), "yyyy-MM-dd") }); setReceiptFile(null); setShowExpenseDialog(true); }}>
+              <Button variant="outline" size="sm" className="gap-1 h-8" onClick={() => { setEditingExpense(null); setExpenseForm({ title: "", description: "", amount: "", category: "General", date: format(new Date(), "yyyy-MM-dd"), vendor: "" }); setShowExpenseDialog(true); }}>
                 <Plus className="h-3 w-3" /> Add Expense
               </Button>
             </div>
@@ -868,32 +1043,31 @@ export default function ProjectWorkspace() {
             {expenses.length === 0 ? (
               <div className="flex flex-col items-center justify-center rounded-xl border border-dashed border-border py-8">
                 <DollarSign className="mb-2 h-6 w-6 text-muted-foreground/50" />
-                <p className="text-sm text-muted-foreground">No expenses tracked yet</p>
+                <p className="text-sm text-muted-foreground">No expenses tracked</p>
               </div>
             ) : (
               <div className="space-y-1.5">
                 {expenses.map((expense: any) => (
                   <div key={expense.id} className="flex items-center gap-3 p-2.5 rounded-lg border border-border/50 bg-card/50 transition-colors hover:border-primary/20">
+                    {expense.receipt_url && (
+                      <a href={expense.receipt_url} target="_blank" rel="noopener noreferrer" onClick={(e) => e.stopPropagation()}>
+                        <Receipt className="h-4 w-4 text-muted-foreground hover:text-primary shrink-0" />
+                      </a>
+                    )}
                     <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-2">
-                        <p className="text-sm font-medium">{expense.title}</p>
-                        <Badge variant="secondary" className="text-[10px]">{expense.category}</Badge>
-                      </div>
+                      <p className="text-sm font-medium">{expense.title}</p>
+                      {expense.vendor && <p className="text-xs text-muted-foreground">{(expense as any).vendor}</p>}
                       {expense.description && <p className="text-xs text-muted-foreground line-clamp-1">{expense.description}</p>}
                     </div>
-                    <span className="text-sm font-semibold text-primary">${Number(expense.amount).toFixed(2)}</span>
+                    <Badge variant="secondary" className="text-[10px]">{expense.category}</Badge>
+                    <span className="text-sm font-semibold tabular-nums">${Number(expense.amount).toFixed(2)}</span>
                     {expense.date && (
                       <span className="text-[10px] text-muted-foreground">{format(new Date(expense.date), "MMM d")}</span>
-                    )}
-                    {expense.receipt_url && (
-                      <Button variant="ghost" size="icon" className="h-6 w-6 text-muted-foreground hover:text-primary" onClick={() => window.open(expense.receipt_url, "_blank")}>
-                        <Receipt className="h-3 w-3" />
-                      </Button>
                     )}
                     <div className="flex items-center gap-0.5 shrink-0">
                       <Button variant="ghost" size="icon" className="h-6 w-6 text-muted-foreground hover:text-primary" onClick={() => {
                         setEditingExpense(expense);
-                        setExpenseForm({ title: expense.title, description: expense.description || "", amount: String(expense.amount), category: expense.category, date: expense.date || "" });
+                        setExpenseForm({ title: expense.title, description: expense.description || "", amount: String(expense.amount), category: expense.category || "General", date: expense.date || "", vendor: (expense as any).vendor || "" });
                         setShowExpenseDialog(true);
                       }}>
                         <Pencil className="h-3 w-3" />
@@ -911,6 +1085,7 @@ export default function ProjectWorkspace() {
 
         {/* Right column */}
         <div className="lg:col-span-2 space-y-6">
+          {/* Tags */}
           <div>
             <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-2">Tags</p>
             {projectTags.length > 0 ? (
@@ -923,80 +1098,6 @@ export default function ProjectWorkspace() {
               <p className="text-xs text-muted-foreground/60 italic">No tags</p>
             )}
           </div>
-
-          {/* Brainstorm Callout */}
-          {linkedBrainstorm && (
-            <Collapsible
-              open={brainstormCalloutOpen}
-              onOpenChange={(open) => {
-                setBrainstormCalloutOpen(open);
-                localStorage.setItem(`proj-brainstorm-callout-${id}`, String(open));
-              }}
-            >
-              <CollapsibleTrigger className="flex items-center gap-2 w-full text-left py-1 hover:text-primary transition-colors">
-                {brainstormCalloutOpen ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" />}
-                <Brain className="h-3.5 w-3.5 text-primary" />
-                <span className="text-xs font-semibold uppercase tracking-wider">Brainstorm</span>
-              </CollapsibleTrigger>
-              <CollapsibleContent className="mt-2 space-y-4">
-                {linkedBrainstorm.compiled_description && (
-                  <div>
-                    <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-1">Description</p>
-                    <div className="rounded-lg bg-zinc-900/50 border border-white/5 p-4">
-                      <div className="prose prose-invert prose-sm max-w-none leading-relaxed text-gray-300 [&_ul]:list-disc [&_ol]:list-decimal [&_ul]:pl-5 [&_ol]:pl-5 [&_li]:my-0.5 [&_p]:my-1.5">
-                        <ReactMarkdown>{linkedBrainstorm.compiled_description}</ReactMarkdown>
-                      </div>
-                    </div>
-                  </div>
-                )}
-                {linkedBrainstorm.bullet_breakdown && (
-                  <div>
-                    <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-1">Bullet Breakdown</p>
-                    <div className="rounded-lg bg-zinc-900/50 border border-white/5 p-4">
-                      <div className="prose prose-invert prose-sm max-w-none leading-relaxed text-gray-300 [&_ul]:list-disc [&_ol]:list-decimal [&_ul]:pl-5 [&_ol]:pl-5 [&_li]:my-0.5 [&_p]:my-1.5">
-                        <ReactMarkdown>{linkedBrainstorm.bullet_breakdown}</ReactMarkdown>
-                      </div>
-                    </div>
-                  </div>
-                )}
-                {brainstormRefs.length > 0 && (
-                  <div>
-                    <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-1">References</p>
-                    <div className="space-y-1.5">
-                      {brainstormRefs.map((ref: any) => {
-                        const Icon = REF_ICONS[ref.type] || StickyNote;
-                        const iconColor = REF_ICON_COLORS[ref.type] || "text-muted-foreground";
-                        return (
-                          <div
-                            key={ref.id}
-                            className="flex items-center gap-2 p-1.5 rounded border border-border/30 bg-card/30 text-xs cursor-pointer hover:border-primary/30 transition-colors"
-                            onClick={() => handleRefClick(ref)}
-                          >
-                            <Icon className={`h-3.5 w-3.5 ${iconColor} shrink-0`} />
-                            <span className="truncate">{ref.title}</span>
-                          </div>
-                        );
-                      })}
-                    </div>
-                  </div>
-                )}
-              </CollapsibleContent>
-            </Collapsible>
-          )}
-
-          {/* Bullet Breakdown - only show if no linked brainstorm */}
-          {!brainstormId && (
-            <div>
-              <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-1">Bullet Breakdown</p>
-              <EditableMarkdown
-                value={bullets}
-                onChange={setBullets}
-                onSave={() => updateProject.mutate({ bullet_breakdown: bullets })}
-                placeholder="- Key point 1&#10;- Key point 2"
-                minHeight="80px"
-              />
-            </div>
-          )}
 
           {/* GitHub URL - Click to edit */}
           <div>
@@ -1034,21 +1135,11 @@ export default function ProjectWorkspace() {
               <CardContent className="p-4 space-y-3">
                 <div className="flex items-center gap-2">
                   <Github className="h-4 w-4 text-muted-foreground" />
-                  <a
-                    href={githubUrl}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="text-sm font-semibold hover:text-primary transition-colors truncate"
-                  >
+                  <a href={githubUrl} target="_blank" rel="noopener noreferrer" className="text-sm font-semibold hover:text-primary transition-colors truncate">
                     {githubData.repo.full_name}
                   </a>
                   {githubPagesUrl && (
-                    <a
-                      href={githubPagesUrl}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="ml-auto"
-                    >
+                    <a href={githubPagesUrl} target="_blank" rel="noopener noreferrer" className="ml-auto">
                       <Badge variant="outline" className="text-[10px] gap-1 cursor-pointer hover:bg-accent">
                         <ExternalLink className="h-2.5 w-2.5" /> View Site
                       </Badge>
@@ -1059,15 +1150,9 @@ export default function ProjectWorkspace() {
                   <p className="text-xs text-muted-foreground">{githubData.repo.description}</p>
                 )}
                 <div className="flex items-center gap-2 flex-wrap">
-                  <Badge variant="secondary" className="text-xs gap-1">
-                    <Star className="h-3 w-3" /> {githubData.repo.stargazers_count}
-                  </Badge>
-                  <Badge variant="secondary" className="text-xs gap-1">
-                    <GitFork className="h-3 w-3" /> {githubData.repo.forks_count}
-                  </Badge>
-                  <Badge variant="secondary" className="text-xs gap-1">
-                    <AlertCircle className="h-3 w-3" /> {githubData.repo.open_issues_count} issues
-                  </Badge>
+                  <Badge variant="secondary" className="text-xs gap-1"><Star className="h-3 w-3" /> {githubData.repo.stargazers_count}</Badge>
+                  <Badge variant="secondary" className="text-xs gap-1"><GitFork className="h-3 w-3" /> {githubData.repo.forks_count}</Badge>
+                  <Badge variant="secondary" className="text-xs gap-1"><AlertCircle className="h-3 w-3" /> {githubData.repo.open_issues_count} issues</Badge>
                 </div>
                 {githubData.commits.length > 0 && (
                   <div>
@@ -1078,9 +1163,7 @@ export default function ProjectWorkspace() {
                           <GitCommit className="h-3 w-3 text-muted-foreground shrink-0 mt-0.5" />
                           <div className="min-w-0 flex-1">
                             <p className="truncate">{c.commit.message.split("\n")[0]}</p>
-                            <p className="text-muted-foreground/60">
-                              {formatDistanceToNow(new Date(c.commit.author.date), { addSuffix: true })}
-                            </p>
+                            <p className="text-muted-foreground/60">{formatDistanceToNow(new Date(c.commit.author.date), { addSuffix: true })}</p>
                           </div>
                         </div>
                       ))}
@@ -1110,6 +1193,45 @@ export default function ProjectWorkspace() {
           {githubParsed && !githubData && (
             <p className="text-xs text-muted-foreground/60 italic">Could not fetch repository data</p>
           )}
+
+          {/* Brainstorm References - standalone section */}
+          {brainstormRefs.length > 0 && (
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-1">Brainstorm References</p>
+              <div className="space-y-1.5">
+                {brainstormRefs.map((ref: any) => {
+                  const Icon = REF_ICONS[ref.type] || StickyNote;
+                  const iconColor = REF_ICON_COLORS[ref.type] || "text-muted-foreground";
+                  const previewText = ref.type === "note" ? stripHtml(ref.description) : ref.description;
+                  return (
+                    <div
+                      key={ref.id}
+                      className="flex items-center gap-2 p-1.5 rounded border border-border/30 bg-card/30 text-xs cursor-pointer hover:border-primary/30 transition-colors"
+                      onClick={() => handleRefClick(ref)}
+                    >
+                      <Icon className={`h-3.5 w-3.5 ${iconColor} shrink-0`} />
+                      <span className="truncate flex-1">{ref.title}</span>
+                      {previewText && (
+                        <span className="text-muted-foreground truncate max-w-[150px] hidden sm:inline">{previewText}</span>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
+          {/* Bullet Breakdown - always shown */}
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-1">Bullet Breakdown</p>
+            <EditableMarkdown
+              value={bullets}
+              onChange={setBullets}
+              onSave={() => updateProject.mutate({ bullet_breakdown: bullets })}
+              placeholder="- Key point 1&#10;- Key point 2"
+              minHeight="80px"
+            />
+          </div>
         </div>
       </div>
 
@@ -1196,9 +1318,7 @@ export default function ProjectWorkspace() {
               <div>
                 <label className="text-xs text-muted-foreground mb-1 block">Priority</label>
                 <Select value={taskForm.priority} onValueChange={(val) => setTaskForm(p => ({ ...p, priority: val }))}>
-                  <SelectTrigger className="h-8 text-xs">
-                    <SelectValue />
-                  </SelectTrigger>
+                  <SelectTrigger className="h-8 text-xs"><SelectValue /></SelectTrigger>
                   <SelectContent>
                     <SelectItem value="low">Low</SelectItem>
                     <SelectItem value="medium">Medium</SelectItem>
@@ -1240,6 +1360,7 @@ export default function ProjectWorkspace() {
           </DialogHeader>
           <div className="space-y-3">
             <Input placeholder="Expense title" value={expenseForm.title} onChange={(e) => setExpenseForm(p => ({ ...p, title: e.target.value }))} />
+            <Input placeholder="Vendor (optional)" value={expenseForm.vendor} onChange={(e) => setExpenseForm(p => ({ ...p, vendor: e.target.value }))} />
             <div className="grid grid-cols-2 gap-3">
               <div>
                 <label className="text-xs text-muted-foreground mb-1 block">Amount ($)</label>
@@ -1248,9 +1369,7 @@ export default function ProjectWorkspace() {
               <div>
                 <label className="text-xs text-muted-foreground mb-1 block">Category</label>
                 <Select value={expenseForm.category} onValueChange={(val) => setExpenseForm(p => ({ ...p, category: val }))}>
-                  <SelectTrigger className="h-8 text-xs">
-                    <SelectValue />
-                  </SelectTrigger>
+                  <SelectTrigger className="h-8 text-xs"><SelectValue /></SelectTrigger>
                   <SelectContent>
                     {EXPENSE_CATEGORIES.map(c => (
                       <SelectItem key={c} value={c}>{c}</SelectItem>
@@ -1276,7 +1395,7 @@ export default function ProjectWorkspace() {
             <Button
               onClick={() => {
                 if (editingExpense) {
-                  updateExpense.mutate({ expenseId: editingExpense.id, fields: { title: expenseForm.title, description: expenseForm.description, amount: parseFloat(expenseForm.amount) || 0, category: expenseForm.category, date: expenseForm.date || null } });
+                  updateExpense.mutate({ expenseId: editingExpense.id, fields: { title: expenseForm.title, description: expenseForm.description, amount: parseFloat(expenseForm.amount) || 0, category: expenseForm.category, date: expenseForm.date || null, vendor: expenseForm.vendor } });
                 } else {
                   handleAddExpense();
                 }
@@ -1297,7 +1416,6 @@ export default function ProjectWorkspace() {
               <DialogTitle>{linkedIdeaData.title || "Linked Idea"}</DialogTitle>
               <DialogDescription className="sr-only">View linked idea details</DialogDescription>
             </DialogHeader>
-
             <div className="space-y-4">
               <div className="flex items-center gap-2 flex-wrap">
                 <p className="text-xs text-muted-foreground">
@@ -1313,14 +1431,12 @@ export default function ProjectWorkspace() {
                   {linkedIdeaData.raw_dump}
                 </div>
               </div>
-
               {linkedIdeaData.processed_summary && (
                 <div>
                   <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-1">Summary</p>
                   <p className="text-sm leading-relaxed">{linkedIdeaData.processed_summary}</p>
                 </div>
               )}
-
               {linkedIdeaData.key_features && (
                 <div>
                   <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-1">Key Features</p>
@@ -1329,7 +1445,6 @@ export default function ProjectWorkspace() {
                   </div>
                 </div>
               )}
-
               {linkedIdeaData.tags && linkedIdeaData.tags.length > 0 && (
                 <div className="flex flex-wrap gap-1">
                   {linkedIdeaData.tags.map((tag: string) => (
@@ -1338,7 +1453,6 @@ export default function ProjectWorkspace() {
                 </div>
               )}
             </div>
-
             <DialogFooter>
               <Button variant="ghost" onClick={() => setShowLinkedIdea(false)}>Close</Button>
             </DialogFooter>

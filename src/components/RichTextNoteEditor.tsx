@@ -43,7 +43,7 @@ export default function RichTextNoteEditor({ value, onChange, placeholder }: Ric
   const execCmd = (command: string) => {
     editorRef.current?.focus();
     document.execCommand(command, false);
-    handleInput();
+    requestAnimationFrame(() => handleInput());
   };
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
