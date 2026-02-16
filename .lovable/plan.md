@@ -1,138 +1,159 @@
 
 
-# Campaign Dashboard Overhaul, Resources, Task Popups, Campaign Assistant, and Project Layout Fix
+# Campaign Assistant Tools, Expand/Reduce Chat, WYSIWYG Lists, Project Column Reorder, and Gotchas Feature
 
-This plan covers 7 changes across the Campaign Workspace dashboard (State 2), the GTM Interview (State 1), and the Project Workspace.
-
----
-
-## 1. GTM Interview: Render Question with Markdown + Scroll
-
-**Problem:** The AI question text renders as a plain `<p>` tag, so numbered lists and formatting are lost. Long questions overflow without scrolling.
-
-**File: `src/pages/CampaignWorkspace.tsx` (lines 516-522)**
-
-- Replace the plain `<p>` with a `ReactMarkdown` component inside a scrollable container (`max-h-[300px] overflow-y-auto`).
-- Apply prose styling: `prose prose-invert prose-sm` with list styles matching the rest of the app.
+This plan covers 5 major changes across multiple files and a new database table + edge function.
 
 ---
 
-## 2. Campaign Dashboard: Remove Metric Cards, Distribution Strategy, and Campaign Links
+## 1. Campaign Assistant: Add Note Creation and Task Addition Tools
 
-**File: `src/pages/CampaignWorkspace.tsx` (lines 621-846)**
+**File: `supabase/functions/campaign-chat/index.ts`**
 
-- **Remove** the `metricCards` array and the entire Revenue/Units Sold/Target Price grid (lines 621-767).
-- **Remove** the Distribution Strategy card (Sales Model + Primary Channel selects) (lines 783-816).
-- **Remove** the Campaign Links card and the Add Link dialog (lines 818-933).
-- Remove associated state: `editingMetric`, `metricDraft`, `showAddLink`, `linkForm`, and helper functions `handleSaveMetric`, `handleAddLink`, `handleDeleteLink`.
+Update the `assistant` mode to use tool-calling (like `project-chat` does) instead of plain chat. Add two tools:
 
----
+- **`create_note`**: Creates a campaign reference (note type) in `campaign_references`. Parameters: `title` (string), `content` (string, HTML).
+- **`add_task`**: Adds a task to any of the 5 Kanban columns. Parameters: `title` (string), `description` (string), `status_column` (enum of the 5 phases).
 
-## 3. Campaign Dashboard: Two-Column Layout with Tags on Right
+Update the system prompt to include these capabilities and instruct the AI to use them when appropriate. Also include a `notes` field in the context showing existing campaign references.
 
-Restructure the dashboard (State 2) to match the Project page layout using a `grid-cols-5` two-column split (3 left, 2 right).
+**File: `src/pages/CampaignWorkspace.tsx`**
 
-**Left column (lg:col-span-3):**
-- The four playbook sections (Discovery & IP Strategy, Monetization Strategy, Distribution & Marketing, Logistics & Operations), each as `EditableMarkdown`.
+Update `handleChatSubmit` to process returned `actions` array (same pattern as ProjectWorkspace's chat handler):
+- For `create_note` actions: insert into `campaign_references` and invalidate query, show a clickable badge in the chat message.
+- For `add_task` actions: insert into `campaign_tasks` and invalidate query.
 
-**Right column (lg:col-span-2):**
-- Tags at the top
-- Resources section (see item 4 below)
+Update `ChatMsg` type to include optional `noteId` and `noteTitle` fields.
 
 ---
 
-## 4. Campaign Resources: New Table + Full CRUD
+## 2. Expand/Reduce Button on All Chat Assistants
 
-Since campaign resources must be independent from project/brainstorm resources, we need a new `campaign_references` table.
+**File: `src/components/FloatingChatWidget.tsx`**
 
-**Database Migration:**
+Add a new `"maximized"` state alongside `"collapsed"` and `"expanded"`. Add an expand/reduce toggle button next to the X button in the title bar.
+
+- **Expanded (default)**: Current size (`w-[400px] max-h-[500px]`).
+- **Maximized**: Larger size (`w-[600px] max-h-[80vh]`), with increased message area (`max-h-[60vh]`).
+- Use `Maximize2` icon when in expanded state, `Minimize2` icon when maximized.
+- Both states persist to localStorage. The X button always collapses.
+
+This automatically applies to all three assistants (Project, Brainstorm, Campaign) since they all use `FloatingChatWidget`.
+
+---
+
+## 3. Fix WYSIWYG Bullet/Numbered Lists in EditableMarkdown
+
+**File: `src/components/EditableMarkdown.tsx`**
+
+The current `markdownToHtml` and `htmlToMarkdown` converters are too simplistic -- they don't properly handle nested lists, ordered lists mixed with unordered lists, or list items created by the `RichTextNoteEditor` toolbar.
+
+Key fixes:
+- **`markdownToHtml`**: Properly group consecutive `- ` lines into `<ul>` and consecutive `1. ` lines into `<ol>`. Handle indented sub-items.
+- **`htmlToMarkdown`**: Properly detect `<ol>` vs `<ul>` and convert `<li>` inside `<ol>` to numbered format (`1. item`) and inside `<ul>` to `- item`. Currently everything becomes `- item`.
+- Preserve list context when converting back, so round-tripping works: edit in WYSIWYG, save as markdown, re-open in WYSIWYG -- lists should survive intact.
+
+---
+
+## 4. Project Page Right Column Reorder
+
+**File: `src/pages/ProjectWorkspace.tsx`** (lines 1086-1367)
+
+Current right column order:
+1. Tags
+2. GitHub Repository
+3. GitHub Activity Widget
+4. Brainstorm References
+5. Bullet Breakdown
+6. Resources
+
+New desired order:
+1. Tags
+2. Bullet Breakdown
+3. Brainstorm References
+4. GitHub Repository
+5. Resources
+
+Move the Bullet Breakdown section (lines 1224-1234) to directly after Tags (after line 1100). Move Brainstorm References (lines 1197-1222) to after Bullet Breakdown. Keep GitHub Repository + Activity Widget after Brainstorm References. Resources stays at the end.
+
+---
+
+## 5. Gotchas Feature: Root Cause Autopsy (5 Whys)
+
+### 5a. Database Migration
+
+Create a new `gotchas` table:
+
 ```sql
-CREATE TABLE campaign_references (
+CREATE TABLE public.gotchas (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-  campaign_id uuid NOT NULL REFERENCES campaigns(id) ON DELETE CASCADE,
+  project_id uuid NOT NULL REFERENCES public.projects(id) ON DELETE CASCADE,
   user_id uuid NOT NULL,
-  type text NOT NULL DEFAULT 'note',
-  title text NOT NULL DEFAULT '',
-  url text DEFAULT '',
-  description text DEFAULT '',
-  thumbnail_url text DEFAULT '',
-  sort_order integer DEFAULT 0,
+  symptom text NOT NULL DEFAULT '',
+  root_cause text,
+  status text NOT NULL DEFAULT 'active',
+  chat_history jsonb DEFAULT '[]',
   created_at timestamptz DEFAULT now()
 );
 
-ALTER TABLE campaign_references ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.gotchas ENABLE ROW LEVEL SECURITY;
 
-CREATE POLICY "Users manage own campaign references"
-  ON campaign_references FOR ALL
-  USING (auth.uid() = user_id);
+CREATE POLICY "Users can manage own gotchas"
+  ON public.gotchas FOR ALL
+  USING (auth.uid() = user_id)
+  WITH CHECK (auth.uid() = user_id);
 ```
 
-**File: `src/pages/CampaignWorkspace.tsx`**
+### 5b. Edge Function: `supabase/functions/gotcha-chat/index.ts`
 
-- Add a full Resources section in the right column, mirroring the Project Workspace's Resources implementation:
-  - View mode toggle (grid/list) with localStorage persistence
-  - Sort mode (newest/oldest/A-Z/Z-A)
-  - Collapsible groups by type (notes, links, images, videos, files)
-  - Add/Edit/Delete resource dialogs
-  - Note type uses `RichTextNoteEditor`
-  - Image/file upload to Supabase storage
-  - `ReferenceViewer` for viewing resources
-- Query `campaign_references` table filtered by `campaign_id`.
-- Import needed components: `ReferenceViewer`, `RichTextNoteEditor`, `Popover`, `Collapsible`, etc.
+Create a new edge function with two modes:
 
----
+- **`ask_why`**: System prompt as a strict Root Cause Investigator. Takes the symptom and chat history, asks "Why did this happen?" Only one question at a time. Up to 5 rounds. If the user says "I don't know" / "I'm not sure", returns an `investigation_task` instead of another why. If root cause is reached, returns `root_cause` and a `corrective_action_task`.
 
-## 5. Kanban Pipeline: Move to Top + Task Click Popup
+- Uses tool calling to return structured output:
+  - `ask_why_result`: `{ next_question?: string, investigation_task?: string, root_cause?: string, corrective_action_task?: string }`
 
-**File: `src/pages/CampaignWorkspace.tsx`**
+Register in `supabase/config.toml` with `verify_jwt = false`.
 
-- Move the "Go-To-Market Pipeline" Kanban board to appear **above** the two-column layout (right after the separator, before the playbook sections).
-- Add a task detail popup dialog (matching the Project Workspace's `viewingTask` pattern):
-  - Clicking a task card opens a dialog showing title, description, status column, and completion state.
-  - Dialog footer has "Mark Complete/Active", "Edit" (inline title/description editing), and "Delete" buttons.
-  - Add `viewingTask` state and the corresponding `Dialog` component.
-
----
-
-## 6. Campaign Assistant: Floating Chat Widget + Edge Function
-
-**Edge Function: `supabase/functions/campaign-chat/index.ts`**
-
-- Add a new mode `"assistant"` to the existing campaign-chat edge function.
-- The assistant mode uses a system prompt similar to the project-chat assistant:
-  - Understands the campaign context (playbook sections, tasks, tags, status).
-  - Can answer questions about the campaign strategy and how to accomplish GTM goals.
-  - Does NOT need tool-calling (tasks are managed via the Kanban board) -- it's a conversational assistant.
-- Uses the same AI gateway pattern already in place.
-
-**File: `src/pages/CampaignWorkspace.tsx`**
-
-- Add `FloatingChatWidget` to the dashboard (State 2 only, not during interview).
-- Add chat state: `chatHistory`, `chatInput`, `isChatThinking`.
-- Welcome message: "I'm your Campaign Assistant. I can help you understand your GTM strategy, suggest improvements, and answer questions about launching your product."
-- On submit, call `campaign-chat` with `mode: "assistant"` and the full chat history + campaign context.
-- Render messages with `ReactMarkdown` + prose styling (same pattern as project assistant).
-
----
-
-## 7. Project Workspace: Move Resources Under Bullet Breakdown
+### 5c. UI in ProjectWorkspace
 
 **File: `src/pages/ProjectWorkspace.tsx`**
 
-Currently, Resources is in the **left column** (after Tasks, around line 1028). Bullet Breakdown is in the **right column** (line 1354).
+Add a "Gotchas" section near the Tasks area (in the left column, after Tasks and before Expenses):
 
-- **Move** the entire Resources section (including the Add/Edit dialogs, sort/view controls, grouped refs rendering) from the left column to the right column, placing it **after** the Bullet Breakdown section.
-- This means the left column will contain: Description, Execution Strategy, Tasks, Expenses.
-- The right column will contain: Tags, GitHub, GitHub Activity, Brainstorm References, Bullet Breakdown, **Resources**.
+- Query `gotchas` table for the project.
+- Display active/investigating gotchas as cards with amber/red border.
+- "+ Add Gotcha" button opens a modal.
+
+**Gotcha Modal (two states):**
+
+**State 1 - Definition:**
+- Large textarea: "What is the Gotcha?"
+- "Start Autopsy" button saves symptom, transitions to State 2.
+
+**State 2 - AI Interview (5 Whys):**
+- Flashcard-style Q&A: AI asks why, user answers.
+- Show current why round (1-5).
+- If AI returns `investigation_task`: auto-create a project task (via `addTask` mutation), set gotcha status to `investigating`, show message, close modal.
+- If AI returns `root_cause`: save to gotcha, set status to `resolved`, auto-create corrective action task, close modal with success toast.
+- "I don't know" / "I'm not sure" responses are sent to the AI which handles the pivot logic.
+
+**Gotcha cards display:**
+- Active: amber border, symptom text, "Continue Autopsy" button.
+- Investigating: amber border + investigating badge, symptom text.
+- Resolved: green border, symptom + root cause summary, collapsed by default.
 
 ---
 
 ## Technical Summary
 
-| Area | Changes |
-|---|---|
-| **DB Migration** | Create `campaign_references` table with RLS |
-| **`src/pages/CampaignWorkspace.tsx`** | Markdown rendering for interview questions with scroll; remove metrics/distribution/links; two-column layout; Resources CRUD; Kanban moved to top with task popups; Campaign Assistant floating widget |
-| **`supabase/functions/campaign-chat/index.ts`** | Add `"assistant"` mode for conversational campaign help |
-| **`src/pages/ProjectWorkspace.tsx`** | Move Resources section from left column to right column (under Bullet Breakdown) |
+| Area | File(s) | Changes |
+|---|---|---|
+| Campaign Assistant tools | `campaign-chat/index.ts`, `CampaignWorkspace.tsx` | Add `create_note` and `add_task` tool-calling to assistant mode; process actions on frontend |
+| Expand/reduce chat | `FloatingChatWidget.tsx` | Add maximized state with toggle button next to X |
+| WYSIWYG lists | `EditableMarkdown.tsx` | Fix `markdownToHtml` and `htmlToMarkdown` converters for proper list handling |
+| Project column order | `ProjectWorkspace.tsx` | Reorder right column: Tags, Bullet Breakdown, Brainstorm Refs, GitHub, Resources |
+| Gotchas table | DB migration | Create `gotchas` table with RLS |
+| Gotchas edge function | `gotcha-chat/index.ts`, `config.toml` | New edge function for 5 Whys root cause analysis |
+| Gotchas UI | `ProjectWorkspace.tsx` | Gotchas section with modal, AI interview, auto-task creation |
 
