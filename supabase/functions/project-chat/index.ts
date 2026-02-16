@@ -74,16 +74,17 @@ const tools = [
     type: "function",
     function: {
       name: "update_widget",
-      description: "Update an existing widget's code by its title.",
+      description: "Update an existing widget by its title. You can update the code, summary, title, and/or instructions. Match the widget by its current title from the Existing Widgets list.",
       parameters: {
         type: "object",
         properties: {
-          title: { type: "string", description: "Exact title of the existing widget to update" },
-          code: { type: "string", description: "Updated complete HTML document with embedded JS/CSS" },
+          title: { type: "string", description: "Current title of the existing widget to update (must match an existing widget)" },
+          new_title: { type: "string", description: "New title for the widget (optional, only if renaming)" },
+          code: { type: "string", description: "Updated complete HTML document with embedded JS/CSS (optional, omit to keep existing code)" },
           summary: { type: "string", description: "Updated brief summary (optional)" },
           instructions: { type: "string", description: "Updated usage instructions in HTML format (optional)" },
         },
-        required: ["title", "code"],
+        required: ["title"],
       },
     },
   },
@@ -109,6 +110,7 @@ Bullet Breakdown: ${context.bullet_breakdown || "None"}
 Execution Strategy: ${context.execution_strategy || "None yet"}
 Current Tasks: ${context.tasks || "None"}
 Notes/Research: ${context.notes || "None"}
+Existing Widgets: ${context.widgets || "None"}
 
 YOUR CAPABILITIES:
 - Help plan and break down the project into actionable steps

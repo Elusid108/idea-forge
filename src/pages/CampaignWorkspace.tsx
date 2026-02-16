@@ -523,6 +523,12 @@ export default function CampaignWorkspace() {
     try {
       const tasksList = campaignTasks.map((t: any) => `[${t.completed ? "✓" : " "}] ${t.title} (${STATUS_LABELS[t.status_column] || t.status_column})`).join("\n");
       const notesList = campaignRefs.filter((r: any) => r.type === "note").map((r: any) => `${r.title}: ${stripHtml(r.description || "")}`).join("\n");
+      const widgetsList = campaignRefs
+        .filter((r: any) => r.type === "widget")
+        .map((r: any) => {
+          const wd = parseWidgetData(r.description);
+          return `${r.title}: ${wd.summary || "(no summary)"} [code length: ${wd.code.length} chars]`;
+        }).join("\n");
       const { data, error } = await supabase.functions.invoke("campaign-chat", {
         body: {
           mode: "assistant",
@@ -536,6 +542,7 @@ export default function CampaignWorkspace() {
             playbook: campaign?.playbook || "",
             tasks: tasksList,
             notes: notesList,
+            widgets: widgetsList,
             status: campaign?.status || "",
           },
         },
@@ -583,9 +590,11 @@ export default function CampaignWorkspace() {
             if (existingWidget) {
               const existingData = parseWidgetData(existingWidget.description);
               const updatedDesc = encodeWidgetData(action.code || existingData.code, action.summary || existingData.summary, action.instructions || existingData.instructions);
-              await supabase.from("campaign_references" as any).update({ description: updatedDesc }).eq("id", existingWidget.id);
+              const updateFields: Record<string, any> = { description: updatedDesc };
+              if (action.new_title) updateFields.title = action.new_title;
+              await supabase.from("campaign_references" as any).update(updateFields).eq("id", existingWidget.id);
               queryClient.invalidateQueries({ queryKey: ["campaign-refs", id] });
-              toast.success(`Widget updated: ${action.title}`);
+              toast.success(`Widget updated: ${action.new_title || action.title}`);
             }
           }
         }
@@ -966,20 +975,25 @@ export default function CampaignWorkspace() {
             <DialogDescription className="sr-only">Task details</DialogDescription>
           </DialogHeader>
           {viewingTask && !editingTaskInDialog && (
-            <div className="space-y-4">
+            <div className="space-y-5">
               <div className="flex items-center gap-2 flex-wrap">
                 <Badge variant="secondary" className="text-xs">{STATUS_LABELS[viewingTask.status_column] || viewingTask.status_column}</Badge>
                 <Badge variant={viewingTask.completed ? "default" : "secondary"} className="text-xs">{viewingTask.completed ? "Completed" : "Active"}</Badge>
               </div>
               {viewingTask.description && (
-                <div>
-                  <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-1">Description</p>
-                  <p className="text-sm whitespace-pre-wrap">{viewingTask.description}</p>
-                </div>
+                <>
+                  <Separator />
+                  <div>
+                    <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-1">Description</p>
+                    <p className="text-sm whitespace-pre-wrap">{viewingTask.description}</p>
+                  </div>
+                </>
               )}
               {/* Comments Section */}
+              <Separator />
               <TaskCommentsSection taskId={viewingTask.id} taskType="campaign" />
-              <p className="text-xs text-muted-foreground">Created {format(new Date(viewingTask.created_at), "MMM d, yyyy 'at' h:mm a")}</p>
+              <Separator />
+              <p className="text-xs text-muted-foreground pt-1">Created {format(new Date(viewingTask.created_at), "MMM d, yyyy 'at' h:mm a")}</p>
             </div>
           )}
           {viewingTask && editingTaskInDialog && (
