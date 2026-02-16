@@ -14,6 +14,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from "@/components/ui/dialog";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from "@/components/ui/alert-dialog";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { HoverCard, HoverCardContent, HoverCardTrigger } from "@/components/ui/hover-card";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Separator } from "@/components/ui/separator";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -32,7 +33,7 @@ import { useUndoRedo } from "@/hooks/useUndoRedo";
 import { format } from "date-fns";
 
 type RefType = "link" | "image" | "video" | "note";
-type ChatMsg = { role: "user" | "assistant"; content: string; noteId?: string; noteTitle?: string; linkId?: string; linkTitle?: string };
+type ChatMsg = { role: "user" | "assistant"; content: string; noteId?: string; noteTitle?: string; linkId?: string; linkTitle?: string; links?: { id: string; title: string }[] };
 type SortMode = "az" | "za" | "newest" | "oldest";
 
 const REF_ICONS: Record<string, any> = {
@@ -213,7 +214,7 @@ export default function BrainstormWorkspace() {
     if (brainstorm && queryChatHistory.length === 0) {
       const welcomeMsg: ChatMsg = isLocked
         ? { role: "assistant", content: "👋 I'm your brainstorm assistant. I can answer questions about this brainstorm's content and help you explore ideas. What would you like to know?" }
-        : { role: "assistant", content: "👋 I'm your brainstorm assistant. I can answer questions, help you dig deeper into ideas, **create research notes**, and **update the description and bullet breakdown**. What would you like to explore?" };
+        : { role: "assistant", content: "👋 I'm your brainstorm assistant. I can answer questions, help you dig deeper into ideas, **create research notes**, **add reference links**, and **update the description and bullet breakdown**. What would you like to explore?" };
       setQueryChatHistory([welcomeMsg]);
     }
   }, [brainstorm, isLocked]);
@@ -707,8 +708,7 @@ export default function BrainstormWorkspace() {
       // Process actions
       let createdNoteId: string | null = null;
       let createdNoteTitle: string | null = null;
-      let createdLinkId: string | null = null;
-      let createdLinkTitle: string | null = null;
+      const createdLinks: { id: string; title: string }[] = [];
       if (data.actions && data.actions.length > 0) {
         for (const action of data.actions) {
           if (action.action === "create_note" && action.title) {
@@ -748,19 +748,20 @@ export default function BrainstormWorkspace() {
               description: action.description || "",
               sort_order: references.length,
             }).select("id").single();
-            createdLinkId = linkData?.id || null;
-            createdLinkTitle = action.title;
+            if (linkData?.id) createdLinks.push({ id: linkData.id, title: action.title });
             queryClient.invalidateQueries({ queryKey: ["brainstorm-refs", id] });
-            toast.success(`Link added: ${action.title}`);
           }
         }
+        // Consolidated toast for links
+        if (createdLinks.length === 1) toast.success(`Link added: ${createdLinks[0].title}`);
+        else if (createdLinks.length > 1) toast.success(`${createdLinks.length} links added`);
       }
 
       const assistantMsg: ChatMsg = {
         role: "assistant",
         content: data.answer || "Done.",
         ...(createdNoteId ? { noteId: createdNoteId, noteTitle: createdNoteTitle! } : {}),
-        ...(createdLinkId ? { linkId: createdLinkId, linkTitle: createdLinkTitle! } : {}),
+        ...(createdLinks.length > 0 ? { links: createdLinks } : {}),
       };
       setQueryChatHistory([...newHistory, assistantMsg]);
     } catch (e: any) {
@@ -1079,66 +1080,92 @@ export default function BrainstormWorkspace() {
 
                             if (refViewMode === "list") {
                               return (
-                                <div
-                                  key={ref.id}
-                                  className="flex items-center gap-3 p-2 rounded-lg border border-border/50 bg-card/50 cursor-pointer hover:border-primary/30 transition-colors"
-                                  onClick={() => handleRefClick(ref)}
-                                >
-                                  <Icon className={`h-4 w-4 ${iconColor} shrink-0`} />
-                                  <span className="text-sm font-medium truncate flex-1">{ref.title}</span>
-                                  {ref.description && (
-                                    <span className="text-xs text-muted-foreground truncate max-w-[200px] hidden sm:inline">{ref.type === "note" ? ref.description.replace(/<[^>]*>/g, "").trim() : ref.description}</span>
-                                  )}
-                                  {!isLocked && (
-                                    <div className="flex items-center gap-0.5 shrink-0">
-                                      <Button variant="ghost" size="icon" className="h-6 w-6 text-muted-foreground hover:text-primary" onClick={(e) => { e.stopPropagation(); handleEditRef(ref); }}>
-                                        <Pencil className="h-3 w-3" />
-                                      </Button>
-                                      <Button variant="ghost" size="icon" className="h-6 w-6 text-muted-foreground hover:text-destructive" onClick={(e) => { e.stopPropagation(); deleteReference.mutate(ref); }}>
-                                        <X className="h-3 w-3" />
-                                      </Button>
+                                <HoverCard key={ref.id} openDelay={300} closeDelay={100}>
+                                  <HoverCardTrigger asChild>
+                                    <div
+                                      className="flex items-center gap-3 p-2 rounded-lg border border-border/50 bg-card/50 cursor-pointer hover:border-primary/30 transition-colors"
+                                      onClick={() => handleRefClick(ref)}
+                                    >
+                                      <Icon className={`h-4 w-4 ${iconColor} shrink-0`} />
+                                      <span className="text-sm font-medium truncate flex-1">{ref.title}</span>
+                                      {ref.description && (
+                                        <span className="text-xs text-muted-foreground truncate max-w-[200px] hidden sm:inline">{ref.type === "note" ? ref.description.replace(/<[^>]*>/g, "").trim() : ref.description}</span>
+                                      )}
+                                      {!isLocked && (
+                                        <div className="flex items-center gap-0.5 shrink-0">
+                                          <Button variant="ghost" size="icon" className="h-6 w-6 text-muted-foreground hover:text-primary" onClick={(e) => { e.stopPropagation(); handleEditRef(ref); }}>
+                                            <Pencil className="h-3 w-3" />
+                                          </Button>
+                                          <Button variant="ghost" size="icon" className="h-6 w-6 text-muted-foreground hover:text-destructive" onClick={(e) => { e.stopPropagation(); deleteReference.mutate(ref); }}>
+                                            <X className="h-3 w-3" />
+                                          </Button>
+                                        </div>
+                                      )}
                                     </div>
-                                  )}
-                                </div>
+                                  </HoverCardTrigger>
+                                  <HoverCardContent className="w-72 p-3" side="top">
+                                    <div className="flex items-start gap-2">
+                                      <Icon className={`h-4 w-4 ${iconColor} shrink-0 mt-0.5`} />
+                                      <div className="min-w-0">
+                                        <p className="text-sm font-medium">{ref.title}</p>
+                                        {ref.description && <p className="text-xs text-muted-foreground mt-1 line-clamp-4">{ref.type === "note" ? ref.description.replace(/<[^>]*>/g, "").trim() : ref.description}</p>}
+                                        {ref.type === "link" && ref.url && <p className="text-xs text-blue-400 truncate mt-1">{ref.url}</p>}
+                                      </div>
+                                    </div>
+                                  </HoverCardContent>
+                                </HoverCard>
                               );
                             }
 
                             return (
-                              <Card
-                                key={ref.id}
-                                className="border-border/50 bg-card/50 cursor-pointer hover:border-primary/30 transition-colors"
-                                onClick={() => handleRefClick(ref)}
-                              >
-                                <CardContent className="p-3">
-                                  <div className="flex items-start gap-3">
-                                    {thumbnail ? (
-                                      <div className="h-12 w-16 rounded overflow-hidden shrink-0 bg-muted">
-                                        <img src={thumbnail} alt="" className="h-full w-full object-cover" />
+                              <HoverCard key={ref.id} openDelay={300} closeDelay={100}>
+                                <HoverCardTrigger asChild>
+                                  <Card
+                                    className="border-border/50 bg-card/50 cursor-pointer hover:border-primary/30 transition-colors"
+                                    onClick={() => handleRefClick(ref)}
+                                  >
+                                    <CardContent className="p-3">
+                                      <div className="flex items-start gap-3">
+                                        {thumbnail ? (
+                                          <div className="h-12 w-16 rounded overflow-hidden shrink-0 bg-muted">
+                                            <img src={thumbnail} alt="" className="h-full w-full object-cover" />
+                                          </div>
+                                        ) : (
+                                          <div className="h-12 w-16 rounded bg-muted/50 flex items-center justify-center shrink-0">
+                                            <Icon className={`h-5 w-5 ${iconColor}/50`} />
+                                          </div>
+                                        )}
+                                        <div className="flex-1 min-w-0">
+                                          <p className="text-sm font-medium truncate">{ref.title}</p>
+                                          {ref.description && (
+                                            <p className="text-xs text-muted-foreground line-clamp-2">{ref.type === "note" ? ref.description.replace(/<[^>]*>/g, "").trim() : ref.description}</p>
+                                          )}
+                                        </div>
+                                        {!isLocked && (
+                                          <div className="flex flex-col gap-0.5 shrink-0">
+                                            <Button variant="ghost" size="icon" className="h-6 w-6 text-muted-foreground hover:text-primary" onClick={(e) => { e.stopPropagation(); handleEditRef(ref); }}>
+                                              <Pencil className="h-3 w-3" />
+                                            </Button>
+                                            <Button variant="ghost" size="icon" className="h-6 w-6 text-muted-foreground hover:text-destructive" onClick={(e) => { e.stopPropagation(); deleteReference.mutate(ref); }}>
+                                              <X className="h-3 w-3" />
+                                            </Button>
+                                          </div>
+                                        )}
                                       </div>
-                                    ) : (
-                                      <div className="h-12 w-16 rounded bg-muted/50 flex items-center justify-center shrink-0">
-                                        <Icon className={`h-5 w-5 ${iconColor}/50`} />
-                                      </div>
-                                    )}
-                                    <div className="flex-1 min-w-0">
-                                      <p className="text-sm font-medium truncate">{ref.title}</p>
-                                      {ref.description && (
-                                        <p className="text-xs text-muted-foreground line-clamp-2">{ref.type === "note" ? ref.description.replace(/<[^>]*>/g, "").trim() : ref.description}</p>
-                                      )}
+                                    </CardContent>
+                                  </Card>
+                                </HoverCardTrigger>
+                                <HoverCardContent className="w-72 p-3" side="top">
+                                  <div className="flex items-start gap-2">
+                                    <Icon className={`h-4 w-4 ${iconColor} shrink-0 mt-0.5`} />
+                                    <div className="min-w-0">
+                                      <p className="text-sm font-medium">{ref.title}</p>
+                                      {ref.description && <p className="text-xs text-muted-foreground mt-1 line-clamp-4">{ref.type === "note" ? ref.description.replace(/<[^>]*>/g, "").trim() : ref.description}</p>}
+                                      {ref.type === "link" && ref.url && <p className="text-xs text-blue-400 truncate mt-1">{ref.url}</p>}
                                     </div>
-                                    {!isLocked && (
-                                      <div className="flex flex-col gap-0.5 shrink-0">
-                                        <Button variant="ghost" size="icon" className="h-6 w-6 text-muted-foreground hover:text-primary" onClick={(e) => { e.stopPropagation(); handleEditRef(ref); }}>
-                                          <Pencil className="h-3 w-3" />
-                                        </Button>
-                                        <Button variant="ghost" size="icon" className="h-6 w-6 text-muted-foreground hover:text-destructive" onClick={(e) => { e.stopPropagation(); deleteReference.mutate(ref); }}>
-                                          <X className="h-3 w-3" />
-                                        </Button>
-                                      </div>
-                                    )}
                                   </div>
-                                </CardContent>
-                              </Card>
+                                </HoverCardContent>
+                              </HoverCard>
                             );
                           })}
                         </div>
@@ -1396,6 +1423,26 @@ export default function BrainstormWorkspace() {
                       <LinkIcon className="h-3 w-3" />
                       View: {msg.linkTitle}
                     </button>
+                  )}
+                  {msg.links && msg.links.length > 0 && (
+                    <div className="mt-2 flex flex-wrap gap-1">
+                      {msg.links.map((link) => (
+                        <button
+                          key={link.id}
+                          className="inline-flex items-center gap-1.5 text-xs px-2.5 py-1 rounded-full bg-blue-500/20 text-blue-400 border border-blue-500/30 hover:bg-blue-500/30 transition-colors"
+                          onClick={() => {
+                            const ref = references.find((r: any) => r.id === link.id);
+                            if (ref) {
+                              const url = ref.url?.match(/^https?:\/\//) ? ref.url : `https://${ref.url}`;
+                              window.open(url, "_blank", "noopener,noreferrer");
+                            }
+                          }}
+                        >
+                          <LinkIcon className="h-3 w-3" />
+                          View: {link.title}
+                        </button>
+                      ))}
+                    </div>
                   )}
                 </div>
               ) : msg.content}
