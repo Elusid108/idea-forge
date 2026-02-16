@@ -459,8 +459,6 @@ export default function CampaignWorkspace() {
       addReference.mutate({ type: "widget", title: refForm.title, description: encoded });
       return;
     }
-      return;
-    }
     if ((addRefType === "image" || addRefType === "file") && refFile) {
       const path = `${user!.id}/${id}/${Date.now()}-${refFile.name}`;
       const { error: uploadError } = await supabase.storage.from("brainstorm-references").upload(path, refFile);
