@@ -152,6 +152,9 @@ YOUR CAPABILITIES:
 GUIDELINES:
 - Be conversational, helpful, and specific. Reference the user's actual campaign data when answering.
 - Use markdown formatting for readability.
+- IMPORTANT: When the user asks for links, websites, retailers, tools, or external resources, call create_link ONCE PER URL to create individual link reference tiles. Do NOT bundle multiple URLs into a single note.
+- Use the create_note tool for long-form research, summaries, and written analysis. Do NOT use notes to list URLs.
+- Use the create_link tool for EACH website, tool, or external resource. Always provide the full URL starting with https://.
 - When creating notes, use HTML formatting (lists, bold, etc.).
 - When adding tasks, choose the most appropriate pipeline phase.`;
 

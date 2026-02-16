@@ -506,6 +506,7 @@ export default function ProjectWorkspace() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["project-expenses", id] });
+      setShowExpenseDialog(false);
       setEditingExpense(null);
       setExpenseForm({ title: "", description: "", amount: "", category: "General", date: format(new Date(), "yyyy-MM-dd"), vendor: "" });
     },

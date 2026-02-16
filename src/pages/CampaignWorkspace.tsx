@@ -236,6 +236,7 @@ export default function CampaignWorkspace() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["campaign-expenses", id] });
+      setShowExpenseDialog(false);
       setEditingExpense(null);
       setExpenseForm({ title: "", description: "", amount: "", category: "General", date: format(new Date(), "yyyy-MM-dd"), vendor: "" });
     },
