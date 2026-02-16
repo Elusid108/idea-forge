@@ -57,16 +57,16 @@ const tools = [
     type: "function",
     function: {
       name: "create_widget",
-      description: "Create a widget (mini web app) as a resource. The code should be a complete HTML document with embedded JS/CSS.",
+      description: "Create a widget (mini web app) as a resource. The code should be a complete HTML document with embedded JS/CSS. ALWAYS include a summary and instructions when creating a widget.",
       parameters: {
         type: "object",
         properties: {
           title: { type: "string", description: "Widget title" },
           code: { type: "string", description: "Complete HTML document with embedded JS/CSS" },
-          summary: { type: "string", description: "Brief summary shown on tile/list (optional)" },
-          instructions: { type: "string", description: "Usage instructions in HTML format shown below the widget (optional)" },
+          summary: { type: "string", description: "A brief 1-2 sentence summary of what the widget does, shown on the tile/list view. ALWAYS provide this." },
+          instructions: { type: "string", description: "Usage instructions in HTML format (use <p>, <ul>, <li>, <b> tags) explaining how to use the widget. ALWAYS provide this." },
         },
-        required: ["title", "code"],
+        required: ["title", "code", "summary", "instructions"],
       },
     },
   },
