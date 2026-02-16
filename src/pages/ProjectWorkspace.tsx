@@ -151,7 +151,9 @@ export default function ProjectWorkspace() {
   // Gotcha states
   const [showGotchaModal, setShowGotchaModal] = useState(false);
   const [gotchaSymptom, setGotchaSymptom] = useState("");
-  const [gotchaModalState, setGotchaModalState] = useState<"define" | "autopsy">("define");
+  const [gotchaModalState, setGotchaModalState] = useState<"define" | "autopsy" | "view">("define");
+  const [viewingGotcha, setViewingGotcha] = useState<any>(null);
+  const gotchaAnswerRef = useRef<HTMLTextAreaElement>(null);
   const [activeGotchaId, setActiveGotchaId] = useState<string | null>(null);
   const [gotchaAnswer, setGotchaAnswer] = useState("");
   const [gotchaQuestion, setGotchaQuestion] = useState("");
@@ -598,6 +600,7 @@ export default function ProjectWorkspace() {
     items: sortRefs(references.filter((r: any) => r.type === type)),
   })).filter(g => g.items.length > 0);
 
+  const isLocked = !!(project as any).campaign_id;
   const projectCategory = (project as any)?.category;
   const projectTags: string[] = (project as any)?.tags || [];
   const categoryBadgeClass = projectCategory ? CATEGORY_COLORS[projectCategory] || "bg-secondary text-secondary-foreground" : "";
@@ -636,6 +639,9 @@ export default function ProjectWorkspace() {
     setChatInput("");
     setIsChatThinking(true);
 
+    // If project is locked, skip all actions
+    const skipActions = isLocked;
+
     try {
       // Gather context
       const brainstormNotes = brainstormRefs
@@ -664,10 +670,10 @@ export default function ProjectWorkspace() {
       });
       if (error) throw error;
 
-      // Process actions
+      // Process actions (skip if locked)
       let createdNoteId: string | null = null;
       let createdNoteTitle: string | null = null;
-      if (data.actions && data.actions.length > 0) {
+      if (data.actions && data.actions.length > 0 && !skipActions) {
         // Separate parent tasks and subtasks for two-pass insertion
         const taskActions = data.actions.filter((a: any) => a.action === "add_task");
         const parentTasks = taskActions.filter((a: any) => !a.parent_task_id);
@@ -779,10 +785,12 @@ export default function ProjectWorkspace() {
       key={task.id}
       className={`flex items-center gap-3 p-2.5 rounded-lg border border-border/50 bg-card/50 transition-colors hover:border-primary/20 ${task.completed ? "opacity-60" : ""} ${indent ? "ml-6" : ""}`}
     >
-      <Checkbox
-        checked={task.completed}
-        onCheckedChange={(checked) => toggleTaskComplete.mutate({ taskId: task.id, completed: !!checked })}
-      />
+      {!isLocked && (
+        <Checkbox
+          checked={task.completed}
+          onCheckedChange={(checked) => toggleTaskComplete.mutate({ taskId: task.id, completed: !!checked })}
+        />
+      )}
       <div
         className="flex-1 min-w-0 cursor-pointer"
         onClick={() => setViewingTask(task)}
@@ -799,27 +807,29 @@ export default function ProjectWorkspace() {
           {format(new Date(task.due_date), "MMM d")}
         </span>
       )}
-      <div className="flex items-center gap-0.5 shrink-0">
-        {!task.completed && !indent && (
-          <Button variant="ghost" size="icon" className="h-6 w-6 text-muted-foreground hover:text-primary" title="Add subtask" onClick={() => {
-            setEditingTask(null);
-            setTaskForm({ title: "", description: "", priority: "medium", due_date: "", parent_task_id: task.id });
+      {!isLocked && (
+        <div className="flex items-center gap-0.5 shrink-0">
+          {!task.completed && !indent && (
+            <Button variant="ghost" size="icon" className="h-6 w-6 text-muted-foreground hover:text-primary" title="Add subtask" onClick={() => {
+              setEditingTask(null);
+              setTaskForm({ title: "", description: "", priority: "medium", due_date: "", parent_task_id: task.id });
+              setShowTaskDialog(true);
+            }}>
+              <Plus className="h-3 w-3" />
+            </Button>
+          )}
+          <Button variant="ghost" size="icon" className="h-6 w-6 text-muted-foreground hover:text-primary" onClick={() => {
+            setEditingTask(task);
+            setTaskForm({ title: task.title, description: task.description || "", priority: task.priority, due_date: task.due_date || "", parent_task_id: (task as any).parent_task_id || "" });
             setShowTaskDialog(true);
           }}>
-            <Plus className="h-3 w-3" />
+            <Pencil className="h-3 w-3" />
           </Button>
-        )}
-        <Button variant="ghost" size="icon" className="h-6 w-6 text-muted-foreground hover:text-primary" onClick={() => {
-          setEditingTask(task);
-          setTaskForm({ title: task.title, description: task.description || "", priority: task.priority, due_date: task.due_date || "", parent_task_id: (task as any).parent_task_id || "" });
-          setShowTaskDialog(true);
-        }}>
-          <Pencil className="h-3 w-3" />
-        </Button>
-        <Button variant="ghost" size="icon" className="h-6 w-6 text-muted-foreground hover:text-destructive" onClick={() => deleteTask.mutate(task.id)}>
-          <X className="h-3 w-3" />
-        </Button>
-      </div>
+          <Button variant="ghost" size="icon" className="h-6 w-6 text-muted-foreground hover:text-destructive" onClick={() => deleteTask.mutate(task.id)}>
+            <X className="h-3 w-3" />
+          </Button>
+        </div>
+      )}
     </div>
   );
 
@@ -860,7 +870,7 @@ export default function ProjectWorkspace() {
           <ArrowLeft className="h-4 w-4" />
         </Button>
 
-        {editingTitle ? (
+        {editingTitle && !isLocked ? (
           <Input
             value={titleDraft}
             onChange={(e) => setTitleDraft(e.target.value)}
@@ -871,8 +881,8 @@ export default function ProjectWorkspace() {
           />
         ) : (
           <h1
-            className="text-2xl font-bold cursor-pointer hover:text-primary transition-colors"
-            onClick={() => setEditingTitle(true)}
+            className={`text-2xl font-bold ${!isLocked ? "cursor-pointer hover:text-primary" : ""} transition-colors`}
+            onClick={() => !isLocked && setEditingTitle(true)}
           >
             {project.name}
           </h1>
@@ -958,6 +968,13 @@ export default function ProjectWorkspace() {
         )}
       </div>
 
+      {isLocked && (
+        <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-300 flex items-center gap-2">
+          <AlertTriangle className="h-4 w-4 shrink-0" />
+          This project is locked because it has an active campaign. Delete the linked campaign to unlock editing.
+        </div>
+      )}
+
       <Separator />
 
       {/* Two-column layout */}
@@ -973,6 +990,7 @@ export default function ProjectWorkspace() {
               onSave={() => updateProject.mutate({ compiled_description: description })}
               placeholder="Project description…"
               minHeight="100px"
+              readOnly={isLocked}
             />
           </div>
 
@@ -996,6 +1014,7 @@ export default function ProjectWorkspace() {
                 onSave={() => updateProject.mutate({ execution_strategy: executionStrategy } as any)}
                 placeholder="Plan your execution strategy here…"
                 minHeight="80px"
+                readOnly={isLocked}
               />
             )}
           </div>
@@ -1012,9 +1031,11 @@ export default function ProjectWorkspace() {
                   {completedTasks.length}/{tasks.length}
                 </Badge>
               </div>
-              <Button variant="outline" size="sm" className="gap-1 h-8" onClick={() => { setEditingTask(null); setTaskForm({ title: "", description: "", priority: "medium", due_date: "", parent_task_id: "" }); setShowTaskDialog(true); }}>
-                <Plus className="h-3 w-3" /> Add Task
-              </Button>
+              {!isLocked && (
+                <Button variant="outline" size="sm" className="gap-1 h-8" onClick={() => { setEditingTask(null); setTaskForm({ title: "", description: "", priority: "medium", due_date: "", parent_task_id: "" }); setShowTaskDialog(true); }}>
+                  <Plus className="h-3 w-3" /> Add Task
+                </Button>
+              )}
             </div>
             {tasks.length > 0 && (
               <div className="flex items-center gap-3">
@@ -1055,9 +1076,11 @@ export default function ProjectWorkspace() {
                 <h2 className="text-lg font-semibold">Gotchas</h2>
                 <Badge variant="secondary" className="text-[10px]">{gotchas.filter((g: any) => g.status !== "resolved").length}</Badge>
               </div>
-              <Button variant="outline" size="sm" className="gap-1 h-8" onClick={() => { setGotchaSymptom(""); setGotchaModalState("define"); setGotchaChatHistory([]); setGotchaQuestion(""); setGotchaWhyRound(0); setActiveGotchaId(null); setShowGotchaModal(true); }}>
-                <Plus className="h-3 w-3" /> Add Gotcha
-              </Button>
+              {!isLocked && (
+                <Button variant="outline" size="sm" className="gap-1 h-8" onClick={() => { setGotchaSymptom(""); setGotchaModalState("define"); setGotchaChatHistory([]); setGotchaQuestion(""); setGotchaWhyRound(0); setActiveGotchaId(null); setShowGotchaModal(true); }}>
+                  <Plus className="h-3 w-3" /> Add Gotcha
+                </Button>
+              )}
             </div>
             {gotchas.length === 0 ? (
               <div className="flex flex-col items-center justify-center rounded-xl border border-dashed border-border py-8">
@@ -1069,17 +1092,22 @@ export default function ProjectWorkspace() {
                 {gotchas.map((g: any) => (
                   <div key={g.id} className={`flex items-center gap-3 p-2.5 rounded-lg border transition-colors ${g.status === "resolved" ? "border-emerald-500/30 bg-emerald-500/5 opacity-70" : g.status === "investigating" ? "border-amber-500/30 bg-amber-500/5" : "border-amber-500/30 bg-amber-500/5"}`}>
                     <AlertTriangle className={`h-4 w-4 shrink-0 ${g.status === "resolved" ? "text-emerald-400" : "text-amber-400"}`} />
-                    <div className="flex-1 min-w-0">
-                      <p className="text-sm font-medium">{g.symptom}</p>
+                    <div className="flex-1 min-w-0 cursor-pointer" onClick={() => {
+                      setViewingGotcha(g);
+                      setGotchaSymptom(g.symptom);
+                      setGotchaModalState("view");
+                      setGotchaChatHistory((g.chat_history as any[]) || []);
+                      setShowGotchaModal(true);
+                    }}>
+                      <p className="text-sm font-medium hover:text-primary transition-colors">{g.symptom}</p>
                       {g.root_cause && <p className="text-xs text-muted-foreground mt-0.5">{g.root_cause}</p>}
                     </div>
                     <Badge variant="secondary" className="text-[10px]">{g.status}</Badge>
-                    {g.status === "active" && (
+                    {g.status === "active" && !isLocked && (
                       <Button variant="ghost" size="sm" className="h-7 text-xs" onClick={() => {
                         setActiveGotchaId(g.id); setGotchaSymptom(g.symptom); setGotchaModalState("autopsy");
                         const history = (g.chat_history as any[]) || [];
                         setGotchaChatHistory(history); setGotchaWhyRound(history.filter((m: any) => m.role === "user").length);
-                        // Get first question if no history
                         if (history.length === 0) {
                           setIsGotchaThinking(true); setShowGotchaModal(true);
                           supabase.functions.invoke("gotcha-chat", { body: { symptom: g.symptom, chat_history: [{ role: "user", content: `The gotcha is: ${g.symptom}` }] } })
@@ -1092,10 +1120,12 @@ export default function ProjectWorkspace() {
                         }
                       }}>Continue Autopsy</Button>
                     )}
-                    <Button variant="ghost" size="icon" className="h-6 w-6 text-muted-foreground hover:text-destructive" onClick={async () => {
-                      await supabase.from("gotchas" as any).delete().eq("id", g.id);
-                      queryClient.invalidateQueries({ queryKey: ["project-gotchas", id] });
-                    }}><X className="h-3 w-3" /></Button>
+                    {!isLocked && (
+                      <Button variant="ghost" size="icon" className="h-6 w-6 text-muted-foreground hover:text-destructive" onClick={async () => {
+                        await supabase.from("gotchas" as any).delete().eq("id", g.id);
+                        queryClient.invalidateQueries({ queryKey: ["project-gotchas", id] });
+                      }}><X className="h-3 w-3" /></Button>
+                    )}
                   </div>
                 ))}
               </div>
@@ -1112,9 +1142,11 @@ export default function ProjectWorkspace() {
                 <h2 className="text-lg font-semibold">Expenses</h2>
                 <Badge variant="secondary" className="text-[10px]">${totalExpenses.toFixed(2)}</Badge>
               </div>
-              <Button variant="outline" size="sm" className="gap-1 h-8" onClick={() => { setEditingExpense(null); setExpenseForm({ title: "", description: "", amount: "", category: "General", date: format(new Date(), "yyyy-MM-dd"), vendor: "" }); setShowExpenseDialog(true); }}>
-                <Plus className="h-3 w-3" /> Add Expense
-              </Button>
+              {!isLocked && (
+                <Button variant="outline" size="sm" className="gap-1 h-8" onClick={() => { setEditingExpense(null); setExpenseForm({ title: "", description: "", amount: "", category: "General", date: format(new Date(), "yyyy-MM-dd"), vendor: "" }); setShowExpenseDialog(true); }}>
+                  <Plus className="h-3 w-3" /> Add Expense
+                </Button>
+              )}
             </div>
 
             {expenses.length === 0 ? (
@@ -1141,18 +1173,20 @@ export default function ProjectWorkspace() {
                     {expense.date && (
                       <span className="text-[10px] text-muted-foreground">{format(new Date(expense.date), "MMM d")}</span>
                     )}
-                    <div className="flex items-center gap-0.5 shrink-0">
-                      <Button variant="ghost" size="icon" className="h-6 w-6 text-muted-foreground hover:text-primary" onClick={() => {
-                        setEditingExpense(expense);
-                        setExpenseForm({ title: expense.title, description: expense.description || "", amount: String(expense.amount), category: expense.category || "General", date: expense.date || "", vendor: (expense as any).vendor || "" });
-                        setShowExpenseDialog(true);
-                      }}>
-                        <Pencil className="h-3 w-3" />
-                      </Button>
-                      <Button variant="ghost" size="icon" className="h-6 w-6 text-muted-foreground hover:text-destructive" onClick={() => deleteExpense.mutate(expense.id)}>
-                        <X className="h-3 w-3" />
-                      </Button>
-                    </div>
+                    {!isLocked && (
+                      <div className="flex items-center gap-0.5 shrink-0">
+                        <Button variant="ghost" size="icon" className="h-6 w-6 text-muted-foreground hover:text-primary" onClick={() => {
+                          setEditingExpense(expense);
+                          setExpenseForm({ title: expense.title, description: expense.description || "", amount: String(expense.amount), category: expense.category || "General", date: expense.date || "", vendor: (expense as any).vendor || "" });
+                          setShowExpenseDialog(true);
+                        }}>
+                          <Pencil className="h-3 w-3" />
+                        </Button>
+                        <Button variant="ghost" size="icon" className="h-6 w-6 text-muted-foreground hover:text-destructive" onClick={() => deleteExpense.mutate(expense.id)}>
+                          <X className="h-3 w-3" />
+                        </Button>
+                      </div>
+                    )}
                   </div>
                 ))}
               </div>
@@ -1185,6 +1219,7 @@ export default function ProjectWorkspace() {
               onSave={() => updateProject.mutate({ bullet_breakdown: bullets })}
               placeholder="- Key point 1&#10;- Key point 2"
               minHeight="80px"
+              readOnly={isLocked}
             />
           </div>
 
@@ -1218,7 +1253,7 @@ export default function ProjectWorkspace() {
           {/* GitHub Repository */}
           <div>
             <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-1">GitHub Repository</p>
-            {editingGithub ? (
+          {editingGithub && !isLocked ? (
               <Input
                 value={githubDraft}
                 onChange={(e) => setGithubDraft(e.target.value)}
@@ -1230,17 +1265,17 @@ export default function ProjectWorkspace() {
               />
             ) : githubUrl ? (
               <p
-                className="text-sm text-primary hover:underline cursor-pointer truncate"
-                onClick={() => { setGithubDraft(githubUrl); setEditingGithub(true); }}
+                className={`text-sm text-primary truncate ${!isLocked ? "hover:underline cursor-pointer" : ""}`}
+                onClick={() => !isLocked && (() => { setGithubDraft(githubUrl); setEditingGithub(true); })()}
               >
                 {githubUrl}
               </p>
             ) : (
               <p
-                className="text-sm text-muted-foreground/60 italic cursor-pointer hover:text-muted-foreground"
-                onClick={() => { setGithubDraft(""); setEditingGithub(true); }}
+                className={`text-sm text-muted-foreground/60 italic ${!isLocked ? "cursor-pointer hover:text-muted-foreground" : ""}`}
+                onClick={() => !isLocked && (() => { setGithubDraft(""); setEditingGithub(true); })()}
               >
-                Click to add GitHub URL…
+                {isLocked ? "No GitHub URL" : "Click to add GitHub URL…"}
               </p>
             )}
           </div>
@@ -1333,24 +1368,26 @@ export default function ProjectWorkspace() {
                 <Button variant="ghost" size="icon" className={`h-8 w-8 ${refViewMode === "list" ? "text-primary" : ""}`} onClick={() => toggleRefViewMode("list")}>
                   <List className="h-3.5 w-3.5" />
                 </Button>
-                <Popover>
-                  <PopoverTrigger asChild>
-                    <Button variant="outline" size="sm" className="gap-1 h-8">
-                      <Plus className="h-3 w-3" /> Add
-                    </Button>
-                  </PopoverTrigger>
-                  <PopoverContent className="w-44 p-1" align="end">
-                    {(["note", "link", "image", "video", "file"] as RefType[]).map((type) => {
-                      const Icon = REF_ICONS[type];
-                      const iconColor = REF_ICON_COLORS[type];
-                      return (
-                        <button key={type} onClick={() => setAddRefType(type)} className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-sm hover:bg-accent capitalize">
-                          <Icon className={`h-4 w-4 ${iconColor}`} /> {type}
-                        </button>
-                      );
-                    })}
-                  </PopoverContent>
-                </Popover>
+                {!isLocked && (
+                  <Popover>
+                    <PopoverTrigger asChild>
+                      <Button variant="outline" size="sm" className="gap-1 h-8">
+                        <Plus className="h-3 w-3" /> Add
+                      </Button>
+                    </PopoverTrigger>
+                    <PopoverContent className="w-44 p-1" align="end">
+                      {(["note", "link", "image", "video", "file"] as RefType[]).map((type) => {
+                        const Icon = REF_ICONS[type];
+                        const iconColor = REF_ICON_COLORS[type];
+                        return (
+                          <button key={type} onClick={() => setAddRefType(type)} className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-sm hover:bg-accent capitalize">
+                            <Icon className={`h-4 w-4 ${iconColor}`} /> {type}
+                          </button>
+                        );
+                      })}
+                    </PopoverContent>
+                  </Popover>
+                )}
               </div>
             </div>
 
@@ -1389,14 +1426,16 @@ export default function ProjectWorkspace() {
                                   {previewText && (
                                     <span className="text-xs text-muted-foreground truncate max-w-[200px] hidden sm:inline">{previewText}</span>
                                   )}
-                                  <div className="flex items-center gap-0.5 shrink-0">
-                                    <Button variant="ghost" size="icon" className="h-6 w-6 text-muted-foreground hover:text-primary" onClick={(e) => { e.stopPropagation(); handleEditRef(ref); }}>
-                                      <Pencil className="h-3 w-3" />
-                                    </Button>
-                                    <Button variant="ghost" size="icon" className="h-6 w-6 text-muted-foreground hover:text-destructive" onClick={(e) => { e.stopPropagation(); deleteReference.mutate(ref.id); }}>
-                                      <X className="h-3 w-3" />
-                                    </Button>
-                                  </div>
+                                  {!isLocked && (
+                                    <div className="flex items-center gap-0.5 shrink-0">
+                                      <Button variant="ghost" size="icon" className="h-6 w-6 text-muted-foreground hover:text-primary" onClick={(e) => { e.stopPropagation(); handleEditRef(ref); }}>
+                                        <Pencil className="h-3 w-3" />
+                                      </Button>
+                                      <Button variant="ghost" size="icon" className="h-6 w-6 text-muted-foreground hover:text-destructive" onClick={(e) => { e.stopPropagation(); deleteReference.mutate(ref.id); }}>
+                                        <X className="h-3 w-3" />
+                                      </Button>
+                                    </div>
+                                  )}
                                 </div>
                               );
                             }
@@ -1420,14 +1459,16 @@ export default function ProjectWorkspace() {
                                         <p className="text-xs text-muted-foreground line-clamp-2">{previewText}</p>
                                       )}
                                     </div>
-                                    <div className="flex flex-col gap-0.5 shrink-0">
-                                      <Button variant="ghost" size="icon" className="h-6 w-6 text-muted-foreground hover:text-primary" onClick={(e) => { e.stopPropagation(); handleEditRef(ref); }}>
-                                        <Pencil className="h-3 w-3" />
-                                      </Button>
-                                      <Button variant="ghost" size="icon" className="h-6 w-6 text-muted-foreground hover:text-destructive" onClick={(e) => { e.stopPropagation(); deleteReference.mutate(ref.id); }}>
-                                        <X className="h-3 w-3" />
-                                      </Button>
-                                    </div>
+                                    {!isLocked && (
+                                      <div className="flex flex-col gap-0.5 shrink-0">
+                                        <Button variant="ghost" size="icon" className="h-6 w-6 text-muted-foreground hover:text-primary" onClick={(e) => { e.stopPropagation(); handleEditRef(ref); }}>
+                                          <Pencil className="h-3 w-3" />
+                                        </Button>
+                                        <Button variant="ghost" size="icon" className="h-6 w-6 text-muted-foreground hover:text-destructive" onClick={(e) => { e.stopPropagation(); deleteReference.mutate(ref.id); }}>
+                                          <X className="h-3 w-3" />
+                                        </Button>
+                                      </div>
+                                    )}
                                   </div>
                                 </CardContent>
                               </Card>
@@ -1757,9 +1798,67 @@ export default function ProjectWorkspace() {
       )}
 
       {/* Gotcha Modal */}
-      <Dialog open={showGotchaModal} onOpenChange={(open) => { if (!open) { setShowGotchaModal(false); } }}>
+      <Dialog open={showGotchaModal} onOpenChange={(open) => { if (!open) { setShowGotchaModal(false); setViewingGotcha(null); } }}>
         <DialogContent className="sm:max-w-lg">
-          {gotchaModalState === "define" ? (
+          {gotchaModalState === "view" ? (
+            <>
+              <DialogHeader>
+                <DialogTitle className="flex items-center gap-2">
+                  <AlertTriangle className={`h-5 w-5 ${viewingGotcha?.status === "resolved" ? "text-emerald-400" : "text-amber-400"}`} />
+                  Gotcha History
+                  <Badge variant="secondary" className="ml-auto text-xs">{viewingGotcha?.status}</Badge>
+                </DialogTitle>
+                <DialogDescription className="text-xs">Symptom: {gotchaSymptom}</DialogDescription>
+              </DialogHeader>
+              <div className="max-h-[400px] overflow-y-auto space-y-3 rounded-md bg-muted/50 p-3">
+                {gotchaChatHistory.length === 0 ? (
+                  <p className="text-sm text-muted-foreground italic">No conversation history yet.</p>
+                ) : (
+                  gotchaChatHistory.map((msg: any, i: number) => (
+                    <div key={i} className={`flex items-start gap-2 ${msg.role === "user" ? "justify-end" : ""}`}>
+                      {msg.role === "assistant" && (
+                        <div className="h-6 w-6 rounded-full bg-primary/10 flex items-center justify-center shrink-0 mt-0.5">
+                          <Brain className="h-3 w-3 text-primary" />
+                        </div>
+                      )}
+                      <div className={`rounded-lg px-3 py-2 text-sm max-w-[80%] ${msg.role === "user" ? "bg-primary text-primary-foreground" : "bg-muted"}`}>
+                        {msg.role === "assistant" ? (
+                          <div className="prose prose-invert prose-sm max-w-none">
+                            <ReactMarkdown components={markdownComponents}>{msg.content}</ReactMarkdown>
+                          </div>
+                        ) : msg.content}
+                      </div>
+                    </div>
+                  ))
+                )}
+                {viewingGotcha?.root_cause && (
+                  <div className="rounded-lg border border-emerald-500/30 bg-emerald-500/10 p-3 mt-2">
+                    <p className="text-xs font-semibold uppercase tracking-wider text-emerald-400 mb-1">Root Cause</p>
+                    <p className="text-sm">{viewingGotcha.root_cause}</p>
+                  </div>
+                )}
+                {viewingGotcha?.status === "investigating" && (
+                  <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 p-3 mt-2">
+                    <p className="text-sm text-amber-300">⏳ Investigation in progress. Complete the investigation task to continue.</p>
+                  </div>
+                )}
+              </div>
+              <DialogFooter>
+                {viewingGotcha?.status === "active" && !isLocked && (
+                  <Button onClick={() => {
+                    setActiveGotchaId(viewingGotcha.id);
+                    setGotchaModalState("autopsy");
+                    setGotchaWhyRound(gotchaChatHistory.filter((m: any) => m.role === "user").length);
+                    const lastAssistant = [...gotchaChatHistory].reverse().find((m: any) => m.role === "assistant");
+                    setGotchaQuestion(lastAssistant?.content || "Why did this happen?");
+                  }}>
+                    <Brain className="h-4 w-4 mr-2" /> Continue Autopsy
+                  </Button>
+                )}
+                <Button variant="ghost" onClick={() => { setShowGotchaModal(false); setViewingGotcha(null); }}>Close</Button>
+              </DialogFooter>
+            </>
+          ) : gotchaModalState === "define" ? (
             <>
               <DialogHeader>
                 <DialogTitle className="flex items-center gap-2">
@@ -1773,9 +1872,16 @@ export default function ProjectWorkspace() {
                 value={gotchaSymptom}
                 onChange={(e) => setGotchaSymptom(e.target.value)}
                 className="min-h-[120px]"
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" && !e.shiftKey && gotchaSymptom.trim()) {
+                    e.preventDefault();
+                    (document.querySelector("[data-gotcha-start]") as HTMLButtonElement)?.click();
+                  }
+                }}
               />
               <DialogFooter>
                 <Button
+                  data-gotcha-start
                   disabled={!gotchaSymptom.trim() || isGotchaThinking}
                   onClick={async () => {
                     if (!user || !id) return;
@@ -1801,6 +1907,7 @@ export default function ProjectWorkspace() {
                       toast.error("Failed to create gotcha");
                     } finally {
                       setIsGotchaThinking(false);
+                      setTimeout(() => gotchaAnswerRef.current?.focus(), 100);
                     }
                   }}
                 >
@@ -1829,14 +1936,22 @@ export default function ProjectWorkspace() {
                 )}
               </div>
               <Textarea
+                ref={gotchaAnswerRef}
                 placeholder="Your answer…"
                 value={gotchaAnswer}
                 onChange={(e) => setGotchaAnswer(e.target.value)}
                 className="min-h-[80px]"
                 disabled={isGotchaThinking}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" && !e.shiftKey && gotchaAnswer.trim() && !isGotchaThinking) {
+                    e.preventDefault();
+                    (document.querySelector("[data-gotcha-submit]") as HTMLButtonElement)?.click();
+                  }
+                }}
               />
               <DialogFooter>
                 <Button
+                  data-gotcha-submit
                   disabled={!gotchaAnswer.trim() || isGotchaThinking}
                   onClick={async () => {
                     if (!user || !activeGotchaId) return;
@@ -1853,24 +1968,56 @@ export default function ProjectWorkspace() {
                       const { data } = await supabase.functions.invoke("gotcha-chat", {
                         body: { symptom: gotchaSymptom, chat_history: updatedHistory },
                       });
+
+                      // Helper to insert a structured task with subtasks
+                      const insertTaskWithSubtasks = async (taskData: any, defaultTitlePrefix: string) => {
+                        let title: string;
+                        let description: string;
+                        let subtasks: any[] = [];
+
+                        if (typeof taskData === "string") {
+                          // Backward compat: plain string
+                          title = `${defaultTitlePrefix}: ${taskData.split(" ").slice(0, 6).join(" ")}`;
+                          description = taskData;
+                        } else {
+                          title = taskData.title || `${defaultTitlePrefix}: ${(taskData.description || "").split(" ").slice(0, 6).join(" ")}`;
+                          description = taskData.description || "";
+                          subtasks = taskData.subtasks || [];
+                        }
+
+                        const { data: parentTask } = await supabase.from("project_tasks").insert({
+                          project_id: id!, user_id: user!.id, title, description, priority: "high", sort_order: tasks.length,
+                        }).select("id").single();
+
+                        if (parentTask && subtasks.length > 0) {
+                          for (const sub of subtasks) {
+                            await supabase.from("project_tasks").insert({
+                              project_id: id!, user_id: user!.id,
+                              title: sub.title || "Subtask",
+                              description: sub.description || "",
+                              priority: "high",
+                              parent_task_id: parentTask.id,
+                              sort_order: tasks.length,
+                            } as any);
+                          }
+                        }
+                        return parentTask;
+                      };
+
                       if (data?.investigation_task) {
-                        await supabase.from("project_tasks").insert({
-                          project_id: id!, user_id: user.id, title: data.investigation_task, description: "Auto-created from Gotcha autopsy", priority: "high",
-                        });
+                        await insertTaskWithSubtasks(data.investigation_task, "Investigate");
                         await supabase.from("gotchas").update({ status: "investigating" } as any).eq("id", activeGotchaId);
-                        queryClient.invalidateQueries({ queryKey: ["project-gotchas"] });
-                        queryClient.invalidateQueries({ queryKey: ["project-tasks"] });
+                        queryClient.invalidateQueries({ queryKey: ["project-gotchas", id] });
+                        queryClient.invalidateQueries({ queryKey: ["project-tasks", id] });
                         toast.info("Investigation task created. Go find out!");
                         setShowGotchaModal(false);
                       } else if (data?.root_cause) {
                         await supabase.from("gotchas").update({ root_cause: data.root_cause, status: "resolved" } as any).eq("id", activeGotchaId);
                         if (data.corrective_action_task) {
-                          await supabase.from("project_tasks").insert({
-                            project_id: id!, user_id: user.id, title: data.corrective_action_task, description: "Corrective action from Gotcha root cause analysis", priority: "high",
-                          });
-                          queryClient.invalidateQueries({ queryKey: ["project-tasks"] });
+                          await insertTaskWithSubtasks(data.corrective_action_task, "Fix");
+                          queryClient.invalidateQueries({ queryKey: ["project-tasks", id] });
                         }
-                        queryClient.invalidateQueries({ queryKey: ["project-gotchas"] });
+                        queryClient.invalidateQueries({ queryKey: ["project-gotchas", id] });
                         toast.success("Root cause identified!");
                         setShowGotchaModal(false);
                       } else if (data?.next_question) {
@@ -1883,6 +2030,7 @@ export default function ProjectWorkspace() {
                       toast.error("Failed to process answer");
                     } finally {
                       setIsGotchaThinking(false);
+                      setTimeout(() => gotchaAnswerRef.current?.focus(), 100);
                     }
                   }}
                 >
