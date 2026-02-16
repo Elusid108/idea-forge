@@ -780,6 +780,12 @@ export default function ProjectWorkspace() {
         .join("\n");
       const allNotes = [brainstormNotes, projectNotes].filter(Boolean).join("\n");
       const tasksList = tasks.map((t: any) => `[${t.completed ? "✓" : " "}] ${t.title} (${t.priority}${t.due_date ? ", due " + t.due_date : ""})`).join("\n");
+      const widgetsList = references
+        .filter((r: any) => r.type === "widget")
+        .map((r: any) => {
+          const wd = parseWidgetData(r.description);
+          return `${r.title}: ${wd.summary || "(no summary)"} [code length: ${wd.code.length} chars]`;
+        }).join("\n");
 
       const { data, error } = await supabase.functions.invoke("project-chat", {
         body: {
@@ -791,6 +797,7 @@ export default function ProjectWorkspace() {
             execution_strategy: executionStrategy,
             notes: allNotes,
             tasks: tasksList,
+            widgets: widgetsList,
           },
         },
       });
@@ -901,9 +908,11 @@ export default function ProjectWorkspace() {
             if (existingWidget) {
               const existingData = parseWidgetData(existingWidget.description);
               const updatedDesc = encodeWidgetData(action.code || existingData.code, action.summary || existingData.summary, action.instructions || existingData.instructions);
-              await supabase.from("project_references").update({ description: updatedDesc }).eq("id", existingWidget.id);
+              const updateFields: Record<string, any> = { description: updatedDesc };
+              if (action.new_title) updateFields.title = action.new_title;
+              await supabase.from("project_references").update(updateFields).eq("id", existingWidget.id);
               queryClient.invalidateQueries({ queryKey: ["project-refs", id] });
-              toast.success(`Widget updated: ${action.title}`);
+              toast.success(`Widget updated: ${action.new_title || action.title}`);
             }
           }
         }
@@ -1758,7 +1767,7 @@ export default function ProjectWorkspace() {
             <DialogDescription className="sr-only">Task details</DialogDescription>
           </DialogHeader>
           {viewingTask && (
-            <div className="space-y-4">
+            <div className="space-y-5">
               <div className="flex items-center gap-2 flex-wrap">
                 <Badge className={`text-xs border ${PRIORITY_COLORS[viewingTask.priority] || PRIORITY_COLORS.medium}`}>
                   {viewingTask.priority}
@@ -1774,32 +1783,40 @@ export default function ProjectWorkspace() {
                 )}
               </div>
               {viewingTask.description && (
-                <div>
-                  <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-1">Description</p>
-                  <p className="text-sm whitespace-pre-wrap">{viewingTask.description}</p>
-                </div>
+                <>
+                  <Separator />
+                  <div>
+                    <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-1">Description</p>
+                    <p className="text-sm whitespace-pre-wrap">{viewingTask.description}</p>
+                  </div>
+                </>
               )}
               {/* Show subtasks */}
               {(() => {
                 const subs = tasks.filter((t: any) => (t as any).parent_task_id === viewingTask.id);
                 if (subs.length === 0) return null;
                 return (
-                  <div>
-                    <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-1">Subtasks</p>
-                    <div className="space-y-1">
-                      {subs.map((s: any) => (
-                        <div key={s.id} className="flex items-center gap-2 text-sm">
-                          <Checkbox checked={s.completed} onCheckedChange={(checked) => handleToggleTask(s, !!checked)} />
-                          <span className={s.completed ? "line-through text-muted-foreground" : ""}>{s.title}</span>
-                        </div>
-                      ))}
+                  <>
+                    <Separator />
+                    <div>
+                      <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-1">Subtasks</p>
+                      <div className="space-y-1">
+                        {subs.map((s: any) => (
+                          <div key={s.id} className="flex items-center gap-2 text-sm">
+                            <Checkbox checked={s.completed} onCheckedChange={(checked) => handleToggleTask(s, !!checked)} />
+                            <span className={s.completed ? "line-through text-muted-foreground" : ""}>{s.title}</span>
+                          </div>
+                        ))}
+                      </div>
                     </div>
-                  </div>
+                  </>
                 );
               })()}
               {/* Comments Section */}
+              <Separator />
               <TaskCommentsSection taskId={viewingTask.id} taskType="project" />
-              <p className="text-xs text-muted-foreground">Created {format(new Date(viewingTask.created_at), "MMM d, yyyy 'at' h:mm a")}</p>
+              <Separator />
+              <p className="text-xs text-muted-foreground pt-1">Created {format(new Date(viewingTask.created_at), "MMM d, yyyy 'at' h:mm a")}</p>
             </div>
           )}
           <DialogFooter>

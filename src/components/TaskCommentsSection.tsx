@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useRef, useEffect } from "react";
 import { Send } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -16,6 +16,7 @@ export default function TaskCommentsSection({ taskId, taskType }: TaskCommentsSe
   const { user } = useAuth();
   const queryClient = useQueryClient();
   const [newComment, setNewComment] = useState("");
+  const scrollRef = useRef<HTMLDivElement>(null);
 
   const { data: comments = [] } = useQuery({
     queryKey: ["task-comments-section", taskId],
@@ -30,6 +31,12 @@ export default function TaskCommentsSection({ taskId, taskType }: TaskCommentsSe
       return data as any[];
     },
   });
+
+  useEffect(() => {
+    if (scrollRef.current) {
+      scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+    }
+  }, [comments]);
 
   const addComment = useMutation({
     mutationFn: async (content: string) => {
@@ -57,7 +64,7 @@ export default function TaskCommentsSection({ taskId, taskType }: TaskCommentsSe
   return (
     <div>
       <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-1">Comments</p>
-      <div className="max-h-[200px] overflow-y-auto space-y-2 border rounded-md p-2 bg-muted/30">
+      <div ref={scrollRef} className="max-h-[200px] overflow-y-auto space-y-2 border rounded-md p-2 bg-muted/30">
         {comments.length === 0 ? (
           <p className="text-xs text-muted-foreground text-center py-2">No comments yet</p>
         ) : (
