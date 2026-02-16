@@ -38,6 +38,44 @@ Project/Product Context:
 
     // --- assistant mode ---
     if (mode === "assistant") {
+      const assistantTools = [
+        {
+          type: "function",
+          function: {
+            name: "create_note",
+            description: "Create a new note/reference for the campaign. Use this to compile research, summaries, action plans, etc.",
+            parameters: {
+              type: "object",
+              properties: {
+                title: { type: "string", description: "Note title" },
+                content: { type: "string", description: "Note content in HTML format. Use <ul><li> for lists, <b> for bold, etc." },
+              },
+              required: ["title", "content"],
+            },
+          },
+        },
+        {
+          type: "function",
+          function: {
+            name: "add_task",
+            description: "Add a new task to the campaign's Go-To-Market pipeline.",
+            parameters: {
+              type: "object",
+              properties: {
+                title: { type: "string", description: "Task title" },
+                description: { type: "string", description: "Brief task description" },
+                status_column: {
+                  type: "string",
+                  enum: ["foundation_ip", "infrastructure_production", "asset_creation_prelaunch", "active_campaign", "operations_fulfillment"],
+                  description: "Which pipeline phase to add the task to",
+                },
+              },
+              required: ["title", "status_column"],
+            },
+          },
+        },
+      ];
+
       const systemPrompt = `You are a Campaign Assistant for a Go-To-Market strategy. You help the user understand their campaign, suggest improvements, and answer questions about launching their product.
 
 ${projectContext}
@@ -49,8 +87,18 @@ Campaign Playbook Sections:
 - Operations Plan: ${ctx.operations_plan || "N/A"}
 - Current Status: ${ctx.status || "N/A"}
 - Tasks: ${ctx.tasks || "None"}
+- Existing Notes: ${ctx.notes || "None"}
 
-Be conversational, helpful, and specific. Reference the user's actual campaign data when answering. Use markdown formatting for readability.`;
+YOUR CAPABILITIES:
+- Help understand and refine the GTM strategy
+- Create notes to compile research, action plans, summaries, etc.
+- Add tasks to any of the 5 pipeline phases (Foundation & IP, Infrastructure & Production, Asset Creation & Pre-Launch, Active Campaign, Operations & Fulfillment)
+
+GUIDELINES:
+- Be conversational, helpful, and specific. Reference the user's actual campaign data when answering.
+- Use markdown formatting for readability.
+- When creating notes, use HTML formatting (lists, bold, etc.).
+- When adding tasks, choose the most appropriate pipeline phase.`;
 
       const messages: any[] = [
         { role: "system", content: systemPrompt },
@@ -64,8 +112,9 @@ Be conversational, helpful, and specific. Reference the user's actual campaign d
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
-          model: "google/gemini-3-flash-preview",
+          model: "google/gemini-2.5-flash",
           messages,
+          tools: assistantTools,
           max_tokens: 4000,
         }),
       });
@@ -80,8 +129,24 @@ Be conversational, helpful, and specific. Reference the user's actual campaign d
       }
 
       const data = await response.json();
-      const message = data.choices?.[0]?.message?.content || "I'm not sure how to help with that.";
-      return new Response(JSON.stringify({ message }), {
+      const choice = data.choices?.[0];
+      const message = choice?.message;
+
+      // Extract tool calls if any
+      const toolCalls = message?.tool_calls || [];
+      const actions: any[] = [];
+
+      for (const tc of toolCalls) {
+        try {
+          const args = JSON.parse(tc.function.arguments);
+          actions.push({ action: tc.function.name, ...args });
+        } catch {}
+      }
+
+      return new Response(JSON.stringify({
+        message: message?.content || "",
+        actions,
+      }), {
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }

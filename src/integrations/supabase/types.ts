@@ -338,6 +338,47 @@ export type Database = {
           },
         ]
       }
+      gotchas: {
+        Row: {
+          chat_history: Json | null
+          created_at: string
+          id: string
+          project_id: string
+          root_cause: string | null
+          status: string
+          symptom: string
+          user_id: string
+        }
+        Insert: {
+          chat_history?: Json | null
+          created_at?: string
+          id?: string
+          project_id: string
+          root_cause?: string | null
+          status?: string
+          symptom?: string
+          user_id: string
+        }
+        Update: {
+          chat_history?: Json | null
+          created_at?: string
+          id?: string
+          project_id?: string
+          root_cause?: string | null
+          status?: string
+          symptom?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "gotchas_project_id_fkey"
+            columns: ["project_id"]
+            isOneToOne: false
+            referencedRelation: "projects"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       ideas: {
         Row: {
           category: string | null

@@ -7,7 +7,7 @@ import {
   Grid3X3, List, ChevronDown, ChevronRight, ArrowUpDown, Trash2,
   Plus, Lightbulb, Brain, FileText, FolderOpen, Github, Star, GitFork, AlertCircle, GitCommit,
   CheckSquare, DollarSign, Calendar, ExternalLink, Receipt, Upload, Loader2,
-  Bot, Send, Rocket, Megaphone,
+  Bot, Send, Rocket, Megaphone, AlertTriangle,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -148,6 +148,17 @@ export default function ProjectWorkspace() {
 
   const [showReadme, setShowReadme] = useState(false);
 
+  // Gotcha states
+  const [showGotchaModal, setShowGotchaModal] = useState(false);
+  const [gotchaSymptom, setGotchaSymptom] = useState("");
+  const [gotchaModalState, setGotchaModalState] = useState<"define" | "autopsy">("define");
+  const [activeGotchaId, setActiveGotchaId] = useState<string | null>(null);
+  const [gotchaAnswer, setGotchaAnswer] = useState("");
+  const [gotchaQuestion, setGotchaQuestion] = useState("");
+  const [isGotchaThinking, setIsGotchaThinking] = useState(false);
+  const [gotchaChatHistory, setGotchaChatHistory] = useState<{ role: string; content: string }[]>([]);
+  const [gotchaWhyRound, setGotchaWhyRound] = useState(0);
+
   const { data: project, isLoading } = useQuery({
     queryKey: ["project", id],
     queryFn: async () => {
@@ -217,6 +228,17 @@ export default function ProjectWorkspace() {
         .order("date", { ascending: false });
       if (error) throw error;
       return data;
+    },
+    enabled: !!id,
+  });
+
+  // Gotchas query
+  const { data: gotchas = [] } = useQuery({
+    queryKey: ["project-gotchas", id],
+    queryFn: async () => {
+      const { data, error } = await supabase.from("gotchas" as any).select("*").eq("project_id", id!).order("created_at", { ascending: false });
+      if (error) throw error;
+      return data as any[];
     },
     enabled: !!id,
   });
@@ -1025,6 +1047,61 @@ export default function ProjectWorkspace() {
             )}
           </div>
 
+          {/* Gotchas */}
+          <div className="space-y-3">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <AlertTriangle className="h-4 w-4 text-amber-400" />
+                <h2 className="text-lg font-semibold">Gotchas</h2>
+                <Badge variant="secondary" className="text-[10px]">{gotchas.filter((g: any) => g.status !== "resolved").length}</Badge>
+              </div>
+              <Button variant="outline" size="sm" className="gap-1 h-8" onClick={() => { setGotchaSymptom(""); setGotchaModalState("define"); setGotchaChatHistory([]); setGotchaQuestion(""); setGotchaWhyRound(0); setActiveGotchaId(null); setShowGotchaModal(true); }}>
+                <Plus className="h-3 w-3" /> Add Gotcha
+              </Button>
+            </div>
+            {gotchas.length === 0 ? (
+              <div className="flex flex-col items-center justify-center rounded-xl border border-dashed border-border py-8">
+                <AlertTriangle className="mb-2 h-6 w-6 text-muted-foreground/50" />
+                <p className="text-sm text-muted-foreground">No gotchas tracked</p>
+              </div>
+            ) : (
+              <div className="space-y-1.5">
+                {gotchas.map((g: any) => (
+                  <div key={g.id} className={`flex items-center gap-3 p-2.5 rounded-lg border transition-colors ${g.status === "resolved" ? "border-emerald-500/30 bg-emerald-500/5 opacity-70" : g.status === "investigating" ? "border-amber-500/30 bg-amber-500/5" : "border-amber-500/30 bg-amber-500/5"}`}>
+                    <AlertTriangle className={`h-4 w-4 shrink-0 ${g.status === "resolved" ? "text-emerald-400" : "text-amber-400"}`} />
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-medium">{g.symptom}</p>
+                      {g.root_cause && <p className="text-xs text-muted-foreground mt-0.5">{g.root_cause}</p>}
+                    </div>
+                    <Badge variant="secondary" className="text-[10px]">{g.status}</Badge>
+                    {g.status === "active" && (
+                      <Button variant="ghost" size="sm" className="h-7 text-xs" onClick={() => {
+                        setActiveGotchaId(g.id); setGotchaSymptom(g.symptom); setGotchaModalState("autopsy");
+                        const history = (g.chat_history as any[]) || [];
+                        setGotchaChatHistory(history); setGotchaWhyRound(history.filter((m: any) => m.role === "user").length);
+                        // Get first question if no history
+                        if (history.length === 0) {
+                          setIsGotchaThinking(true); setShowGotchaModal(true);
+                          supabase.functions.invoke("gotcha-chat", { body: { symptom: g.symptom, chat_history: [{ role: "user", content: `The gotcha is: ${g.symptom}` }] } })
+                            .then(({ data }) => { setGotchaQuestion(data?.next_question || data?.message || "Why did this happen?"); setIsGotchaThinking(false); })
+                            .catch(() => { setGotchaQuestion("Why did this happen?"); setIsGotchaThinking(false); });
+                        } else {
+                          const lastAssistant = [...history].reverse().find((m: any) => m.role === "assistant");
+                          setGotchaQuestion(lastAssistant?.content || "Why did this happen?");
+                          setShowGotchaModal(true);
+                        }
+                      }}>Continue Autopsy</Button>
+                    )}
+                    <Button variant="ghost" size="icon" className="h-6 w-6 text-muted-foreground hover:text-destructive" onClick={async () => {
+                      await supabase.from("gotchas" as any).delete().eq("id", g.id);
+                      queryClient.invalidateQueries({ queryKey: ["project-gotchas", id] });
+                    }}><X className="h-3 w-3" /></Button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
           {/* Resources moved to right column */}
 
           {/* Expenses */}
@@ -1099,7 +1176,46 @@ export default function ProjectWorkspace() {
             )}
           </div>
 
-          {/* GitHub URL - Click to edit */}
+          {/* Bullet Breakdown */}
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-1">Bullet Breakdown</p>
+            <EditableMarkdown
+              value={bullets}
+              onChange={setBullets}
+              onSave={() => updateProject.mutate({ bullet_breakdown: bullets })}
+              placeholder="- Key point 1&#10;- Key point 2"
+              minHeight="80px"
+            />
+          </div>
+
+          {/* Brainstorm References */}
+          {brainstormRefs.length > 0 && (
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-1">Brainstorm References</p>
+              <div className="space-y-1.5">
+                {brainstormRefs.map((ref: any) => {
+                  const Icon = REF_ICONS[ref.type] || StickyNote;
+                  const iconColor = REF_ICON_COLORS[ref.type] || "text-muted-foreground";
+                  const previewText = ref.type === "note" ? stripHtml(ref.description) : ref.description;
+                  return (
+                    <div
+                      key={ref.id}
+                      className="flex items-center gap-2 p-1.5 rounded border border-border/30 bg-card/30 text-xs cursor-pointer hover:border-primary/30 transition-colors"
+                      onClick={() => handleRefClick(ref)}
+                    >
+                      <Icon className={`h-3.5 w-3.5 ${iconColor} shrink-0`} />
+                      <span className="truncate flex-1">{ref.title}</span>
+                      {previewText && (
+                        <span className="text-muted-foreground truncate max-w-[150px] hidden sm:inline">{previewText}</span>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
+          {/* GitHub Repository */}
           <div>
             <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-1">GitHub Repository</p>
             {editingGithub ? (
@@ -1193,45 +1309,6 @@ export default function ProjectWorkspace() {
           {githubParsed && !githubData && (
             <p className="text-xs text-muted-foreground/60 italic">Could not fetch repository data</p>
           )}
-
-          {/* Brainstorm References - standalone section */}
-          {brainstormRefs.length > 0 && (
-            <div>
-              <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-1">Brainstorm References</p>
-              <div className="space-y-1.5">
-                {brainstormRefs.map((ref: any) => {
-                  const Icon = REF_ICONS[ref.type] || StickyNote;
-                  const iconColor = REF_ICON_COLORS[ref.type] || "text-muted-foreground";
-                  const previewText = ref.type === "note" ? stripHtml(ref.description) : ref.description;
-                  return (
-                    <div
-                      key={ref.id}
-                      className="flex items-center gap-2 p-1.5 rounded border border-border/30 bg-card/30 text-xs cursor-pointer hover:border-primary/30 transition-colors"
-                      onClick={() => handleRefClick(ref)}
-                    >
-                      <Icon className={`h-3.5 w-3.5 ${iconColor} shrink-0`} />
-                      <span className="truncate flex-1">{ref.title}</span>
-                      {previewText && (
-                        <span className="text-muted-foreground truncate max-w-[150px] hidden sm:inline">{previewText}</span>
-                      )}
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
-          )}
-
-          {/* Bullet Breakdown - always shown */}
-          <div>
-            <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-1">Bullet Breakdown</p>
-            <EditableMarkdown
-              value={bullets}
-              onChange={setBullets}
-              onSave={() => updateProject.mutate({ bullet_breakdown: bullets })}
-              placeholder="- Key point 1&#10;- Key point 2"
-              minHeight="80px"
-            />
-          </div>
 
           {/* Resources */}
           <div className="space-y-4">

@@ -1,12 +1,12 @@
 import { useState, useRef, useEffect, ReactNode } from "react";
-import { Bot, Send, X, Loader2 } from "lucide-react";
+import { Bot, Send, X, Loader2, Maximize2, Minimize2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Skeleton } from "@/components/ui/skeleton";
 
 type ChatMsg = { role: "user" | "assistant"; content: string; noteId?: string; noteTitle?: string };
 
-type WidgetState = "collapsed" | "minimized" | "expanded";
+type WidgetState = "collapsed" | "expanded" | "maximized";
 
 interface FloatingChatWidgetProps {
   title: string;
@@ -36,7 +36,8 @@ export default function FloatingChatWidget({
   const effectiveKey = storageKey || "chat-widget-state";
   const [state, setState] = useState<WidgetState>(() => {
     const saved = localStorage.getItem(effectiveKey);
-    return (saved === "collapsed") ? "collapsed" : "expanded";
+    if (saved === "collapsed" || saved === "maximized") return saved;
+    return "expanded";
   });
 
   useEffect(() => {
@@ -46,14 +47,14 @@ export default function FloatingChatWidget({
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   useEffect(() => {
-    if (state === "expanded") {
+    if (state !== "collapsed") {
       setTimeout(() => scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" }), 100);
     }
   }, [chatHistory, isThinking, state]);
 
   // Auto-focus textarea when AI finishes thinking
   useEffect(() => {
-    if (!isThinking && state === "expanded" && textareaRef.current) {
+    if (!isThinking && state !== "collapsed" && textareaRef.current) {
       textareaRef.current.focus();
     }
   }, [isThinking, state]);
@@ -70,22 +71,37 @@ export default function FloatingChatWidget({
     );
   }
 
+  const isMaximized = state === "maximized";
+  const widthClass = isMaximized ? "w-[600px]" : "w-[calc(100vw-2rem)] sm:w-[400px]";
+  const maxHeightClass = isMaximized ? "max-h-[80vh]" : "max-h-[500px]";
+  const msgMaxHeightClass = isMaximized ? "max-h-[60vh]" : "max-h-[350px]";
 
   return (
-    <div className="fixed bottom-4 right-4 z-50 w-[calc(100vw-2rem)] sm:w-[400px] max-h-[500px] flex flex-col rounded-lg bg-card border border-border shadow-xl">
+    <div className={`fixed bottom-4 right-4 z-50 ${widthClass} ${maxHeightClass} flex flex-col rounded-lg bg-card border border-border shadow-xl`}>
       {/* Title bar */}
       <div className="flex items-center justify-between px-3 py-2 rounded-t-lg bg-primary/10 border-b border-border shrink-0">
         <div className="flex items-center gap-2">
           <Bot className="h-3.5 w-3.5 text-primary" />
           <span className="text-sm font-medium">{title}</span>
         </div>
-        <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => setState("collapsed")}>
-          <X className="h-3 w-3" />
-        </Button>
+        <div className="flex items-center gap-0.5">
+          <Button
+            variant="ghost"
+            size="icon"
+            className="h-6 w-6"
+            onClick={() => setState(isMaximized ? "expanded" : "maximized")}
+            title={isMaximized ? "Reduce" : "Expand"}
+          >
+            {isMaximized ? <Minimize2 className="h-3 w-3" /> : <Maximize2 className="h-3 w-3" />}
+          </Button>
+          <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => setState("collapsed")}>
+            <X className="h-3 w-3" />
+          </Button>
+        </div>
       </div>
 
       {/* Messages */}
-      <div ref={scrollRef} className="flex-1 overflow-y-auto p-3 space-y-3 min-h-[200px] max-h-[350px]">
+      <div ref={scrollRef} className={`flex-1 overflow-y-auto p-3 space-y-3 min-h-[200px] ${msgMaxHeightClass}`}>
         {chatHistory.length === 0 && (
           <div className="flex flex-col items-center justify-center py-6 text-center">
             <Bot className="h-8 w-8 text-muted-foreground/50 mb-2" />

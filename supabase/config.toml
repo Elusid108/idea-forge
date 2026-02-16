@@ -17,3 +17,6 @@ verify_jwt = false
 
 [functions.campaign-chat]
 verify_jwt = false
+
+[functions.gotcha-chat]
+verify_jwt = false
