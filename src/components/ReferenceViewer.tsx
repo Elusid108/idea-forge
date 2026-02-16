@@ -117,6 +117,27 @@ export default function ReferenceViewer({ reference, open, onOpenChange }: Refer
     );
   }
 
+  if (reference.type === "widget") {
+    return (
+      <Dialog open={open} onOpenChange={onOpenChange}>
+        <DialogContent className="sm:max-w-4xl p-0 bg-background border [&>button]:top-2 [&>button]:right-2 [&>button]:z-10">
+          <DialogHeader className="px-4 pt-4 pb-0">
+            <DialogTitle>{reference.title}</DialogTitle>
+            <DialogDescription className="sr-only">Widget viewer</DialogDescription>
+          </DialogHeader>
+          <div className="px-4 pb-4">
+            <iframe
+              srcDoc={reference.description || ""}
+              sandbox="allow-scripts"
+              className="w-full border rounded"
+              style={{ height: "70vh" }}
+            />
+          </div>
+        </DialogContent>
+      </Dialog>
+    );
+  }
+
   return null;
 }
 

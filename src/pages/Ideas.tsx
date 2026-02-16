@@ -41,8 +41,8 @@ function IdeaCard({ idea, onClick }: { idea: any; onClick: () => void }) {
       }`}
     >
       <CardHeader className="px-4 pt-3 pb-1">
-        <div className="flex items-start justify-between gap-2">
-          <Lightbulb className="h-4 w-4 text-yellow-400 shrink-0 mt-0.5" />
+        <div className="flex items-center gap-2">
+          <Lightbulb className="h-4 w-4 text-yellow-400 shrink-0" />
           {isScrapped ? (
             <Badge className="text-xs border bg-zinc-500/20 text-zinc-400 border-zinc-500/30">
               <Ban className="h-3 w-3 mr-1" /> Scrapped
