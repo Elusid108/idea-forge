@@ -1756,6 +1756,145 @@ export default function ProjectWorkspace() {
         </Dialog>
       )}
 
+      {/* Gotcha Modal */}
+      <Dialog open={showGotchaModal} onOpenChange={(open) => { if (!open) { setShowGotchaModal(false); } }}>
+        <DialogContent className="sm:max-w-lg">
+          {gotchaModalState === "define" ? (
+            <>
+              <DialogHeader>
+                <DialogTitle className="flex items-center gap-2">
+                  <AlertTriangle className="h-5 w-5 text-amber-400" />
+                  New Gotcha
+                </DialogTitle>
+                <DialogDescription>What broke, what's your concern, or what is making this difficult?</DialogDescription>
+              </DialogHeader>
+              <Textarea
+                placeholder="Describe the gotcha…"
+                value={gotchaSymptom}
+                onChange={(e) => setGotchaSymptom(e.target.value)}
+                className="min-h-[120px]"
+              />
+              <DialogFooter>
+                <Button
+                  disabled={!gotchaSymptom.trim() || isGotchaThinking}
+                  onClick={async () => {
+                    if (!user || !id) return;
+                    setIsGotchaThinking(true);
+                    try {
+                      const { data: newGotcha, error } = await supabase.from("gotchas").insert({
+                        project_id: id,
+                        user_id: user.id,
+                        symptom: gotchaSymptom.trim(),
+                      }).select().single();
+                      if (error) throw error;
+                      setActiveGotchaId(newGotcha.id);
+                      const initHistory = [{ role: "user", content: `The gotcha is: ${gotchaSymptom.trim()}` }];
+                      setGotchaChatHistory(initHistory);
+                      setGotchaWhyRound(1);
+                      setGotchaModalState("autopsy");
+                      const { data } = await supabase.functions.invoke("gotcha-chat", {
+                        body: { symptom: gotchaSymptom.trim(), chat_history: initHistory },
+                      });
+                      setGotchaQuestion(data?.next_question || data?.message || "Why did this happen?");
+                      queryClient.invalidateQueries({ queryKey: ["project-gotchas"] });
+                    } catch (err) {
+                      toast.error("Failed to create gotcha");
+                    } finally {
+                      setIsGotchaThinking(false);
+                    }
+                  }}
+                >
+                  {isGotchaThinking ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <Brain className="h-4 w-4 mr-2" />}
+                  Start Autopsy
+                </Button>
+              </DialogFooter>
+            </>
+          ) : (
+            <>
+              <DialogHeader>
+                <DialogTitle className="flex items-center gap-2">
+                  <Brain className="h-5 w-5 text-primary" />
+                  Root Cause Autopsy
+                  <Badge variant="outline" className="ml-auto text-xs">Round {gotchaWhyRound}/5</Badge>
+                </DialogTitle>
+                <DialogDescription className="text-xs">Symptom: {gotchaSymptom}</DialogDescription>
+              </DialogHeader>
+              <div className="max-h-[200px] overflow-y-auto rounded-md bg-muted p-3 text-sm">
+                {isGotchaThinking && !gotchaQuestion ? (
+                  <div className="flex items-center gap-2 text-muted-foreground"><Loader2 className="h-4 w-4 animate-spin" /> Thinking…</div>
+                ) : (
+                  <div className="prose prose-invert prose-sm max-w-none">
+                    <ReactMarkdown components={markdownComponents}>{gotchaQuestion}</ReactMarkdown>
+                  </div>
+                )}
+              </div>
+              <Textarea
+                placeholder="Your answer…"
+                value={gotchaAnswer}
+                onChange={(e) => setGotchaAnswer(e.target.value)}
+                className="min-h-[80px]"
+                disabled={isGotchaThinking}
+              />
+              <DialogFooter>
+                <Button
+                  disabled={!gotchaAnswer.trim() || isGotchaThinking}
+                  onClick={async () => {
+                    if (!user || !activeGotchaId) return;
+                    setIsGotchaThinking(true);
+                    const updatedHistory = [
+                      ...gotchaChatHistory,
+                      { role: "assistant", content: gotchaQuestion },
+                      { role: "user", content: gotchaAnswer.trim() },
+                    ];
+                    setGotchaChatHistory(updatedHistory);
+                    setGotchaAnswer("");
+                    try {
+                      await supabase.from("gotchas").update({ chat_history: updatedHistory as any }).eq("id", activeGotchaId);
+                      const { data } = await supabase.functions.invoke("gotcha-chat", {
+                        body: { symptom: gotchaSymptom, chat_history: updatedHistory },
+                      });
+                      if (data?.investigation_task) {
+                        await supabase.from("project_tasks").insert({
+                          project_id: id!, user_id: user.id, title: data.investigation_task, description: "Auto-created from Gotcha autopsy", priority: "high",
+                        });
+                        await supabase.from("gotchas").update({ status: "investigating" } as any).eq("id", activeGotchaId);
+                        queryClient.invalidateQueries({ queryKey: ["project-gotchas"] });
+                        queryClient.invalidateQueries({ queryKey: ["project-tasks"] });
+                        toast.info("Investigation task created. Go find out!");
+                        setShowGotchaModal(false);
+                      } else if (data?.root_cause) {
+                        await supabase.from("gotchas").update({ root_cause: data.root_cause, status: "resolved" } as any).eq("id", activeGotchaId);
+                        if (data.corrective_action_task) {
+                          await supabase.from("project_tasks").insert({
+                            project_id: id!, user_id: user.id, title: data.corrective_action_task, description: "Corrective action from Gotcha root cause analysis", priority: "high",
+                          });
+                          queryClient.invalidateQueries({ queryKey: ["project-tasks"] });
+                        }
+                        queryClient.invalidateQueries({ queryKey: ["project-gotchas"] });
+                        toast.success("Root cause identified!");
+                        setShowGotchaModal(false);
+                      } else if (data?.next_question) {
+                        setGotchaQuestion(data.next_question);
+                        setGotchaWhyRound((r) => r + 1);
+                      } else {
+                        setGotchaQuestion(data?.message || "Can you elaborate further?");
+                      }
+                    } catch (err) {
+                      toast.error("Failed to process answer");
+                    } finally {
+                      setIsGotchaThinking(false);
+                    }
+                  }}
+                >
+                  {isGotchaThinking ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <Send className="h-4 w-4 mr-2" />}
+                  Submit Answer
+                </Button>
+              </DialogFooter>
+            </>
+          )}
+        </DialogContent>
+      </Dialog>
+
       {/* Floating Chat Widget */}
       <FloatingChatWidget
         storageKey="chat-widget-project"
