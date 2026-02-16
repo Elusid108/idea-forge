@@ -22,6 +22,7 @@ import { Separator } from "@/components/ui/separator";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { HoverCard, HoverCardContent, HoverCardTrigger } from "@/components/ui/hover-card";
 import { useAuth } from "@/contexts/AuthContext";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
@@ -39,7 +40,7 @@ import { encodeWidgetData, parseWidgetData, WIDGET_TEMPLATES } from "@/lib/widge
 
 type RefType = "link" | "image" | "video" | "note" | "file" | "widget";
 type SortMode = "az" | "za" | "newest" | "oldest";
-type ChatMsg = { role: "user" | "assistant"; content: string; noteId?: string; noteTitle?: string; widgetId?: string; widgetTitle?: string; linkId?: string; linkTitle?: string };
+type ChatMsg = { role: "user" | "assistant"; content: string; noteId?: string; noteTitle?: string; widgetId?: string; widgetTitle?: string; linkId?: string; linkTitle?: string; links?: { id: string; title: string }[] };
 
 const EDIT_TITLES: Record<string, string> = { note: "Edit Note", link: "Edit Link", image: "Edit Image", video: "Edit Video", file: "Edit File", widget: "Edit Widget" };
 
@@ -147,7 +148,7 @@ export default function ProjectWorkspace() {
 
   // Chatbot states
   const [chatHistory, setChatHistory] = useState<ChatMsg[]>([
-    { role: "assistant", content: "👋 I'm your project assistant. I can help you:\n\n- **Create tasks & subtasks** with priorities and due dates\n- **Generate research notes** with book lists, resources, and recommendations\n- **Update your execution strategy**\n- **Recommend specific resources** (websites, tools, articles)\n- **Create widgets** — mini web apps (calculators, converters, trackers, etc.)\n\nWhat would you like to work on?" }
+    { role: "assistant", content: "👋 I'm your project assistant. I can help you:\n\n- **Create tasks & subtasks** with priorities and due dates\n- **Generate research notes** with book lists, resources, and recommendations\n- **Add reference links** (websites, tools, retailers, articles)\n- **Update your execution strategy**\n- **Create widgets** — mini web apps (calculators, converters, trackers, etc.)\n\nWhat would you like to work on?" }
   ]);
   const [chatInput, setChatInput] = useState("");
   const [isChatThinking, setIsChatThinking] = useState(false);
@@ -809,8 +810,7 @@ export default function ProjectWorkspace() {
       let createdNoteTitle: string | null = null;
       let createdWidgetId: string | null = null;
       let createdWidgetTitle: string | null = null;
-      let createdLinkId: string | null = null;
-      let createdLinkTitle: string | null = null;
+      const createdLinks: { id: string; title: string }[] = [];
       if (data.actions && data.actions.length > 0 && !skipActions) {
         // Separate parent tasks and subtasks for two-pass insertion
         const taskActions = data.actions.filter((a: any) => a.action === "add_task");
@@ -927,12 +927,13 @@ export default function ProjectWorkspace() {
               description: action.description || "",
               sort_order: references.length,
             }).select("id").single();
-            createdLinkId = linkData?.id || null;
-            createdLinkTitle = action.title;
+            if (linkData?.id) createdLinks.push({ id: linkData.id, title: action.title });
             queryClient.invalidateQueries({ queryKey: ["project-refs", id] });
-            toast.success(`Link added: ${action.title}`);
           }
         }
+        // Consolidated toast for links
+        if (createdLinks.length === 1) toast.success(`Link added: ${createdLinks[0].title}`);
+        else if (createdLinks.length > 1) toast.success(`${createdLinks.length} links added`);
       }
 
       const assistantMsg: ChatMsg = {
@@ -940,7 +941,7 @@ export default function ProjectWorkspace() {
         content: data.message || "Done.",
         ...(createdNoteId ? { noteId: createdNoteId, noteTitle: createdNoteTitle! } : {}),
         ...(createdWidgetId ? { widgetId: createdWidgetId, widgetTitle: createdWidgetTitle! } : {}),
-        ...(createdLinkId ? { linkId: createdLinkId, linkTitle: createdLinkTitle! } : {}),
+        ...(createdLinks.length > 0 ? { links: createdLinks } : {}),
       };
       setChatHistory([...newHistory, assistantMsg]);
     } catch (e: any) {
@@ -1547,58 +1548,86 @@ export default function ProjectWorkspace() {
 
                             if (refViewMode === "list") {
                               return (
-                                <div key={ref.id} className="flex items-center gap-3 p-2 rounded-lg border border-border/50 bg-card/50 cursor-pointer hover:border-primary/30 transition-colors" onClick={() => handleRefClick(ref)}>
-                                  <Icon className={`h-4 w-4 ${iconColor} shrink-0`} />
-                                  <span className="text-sm font-medium truncate flex-1">{ref.title}</span>
-                                  {previewText && (
-                                    <span className="text-xs text-muted-foreground truncate max-w-[200px] hidden sm:inline">{previewText}</span>
-                                  )}
-                                  {!isLocked && (
-                                    <div className="flex items-center gap-0.5 shrink-0">
-                                      <Button variant="ghost" size="icon" className="h-6 w-6 text-muted-foreground hover:text-primary" onClick={(e) => { e.stopPropagation(); handleEditRef(ref); }}>
-                                        <Pencil className="h-3 w-3" />
-                                      </Button>
-                                      <Button variant="ghost" size="icon" className="h-6 w-6 text-muted-foreground hover:text-destructive" onClick={(e) => { e.stopPropagation(); deleteReference.mutate(ref.id); }}>
-                                        <X className="h-3 w-3" />
-                                      </Button>
+                                <HoverCard key={ref.id} openDelay={300} closeDelay={100}>
+                                  <HoverCardTrigger asChild>
+                                    <div className="flex items-center gap-3 p-2 rounded-lg border border-border/50 bg-card/50 cursor-pointer hover:border-primary/30 transition-colors" onClick={() => handleRefClick(ref)}>
+                                      <Icon className={`h-4 w-4 ${iconColor} shrink-0`} />
+                                      <span className="text-sm font-medium truncate flex-1">{ref.title}</span>
+                                      {previewText && (
+                                        <span className="text-xs text-muted-foreground truncate max-w-[200px] hidden sm:inline">{previewText}</span>
+                                      )}
+                                      {!isLocked && (
+                                        <div className="flex items-center gap-0.5 shrink-0">
+                                          <Button variant="ghost" size="icon" className="h-6 w-6 text-muted-foreground hover:text-primary" onClick={(e) => { e.stopPropagation(); handleEditRef(ref); }}>
+                                            <Pencil className="h-3 w-3" />
+                                          </Button>
+                                          <Button variant="ghost" size="icon" className="h-6 w-6 text-muted-foreground hover:text-destructive" onClick={(e) => { e.stopPropagation(); deleteReference.mutate(ref.id); }}>
+                                            <X className="h-3 w-3" />
+                                          </Button>
+                                        </div>
+                                      )}
                                     </div>
-                                  )}
-                                </div>
+                                  </HoverCardTrigger>
+                                  <HoverCardContent className="w-72 p-3" side="top">
+                                    <div className="flex items-start gap-2">
+                                      <Icon className={`h-4 w-4 ${iconColor} shrink-0 mt-0.5`} />
+                                      <div className="min-w-0">
+                                        <p className="text-sm font-medium">{ref.title}</p>
+                                        {previewText && <p className="text-xs text-muted-foreground mt-1 line-clamp-4">{previewText}</p>}
+                                        {ref.type === "link" && ref.url && <p className="text-xs text-blue-400 truncate mt-1">{ref.url}</p>}
+                                      </div>
+                                    </div>
+                                  </HoverCardContent>
+                                </HoverCard>
                               );
                             }
 
                             return (
-                              <Card key={ref.id} className="border-border/50 bg-card/50 cursor-pointer hover:border-primary/30 transition-colors" onClick={() => handleRefClick(ref)}>
-                                <CardContent className="p-3">
-                                  <div className="flex items-start gap-3">
-                                    {thumbnail ? (
-                                      <div className="h-12 w-16 rounded overflow-hidden shrink-0 bg-muted">
-                                        <img src={thumbnail} alt="" className="h-full w-full object-cover" />
+                              <HoverCard key={ref.id} openDelay={300} closeDelay={100}>
+                                <HoverCardTrigger asChild>
+                                  <Card className="border-border/50 bg-card/50 cursor-pointer hover:border-primary/30 transition-colors" onClick={() => handleRefClick(ref)}>
+                                    <CardContent className="p-3">
+                                      <div className="flex items-start gap-3">
+                                        {thumbnail ? (
+                                          <div className="h-12 w-16 rounded overflow-hidden shrink-0 bg-muted">
+                                            <img src={thumbnail} alt="" className="h-full w-full object-cover" />
+                                          </div>
+                                        ) : (
+                                          <div className="h-12 w-16 rounded bg-muted/50 flex items-center justify-center shrink-0">
+                                            <Icon className={`h-5 w-5 ${iconColor}/50`} />
+                                          </div>
+                                        )}
+                                        <div className="flex-1 min-w-0">
+                                          <p className="text-sm font-medium truncate">{ref.title}</p>
+                                          {previewText && (
+                                            <p className="text-xs text-muted-foreground line-clamp-2">{previewText}</p>
+                                          )}
+                                        </div>
+                                        {!isLocked && (
+                                          <div className="flex flex-col gap-0.5 shrink-0">
+                                            <Button variant="ghost" size="icon" className="h-6 w-6 text-muted-foreground hover:text-primary" onClick={(e) => { e.stopPropagation(); handleEditRef(ref); }}>
+                                              <Pencil className="h-3 w-3" />
+                                            </Button>
+                                            <Button variant="ghost" size="icon" className="h-6 w-6 text-muted-foreground hover:text-destructive" onClick={(e) => { e.stopPropagation(); deleteReference.mutate(ref.id); }}>
+                                              <X className="h-3 w-3" />
+                                            </Button>
+                                          </div>
+                                        )}
                                       </div>
-                                    ) : (
-                                      <div className="h-12 w-16 rounded bg-muted/50 flex items-center justify-center shrink-0">
-                                        <Icon className={`h-5 w-5 ${iconColor}/50`} />
-                                      </div>
-                                    )}
-                                    <div className="flex-1 min-w-0">
-                                      <p className="text-sm font-medium truncate">{ref.title}</p>
-                                      {previewText && (
-                                        <p className="text-xs text-muted-foreground line-clamp-2">{previewText}</p>
-                                      )}
+                                    </CardContent>
+                                  </Card>
+                                </HoverCardTrigger>
+                                <HoverCardContent className="w-72 p-3" side="top">
+                                  <div className="flex items-start gap-2">
+                                    <Icon className={`h-4 w-4 ${iconColor} shrink-0 mt-0.5`} />
+                                    <div className="min-w-0">
+                                      <p className="text-sm font-medium">{ref.title}</p>
+                                      {previewText && <p className="text-xs text-muted-foreground mt-1 line-clamp-4">{previewText}</p>}
+                                      {ref.type === "link" && ref.url && <p className="text-xs text-blue-400 truncate mt-1">{ref.url}</p>}
                                     </div>
-                                    {!isLocked && (
-                                      <div className="flex flex-col gap-0.5 shrink-0">
-                                        <Button variant="ghost" size="icon" className="h-6 w-6 text-muted-foreground hover:text-primary" onClick={(e) => { e.stopPropagation(); handleEditRef(ref); }}>
-                                          <Pencil className="h-3 w-3" />
-                                        </Button>
-                                        <Button variant="ghost" size="icon" className="h-6 w-6 text-muted-foreground hover:text-destructive" onClick={(e) => { e.stopPropagation(); deleteReference.mutate(ref.id); }}>
-                                          <X className="h-3 w-3" />
-                                        </Button>
-                                      </div>
-                                    )}
                                   </div>
-                                </CardContent>
-                              </Card>
+                                </HoverCardContent>
+                              </HoverCard>
                             );
                           })}
                         </div>
@@ -2331,6 +2360,23 @@ export default function ProjectWorkspace() {
                       <LinkIcon className="h-3 w-3" />
                       View: {msg.linkTitle}
                     </button>
+                  )}
+                  {msg.links && msg.links.length > 0 && (
+                    <div className="mt-2 flex flex-wrap gap-1">
+                      {msg.links.map((link) => (
+                        <button
+                          key={link.id}
+                          className="inline-flex items-center gap-1.5 text-xs px-2.5 py-1 rounded-full bg-blue-500/20 text-blue-400 border border-blue-500/30 hover:bg-blue-500/30 transition-colors"
+                          onClick={() => {
+                            const ref = references.find((r: any) => r.id === link.id);
+                            if (ref) setViewingRef(ref);
+                          }}
+                        >
+                          <LinkIcon className="h-3 w-3" />
+                          View: {link.title}
+                        </button>
+                      ))}
+                    </div>
                   )}
                 </div>
               ) : msg.content}
