@@ -156,13 +156,14 @@ GUIDELINES:
 - Be specific and actionable. Don't give vague advice.
 - When recommending books, include title, author, and publication year.
 - When recommending websites/tools, include the URL.
-- Use the create_note tool to compile lists of resources, books, references, etc.
+- IMPORTANT: When the user asks for links, websites, retailers, tools, or external resources, call create_link ONCE PER URL to create individual link reference tiles. Do NOT bundle multiple URLs into a single note.
+- Use the create_note tool for long-form research, summaries, and written analysis. Do NOT use notes to list URLs.
+- Use the create_link tool for EACH website, tool, or external resource. Always provide the full URL starting with https://.
 - Use the add_task tool to break work into concrete steps.
 - You can create subtasks by providing the TITLE of the parent task as parent_task_id. The system will resolve it to the real UUID.
 - Use the update_strategy tool when the user wants to modify the execution plan.
 - Use the create_widget tool to build mini web apps (calculators, converters, trackers, dashboards, etc.) that run as interactive HTML widgets.
 - Use the update_widget tool to modify existing widgets by title.
-- Use the create_link tool when recommending websites, tools, or external resources. Always provide the full URL starting with https://.
 - Always respond with helpful context even when using tools.`;
     const apiKey = Deno.env.get("LOVABLE_API_KEY");
     const response = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
