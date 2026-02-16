@@ -34,9 +34,15 @@ RULES:
 1. Ask "Why did this happen?" based on their previous answer. Only ask ONE question at a time.
 2. Do not provide the answers for them. Guide them to discover the root cause themselves.
 3. You are on why round ${whyCount + 1} of up to 5.
-4. If the user replies with "I don't know", "I'm not sure", "no idea", or lacks evidence to continue, DO NOT ask another why. Instead, return an investigation_task — a specific, physical action they must take to find the answer.
-5. If you believe the user has reached the true root cause (a systemic issue, not just a symptom), return the root_cause summary and a corrective_action_task.
+4. If the user replies with "I don't know", "I'm not sure", "no idea", or lacks evidence to continue, DO NOT ask another why. Instead, return an investigation_task — a structured task with a short title (under 10 words), a detailed description of what to investigate, and optionally subtasks to break down the investigation into specific steps.
+5. If you believe the user has reached the true root cause (a systemic issue, not just a symptom), return the root_cause summary and a corrective_action_task with a short title, detailed description, and subtasks breaking down the corrective action into actionable steps.
 6. Be encouraging but firm. Don't accept surface-level answers.
+
+TASK FORMATTING RULES:
+- Task titles MUST be under 10 words — short and actionable (e.g., "Check database connection timeout settings")
+- Task descriptions should be detailed instructions (1-3 sentences)
+- Use subtasks to break complex actions into 2-5 specific steps
+- Each subtask also needs a short title and description
 
 You MUST respond using the tool call. Choose the appropriate response type based on the conversation.`;
 
@@ -44,6 +50,25 @@ You MUST respond using the tool call. Choose the appropriate response type based
       { role: "system", content: systemPrompt },
       ...(chat_history || []).map((m: any) => ({ role: m.role, content: m.content })),
     ];
+
+    const taskObjectSchema = {
+      type: "object",
+      properties: {
+        title: { type: "string", description: "Short task title (under 10 words)" },
+        description: { type: "string", description: "Detailed instructions for what to do" },
+        subtasks: {
+          type: "array",
+          description: "Optional breakdown into specific actionable steps",
+          items: {
+            type: "object",
+            properties: {
+              title: { type: "string", description: "Short subtask title" },
+              description: { type: "string", description: "Detailed subtask instructions" },
+            },
+          },
+        },
+      },
+    };
 
     const tools = [
       {
@@ -55,9 +80,9 @@ You MUST respond using the tool call. Choose the appropriate response type based
             type: "object",
             properties: {
               next_question: { type: "string", description: "The next 'why' question to ask. Only set if continuing the autopsy." },
-              investigation_task: { type: "string", description: "A specific action the user must take to find evidence. Set when user says 'I don't know'." },
+              investigation_task: { ...taskObjectSchema, description: "A structured task for the user to investigate. Set when user says 'I don't know' or lacks information." },
               root_cause: { type: "string", description: "Summary of the root cause. Set when root cause is identified." },
-              corrective_action_task: { type: "string", description: "A task to fix the root cause. Set alongside root_cause." },
+              corrective_action_task: { ...taskObjectSchema, description: "A structured task to fix the root cause. Set alongside root_cause." },
               message: { type: "string", description: "A brief message to display to the user alongside the response." },
             },
             required: ["message"],
