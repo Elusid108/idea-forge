@@ -34,11 +34,14 @@ import { markdownComponents } from "@/lib/markdownComponents";
 import { format, formatDistanceToNow } from "date-fns";
 import { useActionUndo } from "@/hooks/useActionUndo";
 import TaskCommentButton from "@/components/TaskCommentButton";
+import TaskCommentsSection from "@/components/TaskCommentsSection";
 import { encodeWidgetData, parseWidgetData, WIDGET_TEMPLATES } from "@/lib/widgetUtils";
 
 type RefType = "link" | "image" | "video" | "note" | "file" | "widget";
 type SortMode = "az" | "za" | "newest" | "oldest";
-type ChatMsg = { role: "user" | "assistant"; content: string; noteId?: string; noteTitle?: string };
+type ChatMsg = { role: "user" | "assistant"; content: string; noteId?: string; noteTitle?: string; widgetId?: string; widgetTitle?: string };
+
+const EDIT_TITLES: Record<string, string> = { note: "Edit Note", link: "Edit Link", image: "Edit Image", video: "Edit Video", file: "Edit File", widget: "Edit Widget" };
 
 const REF_ICONS: Record<string, any> = { link: LinkIcon, image: Image, video: Film, note: StickyNote, file: FileText, widget: Code };
 const REF_ICON_COLORS: Record<string, string> = {
@@ -796,6 +799,8 @@ export default function ProjectWorkspace() {
       // Process actions (skip if locked)
       let createdNoteId: string | null = null;
       let createdNoteTitle: string | null = null;
+      let createdWidgetId: string | null = null;
+      let createdWidgetTitle: string | null = null;
       if (data.actions && data.actions.length > 0 && !skipActions) {
         // Separate parent tasks and subtasks for two-pass insertion
         const taskActions = data.actions.filter((a: any) => a.action === "add_task");
@@ -879,14 +884,16 @@ export default function ProjectWorkspace() {
             toast.success(`Note created: ${action.title}`);
           } else if (action.action === "create_widget" && action.title) {
             const widgetDesc = encodeWidgetData(action.code || "", action.summary || "", action.instructions || "");
-            await supabase.from("project_references").insert({
+            const { data: widgetData } = await supabase.from("project_references").insert({
               project_id: id!,
               user_id: user!.id,
               type: "widget",
               title: action.title,
               description: widgetDesc,
               sort_order: references.length,
-            });
+            }).select("id").single();
+            createdWidgetId = widgetData?.id || null;
+            createdWidgetTitle = action.title;
             queryClient.invalidateQueries({ queryKey: ["project-refs", id] });
             toast.success(`Widget created: ${action.title}`);
           } else if (action.action === "update_widget" && action.title) {
@@ -906,6 +913,7 @@ export default function ProjectWorkspace() {
         role: "assistant",
         content: data.message || "Done.",
         ...(createdNoteId ? { noteId: createdNoteId, noteTitle: createdNoteTitle! } : {}),
+        ...(createdWidgetId ? { widgetId: createdWidgetId, widgetTitle: createdWidgetTitle! } : {}),
       };
       setChatHistory([...newHistory, assistantMsg]);
     } catch (e: any) {
@@ -1698,7 +1706,7 @@ export default function ProjectWorkspace() {
       <Dialog open={!!editingRef} onOpenChange={(open) => { if (!open) { setEditingRef(null); setRefForm({ title: "", url: "", description: "", widgetCode: "", widgetSummary: "", widgetInstructions: "" }); } }}>
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
-            <DialogTitle>Edit Resource</DialogTitle>
+            <DialogTitle>{editingRef ? EDIT_TITLES[editingRef.type] || "Edit Resource" : "Edit Resource"}</DialogTitle>
             <DialogDescription className="sr-only">Edit an existing resource</DialogDescription>
           </DialogHeader>
           <div className="space-y-3">
@@ -1789,6 +1797,8 @@ export default function ProjectWorkspace() {
                   </div>
                 );
               })()}
+              {/* Comments Section */}
+              <TaskCommentsSection taskId={viewingTask.id} taskType="project" />
               <p className="text-xs text-muted-foreground">Created {format(new Date(viewingTask.created_at), "MMM d, yyyy 'at' h:mm a")}</p>
             </div>
           )}
@@ -2261,6 +2271,18 @@ export default function ProjectWorkspace() {
                     >
                       <StickyNote className="h-3 w-3" />
                       View: {msg.noteTitle}
+                    </button>
+                  )}
+                  {msg.widgetId && (
+                    <button
+                      className="mt-2 ml-1 inline-flex items-center gap-1.5 text-xs px-2.5 py-1 rounded-full bg-cyan-500/20 text-cyan-400 border border-cyan-500/30 hover:bg-cyan-500/30 transition-colors"
+                      onClick={() => {
+                        const widget = references.find((r: any) => r.id === msg.widgetId);
+                        if (widget) setViewingRef(widget);
+                      }}
+                    >
+                      <Code className="h-3 w-3" />
+                      View: {msg.widgetTitle}
                     </button>
                   )}
                 </div>

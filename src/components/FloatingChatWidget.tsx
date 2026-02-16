@@ -4,7 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Skeleton } from "@/components/ui/skeleton";
 
-type ChatMsg = { role: "user" | "assistant"; content: string; noteId?: string; noteTitle?: string };
+type ChatMsg = { role: "user" | "assistant"; content: string; noteId?: string; noteTitle?: string; widgetId?: string; widgetTitle?: string };
 
 type WidgetState = "collapsed" | "expanded" | "maximized";
 
