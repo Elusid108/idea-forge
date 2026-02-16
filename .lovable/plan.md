@@ -1,134 +1,138 @@
 
 
-# Empty Trash, GTM Consultant Overhaul, and Kanban Column Rename
+# Campaign Dashboard Overhaul, Resources, Task Popups, Campaign Assistant, and Project Layout Fix
+
+This plan covers 7 changes across the Campaign Workspace dashboard (State 2), the GTM Interview (State 1), and the Project Workspace.
 
 ---
 
-## 1. Empty Trash Button
+## 1. GTM Interview: Render Question with Markdown + Scroll
 
-Add an "Empty Trash" button to the Trash page that permanently deletes all trashed items across all four tables (ideas, brainstorms, projects, campaigns) in one action.
+**Problem:** The AI question text renders as a plain `<p>` tag, so numbered lists and formatting are lost. Long questions overflow without scrolling.
 
-**File: `src/pages/Trash.tsx`**
-- Add an "Empty Trash" button next to the page title (with AlertDialog confirmation)
-- On confirm, run permanent deletes across all four tables for items where `deleted_at IS NOT NULL`
-- For campaigns, also unlink their `project_id` references before deleting
-- Invalidate all trash query keys and entity query keys after completion
-- Disable the button when there are zero total trashed items
+**File: `src/pages/CampaignWorkspace.tsx` (lines 516-522)**
+
+- Replace the plain `<p>` with a `ReactMarkdown` component inside a scrollable container (`max-h-[300px] overflow-y-auto`).
+- Apply prose styling: `prose prose-invert prose-sm` with list styles matching the rest of the app.
 
 ---
 
-## 2. GTM Consultant System Prompt Overhaul
+## 2. Campaign Dashboard: Remove Metric Cards, Distribution Strategy, and Campaign Links
 
-Replace the current interrogation-style prompt with the "Exploratory GTM Consultant" persona that suggests options and educates the user.
+**File: `src/pages/CampaignWorkspace.tsx` (lines 621-846)**
 
-**File: `supabase/functions/campaign-chat/index.ts`**
-
-Replace the `generate_question` / `submit_answer` system prompt (lines 132-150) with:
-
-```
-You are an expert Go-To-Market Consultant. Your job is to help the user build a launch strategy by asking questions and providing them with industry-standard options they might not know exist. Do not ask broad, open-ended questions. Instead, ask a question and provide 2 to 3 contextual examples of how they could answer it based on their specific project.
-
-Guide the conversation through these 4 exploratory phases:
-
-1. Discovery & IP: Ask what the ultimate goal is (Profit, Portfolio, Open-Source). Suggest relevant licensing (e.g., MIT, Apache) or proprietary IP protections.
-
-2. Monetization Strategy: Pitch revenue models. If it's software, suggest SaaS subscriptions, freemium tiers, or usage-based pricing. If it's open-source, suggest open-core, paid hosting, or premium support. If it's physical, suggest direct-to-consumer vs B2B wholesale.
-
-3. Distribution & Marketing: Suggest specific platforms for their niche (e.g., Product Hunt, Etsy, Tindie, Reddit, LinkedIn Ads) and ask which marketing channels they want to commit to.
-
-4. Logistics & Operations: Ask about their capacity for maintenance. Introduce concepts like SaaS server hosting costs, dropshipping, or third-party logistics (3PL) to see how hands-on they want to be.
-
-Keep your responses conversational and encouraging. Wait for the user to select an option or provide their own before moving to the next phase.
-```
-
-Update the `topics_remaining` instruction to use the four phases: `["Discovery & IP", "Monetization Strategy", "Distribution & Marketing", "Logistics & Operations"]`.
-
-Also update the `forge_playbook` system prompt to generate four playbook sections matching these phases (instead of the current six-section format):
-1. Discovery & IP Strategy
-2. Monetization Strategy
-3. Distribution & Marketing Plan
-4. Logistics & Operations Plan
-
-Update the tool parameters to return `ip_strategy`, `monetization_plan`, `marketing_plan`, and `operations_plan` as separate text fields alongside the combined `playbook` markdown.
-
-Update the task `status_column` options in the forge prompt to use the new column keys (see section 4 below).
+- **Remove** the `metricCards` array and the entire Revenue/Units Sold/Target Price grid (lines 621-767).
+- **Remove** the Distribution Strategy card (Sales Model + Primary Channel selects) (lines 783-816).
+- **Remove** the Campaign Links card and the Add Link dialog (lines 818-933).
+- Remove associated state: `editingMetric`, `metricDraft`, `showAddLink`, `linkForm`, and helper functions `handleSaveMetric`, `handleAddLink`, `handleDeleteLink`.
 
 ---
 
-## 3. Database Migration: New Playbook Section Columns
+## 3. Campaign Dashboard: Two-Column Layout with Tags on Right
 
-Add four new text columns to the `campaigns` table to store the structured playbook sections:
+Restructure the dashboard (State 2) to match the Project page layout using a `grid-cols-5` two-column split (3 left, 2 right).
 
+**Left column (lg:col-span-3):**
+- The four playbook sections (Discovery & IP Strategy, Monetization Strategy, Distribution & Marketing, Logistics & Operations), each as `EditableMarkdown`.
+
+**Right column (lg:col-span-2):**
+- Tags at the top
+- Resources section (see item 4 below)
+
+---
+
+## 4. Campaign Resources: New Table + Full CRUD
+
+Since campaign resources must be independent from project/brainstorm resources, we need a new `campaign_references` table.
+
+**Database Migration:**
 ```sql
-ALTER TABLE campaigns ADD COLUMN IF NOT EXISTS ip_strategy text DEFAULT '';
-ALTER TABLE campaigns ADD COLUMN IF NOT EXISTS monetization_plan text DEFAULT '';
-ALTER TABLE campaigns ADD COLUMN IF NOT EXISTS marketing_plan text DEFAULT '';
-ALTER TABLE campaigns ADD COLUMN IF NOT EXISTS operations_plan text DEFAULT '';
+CREATE TABLE campaign_references (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  campaign_id uuid NOT NULL REFERENCES campaigns(id) ON DELETE CASCADE,
+  user_id uuid NOT NULL,
+  type text NOT NULL DEFAULT 'note',
+  title text NOT NULL DEFAULT '',
+  url text DEFAULT '',
+  description text DEFAULT '',
+  thumbnail_url text DEFAULT '',
+  sort_order integer DEFAULT 0,
+  created_at timestamptz DEFAULT now()
+);
+
+ALTER TABLE campaign_references ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "Users manage own campaign references"
+  ON campaign_references FOR ALL
+  USING (auth.uid() = user_id);
 ```
+
+**File: `src/pages/CampaignWorkspace.tsx`**
+
+- Add a full Resources section in the right column, mirroring the Project Workspace's Resources implementation:
+  - View mode toggle (grid/list) with localStorage persistence
+  - Sort mode (newest/oldest/A-Z/Z-A)
+  - Collapsible groups by type (notes, links, images, videos, files)
+  - Add/Edit/Delete resource dialogs
+  - Note type uses `RichTextNoteEditor`
+  - Image/file upload to Supabase storage
+  - `ReferenceViewer` for viewing resources
+- Query `campaign_references` table filtered by `campaign_id`.
+- Import needed components: `ReferenceViewer`, `RichTextNoteEditor`, `Popover`, `Collapsible`, etc.
 
 ---
 
-## 4. Rename Kanban Pipeline Columns
+## 5. Kanban Pipeline: Move to Top + Task Click Popup
 
-Replace the current five columns with the new five phases everywhere they appear:
+**File: `src/pages/CampaignWorkspace.tsx`**
 
-| Old Key | Old Label | New Key | New Label |
-|---|---|---|---|
-| asset_creation | Asset Creation | foundation_ip | Foundation & IP |
-| pre_launch | Pre-Launch | infrastructure_production | Infrastructure & Production |
-| active_campaign | Active Campaign | asset_creation_prelaunch | Asset Creation & Pre-Launch |
-| fulfillment | Fulfillment | active_campaign | Active Campaign |
-| evergreen | Evergreen | operations_fulfillment | Operations & Fulfillment |
-
-**Files to update:**
-
-- **`src/pages/CampaignWorkspace.tsx`**: Update `STATUS_OPTIONS`, `STATUS_LABELS`, `KANBAN_COLUMNS` constants, and the status `Select` dropdown.
-- **`src/pages/Campaigns.tsx`**: Update `statusColumns` and `statusLabels` constants.
-- **`supabase/functions/campaign-chat/index.ts`**: Update the `forge_playbook` prompt to use new `status_column` values for generated tasks.
-
-**Data migration**: Update existing `campaign_tasks` rows and `campaigns.status` to map old values to new ones:
-
-```sql
-UPDATE campaign_tasks SET status_column = 'foundation_ip' WHERE status_column = 'asset_creation';
-UPDATE campaign_tasks SET status_column = 'infrastructure_production' WHERE status_column = 'pre_launch';
-UPDATE campaign_tasks SET status_column = 'asset_creation_prelaunch' WHERE status_column = 'active_campaign';
-UPDATE campaign_tasks SET status_column = 'active_campaign' WHERE status_column = 'fulfillment';
-UPDATE campaign_tasks SET status_column = 'operations_fulfillment' WHERE status_column = 'evergreen';
-
-UPDATE campaigns SET status = 'foundation_ip' WHERE status = 'asset_creation';
-UPDATE campaigns SET status = 'infrastructure_production' WHERE status = 'pre_launch';
-UPDATE campaigns SET status = 'asset_creation_prelaunch' WHERE status = 'active_campaign';
-UPDATE campaigns SET status = 'active_campaign' WHERE status = 'fulfillment';
-UPDATE campaigns SET status = 'operations_fulfillment' WHERE status = 'evergreen';
-```
-
-Note: The data migration must be done carefully since "active_campaign" maps to "fulfillment" old values, and the old "active_campaign" maps to the new "asset_creation_prelaunch". The SQL must run in the correct order to avoid collisions (rename old values to temp names first, then to final names).
+- Move the "Go-To-Market Pipeline" Kanban board to appear **above** the two-column layout (right after the separator, before the playbook sections).
+- Add a task detail popup dialog (matching the Project Workspace's `viewingTask` pattern):
+  - Clicking a task card opens a dialog showing title, description, status column, and completion state.
+  - Dialog footer has "Mark Complete/Active", "Edit" (inline title/description editing), and "Delete" buttons.
+  - Add `viewingTask` state and the corresponding `Dialog` component.
 
 ---
 
-## 5. Dashboard: Render Four Playbook Sections
+## 6. Campaign Assistant: Floating Chat Widget + Edge Function
 
-**File: `src/pages/CampaignWorkspace.tsx`** (State 2 dashboard)
+**Edge Function: `supabase/functions/campaign-chat/index.ts`**
 
-After forging, save the four section fields (`ip_strategy`, `monetization_plan`, `marketing_plan`, `operations_plan`) to the campaign alongside the combined `playbook`.
+- Add a new mode `"assistant"` to the existing campaign-chat edge function.
+- The assistant mode uses a system prompt similar to the project-chat assistant:
+  - Understands the campaign context (playbook sections, tasks, tags, status).
+  - Can answer questions about the campaign strategy and how to accomplish GTM goals.
+  - Does NOT need tool-calling (tasks are managed via the Kanban board) -- it's a conversational assistant.
+- Uses the same AI gateway pattern already in place.
 
-On the dashboard, replace the single `EditablePlaybook` component with four `EditableMarkdown` sections, each with its own heading:
-- Discovery & IP Strategy (`ip_strategy`)
-- Monetization Strategy (`monetization_plan`)
-- Distribution & Marketing (`marketing_plan`)
-- Logistics & Operations (`operations_plan`)
+**File: `src/pages/CampaignWorkspace.tsx`**
 
-Keep the combined `playbook` field as a fallback for campaigns forged before this update (render the single playbook if the four fields are all empty).
+- Add `FloatingChatWidget` to the dashboard (State 2 only, not during interview).
+- Add chat state: `chatHistory`, `chatInput`, `isChatThinking`.
+- Welcome message: "I'm your Campaign Assistant. I can help you understand your GTM strategy, suggest improvements, and answer questions about launching your product."
+- On submit, call `campaign-chat` with `mode: "assistant"` and the full chat history + campaign context.
+- Render messages with `ReactMarkdown` + prose styling (same pattern as project assistant).
+
+---
+
+## 7. Project Workspace: Move Resources Under Bullet Breakdown
+
+**File: `src/pages/ProjectWorkspace.tsx`**
+
+Currently, Resources is in the **left column** (after Tasks, around line 1028). Bullet Breakdown is in the **right column** (line 1354).
+
+- **Move** the entire Resources section (including the Add/Edit dialogs, sort/view controls, grouped refs rendering) from the left column to the right column, placing it **after** the Bullet Breakdown section.
+- This means the left column will contain: Description, Execution Strategy, Tasks, Expenses.
+- The right column will contain: Tags, GitHub, GitHub Activity, Brainstorm References, Bullet Breakdown, **Resources**.
 
 ---
 
 ## Technical Summary
 
-| File | Changes |
+| Area | Changes |
 |---|---|
-| `src/pages/Trash.tsx` | Add "Empty Trash" button with confirmation dialog |
-| `supabase/functions/campaign-chat/index.ts` | Replace system prompt with Exploratory GTM Consultant; update forge_playbook to return 4 section fields; update task status_column values |
-| `src/pages/CampaignWorkspace.tsx` | Update Kanban column constants; save 4 playbook sections on forge; render 4 section editors on dashboard; update status options |
-| `src/pages/Campaigns.tsx` | Update statusColumns and statusLabels to new 5 phases |
-| **DB Migration** | Add `ip_strategy`, `monetization_plan`, `marketing_plan`, `operations_plan` columns; migrate existing task/campaign status values to new column keys |
+| **DB Migration** | Create `campaign_references` table with RLS |
+| **`src/pages/CampaignWorkspace.tsx`** | Markdown rendering for interview questions with scroll; remove metrics/distribution/links; two-column layout; Resources CRUD; Kanban moved to top with task popups; Campaign Assistant floating widget |
+| **`supabase/functions/campaign-chat/index.ts`** | Add `"assistant"` mode for conversational campaign help |
+| **`src/pages/ProjectWorkspace.tsx`** | Move Resources section from left column to right column (under Bullet Breakdown) |
 
