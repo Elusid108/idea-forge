@@ -133,14 +133,13 @@ export default function BrainstormsPage() {
         className="cursor-pointer border-border/50 bg-card/50 transition-all hover:border-primary/30 hover:bg-card/80"
       >
         <CardHeader className="px-4 pt-3 pb-1">
-        <div className="flex items-start justify-between gap-2">
-            <Brain className="h-4 w-4 text-pink-400 shrink-0 mt-0.5" />
+          <div className="flex items-center gap-2">
+            <Brain className="h-4 w-4 text-pink-400 shrink-0" />
             {b.category ? (
               <Badge className={`text-xs border ${categoryClass}`}>{b.category}</Badge>
             ) : (
               <Badge variant="secondary" className="text-xs">Uncategorized</Badge>
             )}
-            <Badge className={`text-xs border ${statusBadge.className}`}>{statusBadge.label}</Badge>
           </div>
         </CardHeader>
         <CardContent className="px-4 pb-3 pt-0 space-y-1">

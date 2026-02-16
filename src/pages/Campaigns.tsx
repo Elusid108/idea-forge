@@ -105,12 +105,9 @@ export default function CampaignsPage() {
         className="cursor-pointer border-border/50 bg-card/50 transition-all hover:border-primary/30 hover:bg-card/80"
       >
         <CardHeader className="px-4 pt-3 pb-1">
-          <div className="flex items-start justify-between gap-2">
-            <Megaphone className="h-4 w-4 text-orange-400 shrink-0 mt-0.5" />
+          <div className="flex items-center gap-2">
+            <Megaphone className="h-4 w-4 text-orange-400 shrink-0" />
             <Badge className={`text-xs border ${catClass}`}>{c.category || "Uncategorized"}</Badge>
-            {viewMode === "list" && (
-              <Badge variant="outline" className="text-xs">{statusLabels[c.status] || c.status}</Badge>
-            )}
           </div>
         </CardHeader>
         <CardContent className="px-4 pb-3 pt-0 space-y-1">

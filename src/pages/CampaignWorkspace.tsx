@@ -3,7 +3,7 @@ import { useParams, useNavigate } from "react-router-dom";
 import {
   ArrowLeft, Trash2, Plus, X, Pencil, Rocket,
   Wrench, Brain, Lightbulb, Bot, Send, Loader2, CheckCircle2, Sparkles,
-  Check, Link as LinkIcon, Image, Film, StickyNote, FileText,
+  Check, Link as LinkIcon, Image, Film, StickyNote, FileText, Code,
   Grid3X3, List, ChevronDown, ChevronRight, ArrowUpDown,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -62,15 +62,15 @@ const KANBAN_COLUMNS = [
 ];
 
 type ChatMsg = { role: "user" | "assistant"; content: string; noteId?: string; noteTitle?: string };
-type RefType = "link" | "image" | "video" | "note" | "file";
+type RefType = "link" | "image" | "video" | "note" | "file" | "widget";
 type SortMode = "az" | "za" | "newest" | "oldest";
 
-const REF_ICONS: Record<string, any> = { link: LinkIcon, image: Image, video: Film, note: StickyNote, file: FileText };
+const REF_ICONS: Record<string, any> = { link: LinkIcon, image: Image, video: Film, note: StickyNote, file: FileText, widget: Code };
 const REF_ICON_COLORS: Record<string, string> = {
-  note: "text-yellow-400", link: "text-blue-400", image: "text-emerald-400", video: "text-red-400", file: "text-orange-400",
+  note: "text-yellow-400", link: "text-blue-400", image: "text-emerald-400", video: "text-red-400", file: "text-orange-400", widget: "text-cyan-400",
 };
-const REF_TYPE_ORDER: RefType[] = ["note", "link", "image", "video", "file"];
-const REF_TYPE_LABELS: Record<string, string> = { note: "Notes", link: "Links", image: "Images", video: "Videos", file: "Files" };
+const REF_TYPE_ORDER: RefType[] = ["note", "link", "image", "video", "file", "widget"];
+const REF_TYPE_LABELS: Record<string, string> = { note: "Notes", link: "Links", image: "Images", video: "Videos", file: "Files", widget: "Widgets" };
 
 const stripHtml = (html: string) => html?.replace(/<[^>]*>/g, "").trim() || "";
 
@@ -122,7 +122,7 @@ export default function CampaignWorkspace() {
 
   // Campaign Assistant state
   const [chatHistory, setChatHistory] = useState<ChatMsg[]>([
-    { role: "assistant", content: "👋 I'm your Campaign Assistant. I can help you understand your GTM strategy, suggest improvements, and answer questions about launching your product." }
+    { role: "assistant", content: "👋 I'm your Campaign Assistant. I can help you understand your GTM strategy, suggest improvements, answer questions about launching your product, and **create widgets** (mini web apps like calculators, trackers, etc.)." }
   ]);
   const [chatInput, setChatInput] = useState("");
   const [isChatThinking, setIsChatThinking] = useState(false);
@@ -440,7 +440,7 @@ export default function CampaignWorkspace() {
   const handleRefClick = (ref: any) => {
     if (ref.type === "link" && ref.url) { window.open(ensureHttps(ref.url), "_blank", "noopener,noreferrer"); }
     else if (ref.type === "file" && ref.url) { window.open(ref.url, "_blank", "noopener,noreferrer"); }
-    else if (ref.type === "note" || ref.type === "image" || ref.type === "video") { setViewingRef(ref); }
+    else if (ref.type === "note" || ref.type === "image" || ref.type === "video" || ref.type === "widget") { setViewingRef(ref); }
   };
 
   const handleEditRef = (ref: any) => {
@@ -449,6 +449,10 @@ export default function CampaignWorkspace() {
   };
 
   const handleAddRef = async () => {
+    if (addRefType === "widget") {
+      addReference.mutate({ type: "widget", title: refForm.title, description: refForm.description });
+      return;
+    }
     if ((addRefType === "image" || addRefType === "file") && refFile) {
       const path = `${user!.id}/${id}/${Date.now()}-${refFile.name}`;
       const { error: uploadError } = await supabase.storage.from("brainstorm-references").upload(path, refFile);
@@ -552,6 +556,21 @@ export default function CampaignWorkspace() {
             });
             queryClient.invalidateQueries({ queryKey: ["campaign-tasks", id] });
             toast.success(`Task added: ${action.title}`);
+          } else if (action.action === "create_widget" && action.title) {
+            await supabase.from("campaign_references" as any).insert({
+              campaign_id: id!, user_id: user!.id, type: "widget",
+              title: action.title, description: action.code || "",
+              sort_order: campaignRefs.length,
+            });
+            queryClient.invalidateQueries({ queryKey: ["campaign-refs", id] });
+            toast.success(`Widget created: ${action.title}`);
+          } else if (action.action === "update_widget" && action.title) {
+            const existingWidget = campaignRefs.find((r: any) => r.type === "widget" && r.title.toLowerCase() === action.title.toLowerCase());
+            if (existingWidget) {
+              await supabase.from("campaign_references" as any).update({ description: action.code || "" }).eq("id", existingWidget.id);
+              queryClient.invalidateQueries({ queryKey: ["campaign-refs", id] });
+              toast.success(`Widget updated: ${action.title}`);
+            }
           }
         }
       }
@@ -837,7 +856,7 @@ export default function CampaignWorkspace() {
                 <Popover>
                   <PopoverTrigger asChild><Button variant="outline" size="sm" className="gap-1 h-8"><Plus className="h-3 w-3" /> Add</Button></PopoverTrigger>
                   <PopoverContent className="w-44 p-1" align="end">
-                    {(["note", "link", "image", "video", "file"] as RefType[]).map((type) => {
+                    {(["note", "link", "image", "video", "file", "widget"] as RefType[]).map((type) => {
                       const Icon = REF_ICONS[type];
                       const iconColor = REF_ICON_COLORS[type];
                       return (
@@ -989,11 +1008,23 @@ export default function CampaignWorkspace() {
               <Input type="file" accept="image/*" onChange={(e) => setRefFile(e.target.files?.[0] || null)} />
             ) : addRefType === "file" ? (
               <Input type="file" onChange={(e) => setRefFile(e.target.files?.[0] || null)} />
-            ) : addRefType !== "note" ? (
+            ) : addRefType === "widget" ? null : addRefType !== "note" ? (
               <Input placeholder="URL" value={refForm.url} onChange={(e) => setRefForm(p => ({ ...p, url: e.target.value }))} />
             ) : null}
             {addRefType === "note" ? (
               <RichTextNoteEditor value={refForm.description} onChange={(val) => setRefForm(p => ({ ...p, description: val }))} placeholder="Write your note…" />
+            ) : addRefType === "widget" ? (
+              <>
+                <Textarea placeholder="Paste your HTML/JS/CSS code here…" value={refForm.description} onChange={(e) => setRefForm(p => ({ ...p, description: e.target.value }))} className="resize-none min-h-[300px] font-mono text-xs" />
+                <div className="flex gap-2">
+                  <Button variant="outline" size="sm" className="text-xs" onClick={() => setRefForm(p => ({ ...p, title: p.title || "Unit Converter", description: `<!DOCTYPE html><html><head><style>*{margin:0;padding:0;box-sizing:border-box}body{font-family:system-ui;background:#1a1a2e;color:#eee;display:flex;justify-content:center;align-items:center;min-height:100vh}.container{background:#16213e;border-radius:12px;padding:24px;width:320px;box-shadow:0 8px 32px rgba(0,0,0,.3)}h2{text-align:center;margin-bottom:16px;color:#0af}select,input{width:100%;padding:10px;margin:6px 0;border:1px solid #333;border-radius:8px;background:#0d1b2a;color:#eee;font-size:14px}.result{margin-top:16px;padding:12px;background:#0d1b2a;border-radius:8px;text-align:center;font-size:18px;color:#0af}</style></head><body><div class="container"><h2>Unit Converter</h2><select id="type" onchange="convert()"><option value="length">Length (in↔cm)</option><option value="weight">Weight (lb↔kg)</option><option value="temp">Temperature (°F↔°C)</option></select><input id="val" type="number" placeholder="Enter value" oninput="convert()"><select id="dir" onchange="convert()"><option value="toMetric">To Metric</option><option value="toImperial">To Imperial</option></select><div class="result" id="result">—</div></div><script>function convert(){const v=parseFloat(document.getElementById('val').value),t=document.getElementById('type').value,d=document.getElementById('dir').value,r=document.getElementById('result');if(isNaN(v)){r.textContent='—';return}let o;if(t==='length')o=d==='toMetric'?v*2.54+' cm':v/2.54+' in';else if(t==='weight')o=d==='toMetric'?(v*.453592).toFixed(2)+' kg':(v*2.20462).toFixed(2)+' lb';else o=d==='toMetric'?((v-32)*5/9).toFixed(1)+' °C':(v*9/5+32).toFixed(1)+' °F';r.textContent=o}</script></body></html>` }))}>
+                    📐 Unit Converter
+                  </Button>
+                  <Button variant="outline" size="sm" className="text-xs" onClick={() => setRefForm(p => ({ ...p, title: p.title || "Calculator", description: `<!DOCTYPE html><html><head><style>*{margin:0;padding:0;box-sizing:border-box}body{font-family:system-ui;background:#1a1a2e;color:#eee;display:flex;justify-content:center;align-items:center;min-height:100vh}.calc{background:#16213e;border-radius:16px;padding:20px;width:280px;box-shadow:0 8px 32px rgba(0,0,0,.3)}.display{background:#0d1b2a;border-radius:10px;padding:16px;text-align:right;font-size:28px;margin-bottom:12px;min-height:60px;word-break:break-all;color:#0af}.grid{display:grid;grid-template-columns:repeat(4,1fr);gap:8px}button{padding:14px;border:none;border-radius:10px;font-size:16px;cursor:pointer;transition:background .15s}button{background:#0d1b2a;color:#eee}button:hover{background:#1a3a5c}button.op{background:#0a4a7a;color:#0af}button.op:hover{background:#0c5a9a}button.eq{background:#0af;color:#000;font-weight:bold}button.eq:hover{background:#08d}button.clear{background:#e74c3c;color:#fff}button.clear:hover{background:#c0392b}</style></head><body><div class="calc"><div class="display" id="display">0</div><div class="grid"><button class="clear" onclick="c()">C</button><button onclick="d('(')">(</button><button onclick="d(')')">)</button><button class="op" onclick="d('/')">÷</button><button onclick="d('7')">7</button><button onclick="d('8')">8</button><button onclick="d('9')">9</button><button class="op" onclick="d('*')">×</button><button onclick="d('4')">4</button><button onclick="d('5')">5</button><button onclick="d('6')">6</button><button class="op" onclick="d('-')">−</button><button onclick="d('1')">1</button><button onclick="d('2')">2</button><button onclick="d('3')">3</button><button class="op" onclick="d('+')">+</button><button onclick="d('0')">0</button><button onclick="d('.')">.</button><button onclick="del()">⌫</button><button class="eq" onclick="eq()">=</button></div></div><script>let s='0';function up(){document.getElementById('display').textContent=s}function d(v){s=s==='0'&&v!=='.'?v:s+v;up()}function c(){s='0';up()}function del(){s=s.length>1?s.slice(0,-1):'0';up()}function eq(){try{s=String(eval(s))}catch{s='Error'}up()}</script></body></html>` }))}>
+                    🔢 Calculator
+                  </Button>
+                </div>
+              </>
             ) : (
               <Textarea placeholder="Description (optional)" value={refForm.description} onChange={(e) => setRefForm(p => ({ ...p, description: e.target.value }))} className="resize-none" />
             )}
@@ -1014,11 +1045,13 @@ export default function CampaignWorkspace() {
           </DialogHeader>
           <div className="space-y-3">
             <Input placeholder="Title" value={refForm.title} onChange={(e) => setRefForm(p => ({ ...p, title: e.target.value }))} />
-            {editingRef?.type !== "note" && editingRef?.type !== "image" && editingRef?.type !== "file" && (
+            {editingRef?.type !== "note" && editingRef?.type !== "image" && editingRef?.type !== "file" && editingRef?.type !== "widget" && (
               <Input placeholder="URL" value={refForm.url} onChange={(e) => setRefForm(p => ({ ...p, url: e.target.value }))} />
             )}
             {editingRef?.type === "note" ? (
               <RichTextNoteEditor value={refForm.description} onChange={(val) => setRefForm(p => ({ ...p, description: val }))} placeholder="Write your note…" />
+            ) : editingRef?.type === "widget" ? (
+              <Textarea placeholder="HTML/JS/CSS code…" value={refForm.description} onChange={(e) => setRefForm(p => ({ ...p, description: e.target.value }))} className="resize-none min-h-[300px] font-mono text-xs" />
             ) : (
               <Textarea placeholder="Description (optional)" value={refForm.description} onChange={(e) => setRefForm(p => ({ ...p, description: e.target.value }))} className="resize-none" />
             )}

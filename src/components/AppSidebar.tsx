@@ -15,6 +15,7 @@ import {
   SidebarMenuButton,
   SidebarMenuItem,
   SidebarFooter,
+  useSidebar,
 } from "@/components/ui/sidebar";
 import { Button } from "@/components/ui/button";
 
@@ -64,7 +65,12 @@ export function AppSidebar() {
   const { signOut, user } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
+  const { isMobile, setOpenMobile } = useSidebar();
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
+
+  const closeMobileSidebar = () => {
+    if (isMobile) setOpenMobile(false);
+  };
 
   const toggleExpand = (label: string, e: React.MouseEvent) => {
     e.stopPropagation();
@@ -122,6 +128,7 @@ export function AppSidebar() {
                             to={section.href}
                             className="text-sm text-sidebar-foreground hover:bg-sidebar-accent flex-1 flex items-center"
                             activeClassName="bg-sidebar-accent text-primary font-medium"
+                            onClick={closeMobileSidebar}
                           >
                             <span className="mr-2">{section.emoji}</span>
                             {section.label}
@@ -150,7 +157,7 @@ export function AppSidebar() {
                           items.map((item) => (
                             <button
                               key={item.id}
-                              onClick={() => navigate(getDetailPath(section.label, item.id))}
+                              onClick={() => { navigate(getDetailPath(section.label, item.id)); closeMobileSidebar(); }}
                               className={`w-full text-left text-xs px-2 py-1 rounded truncate hover:bg-sidebar-accent transition-colors text-sidebar-foreground/80 ${
                                 location.pathname.includes(item.id) ? "bg-sidebar-accent text-primary font-medium" : ""
                               }`}
@@ -177,6 +184,7 @@ export function AppSidebar() {
                     to="/trash"
                     className="text-sm text-sidebar-foreground hover:bg-sidebar-accent"
                     activeClassName="bg-sidebar-accent text-primary font-medium"
+                    onClick={closeMobileSidebar}
                   >
                     <Trash2 className="h-4 w-4 mr-2" /> Trash
                   </NavLink>

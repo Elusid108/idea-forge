@@ -53,6 +53,36 @@ const tools = [
       },
     },
   },
+  {
+    type: "function",
+    function: {
+      name: "create_widget",
+      description: "Create a widget (mini web app) as a resource. The code should be a complete HTML document with embedded JS/CSS.",
+      parameters: {
+        type: "object",
+        properties: {
+          title: { type: "string", description: "Widget title" },
+          code: { type: "string", description: "Complete HTML document with embedded JS/CSS" },
+        },
+        required: ["title", "code"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "update_widget",
+      description: "Update an existing widget's code by its title.",
+      parameters: {
+        type: "object",
+        properties: {
+          title: { type: "string", description: "Exact title of the existing widget to update" },
+          code: { type: "string", description: "Updated complete HTML document with embedded JS/CSS" },
+        },
+        required: ["title", "code"],
+      },
+    },
+  },
 ];
 
 serve(async (req) => {
@@ -109,6 +139,8 @@ GUIDELINES:
 - Use the add_task tool to break work into concrete steps.
 - You can create subtasks by providing the TITLE of the parent task as parent_task_id. The system will resolve it to the real UUID.
 - Use the update_strategy tool when the user wants to modify the execution plan.
+- Use the create_widget tool to build mini web apps (calculators, converters, trackers, dashboards, etc.) that run as interactive HTML widgets.
+- Use the update_widget tool to modify existing widgets by title.
 - Always respond with helpful context even when using tools.`;
     const apiKey = Deno.env.get("LOVABLE_API_KEY");
     const response = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {

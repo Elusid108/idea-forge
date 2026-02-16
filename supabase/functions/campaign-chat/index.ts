@@ -74,6 +74,36 @@ Project/Product Context:
             },
           },
         },
+        {
+          type: "function",
+          function: {
+            name: "create_widget",
+            description: "Create a widget (mini web app) as a resource. The code should be a complete HTML document with embedded JS/CSS.",
+            parameters: {
+              type: "object",
+              properties: {
+                title: { type: "string", description: "Widget title" },
+                code: { type: "string", description: "Complete HTML document with embedded JS/CSS" },
+              },
+              required: ["title", "code"],
+            },
+          },
+        },
+        {
+          type: "function",
+          function: {
+            name: "update_widget",
+            description: "Update an existing widget's code by its title.",
+            parameters: {
+              type: "object",
+              properties: {
+                title: { type: "string", description: "Exact title of the existing widget to update" },
+                code: { type: "string", description: "Updated complete HTML document with embedded JS/CSS" },
+              },
+              required: ["title", "code"],
+            },
+          },
+        },
       ];
 
       const systemPrompt = `You are a Campaign Assistant for a Go-To-Market strategy. You help the user understand their campaign, suggest improvements, and answer questions about launching their product.
@@ -93,6 +123,8 @@ YOUR CAPABILITIES:
 - Help understand and refine the GTM strategy
 - Create notes to compile research, action plans, summaries, etc.
 - Add tasks to any of the 5 pipeline phases (Foundation & IP, Infrastructure & Production, Asset Creation & Pre-Launch, Active Campaign, Operations & Fulfillment)
+- Create widgets — mini web apps (calculators, converters, trackers, dashboards, etc.)
+- Update existing widgets by title
 
 GUIDELINES:
 - Be conversational, helpful, and specific. Reference the user's actual campaign data when answering.

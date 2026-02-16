@@ -135,14 +135,13 @@ export default function ProjectsPage() {
         className="cursor-pointer border-border/50 bg-card/50 transition-all hover:border-primary/30 hover:bg-card/80"
       >
         <CardHeader className="px-4 pt-3 pb-1">
-          <div className="flex items-start justify-between gap-2">
-            <Wrench className="h-4 w-4 text-blue-400 shrink-0 mt-0.5" />
+          <div className="flex items-center gap-2">
+            <Wrench className="h-4 w-4 text-blue-400 shrink-0" />
             {category ? (
               <Badge className={`text-xs border ${categoryClass}`}>{category}</Badge>
             ) : (
               <Badge variant="secondary" className="text-xs">Uncategorized</Badge>
             )}
-            <Badge variant="outline" className="text-xs">{statusLabels[effectiveStatus] || effectiveStatus}</Badge>
           </div>
         </CardHeader>
         <CardContent className="px-4 pb-3 pt-0 space-y-1">
