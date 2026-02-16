@@ -1,5 +1,7 @@
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
+import { ResizablePanelGroup, ResizablePanel, ResizableHandle } from "@/components/ui/resizable";
 import { addTargetBlankToHtml } from "@/lib/markdownComponents";
+import { parseWidgetData } from "@/lib/widgetUtils";
 
 interface Reference {
   id: string;
@@ -118,20 +120,43 @@ export default function ReferenceViewer({ reference, open, onOpenChange }: Refer
   }
 
   if (reference.type === "widget") {
+    const widgetData = parseWidgetData(reference.description || "");
+    const hasInstructions = !!widgetData.instructions && widgetData.instructions.trim() !== "";
+    
     return (
       <Dialog open={open} onOpenChange={onOpenChange}>
-        <DialogContent className="sm:max-w-4xl p-0 bg-background border [&>button]:top-2 [&>button]:right-2 [&>button]:z-10">
+        <DialogContent className="sm:max-w-4xl p-0 bg-background border [&>button]:top-2 [&>button]:right-2 [&>button]:z-10" style={{ height: "80vh", maxHeight: "80vh" }}>
           <DialogHeader className="px-4 pt-4 pb-0">
             <DialogTitle>{reference.title}</DialogTitle>
             <DialogDescription className="sr-only">Widget viewer</DialogDescription>
           </DialogHeader>
-          <div className="px-4 pb-4">
-            <iframe
-              srcDoc={reference.description || ""}
-              sandbox="allow-scripts"
-              className="w-full border rounded"
-              style={{ height: "70vh" }}
-            />
+          <div className="flex-1 overflow-hidden px-4 pb-4" style={{ height: "calc(80vh - 80px)" }}>
+            {hasInstructions ? (
+              <ResizablePanelGroup direction="vertical" className="h-full rounded border border-border/50">
+                <ResizablePanel defaultSize={70} minSize={30}>
+                  <iframe
+                    srcDoc={widgetData.code}
+                    sandbox="allow-scripts"
+                    className="w-full h-full border-0"
+                  />
+                </ResizablePanel>
+                <ResizableHandle withHandle />
+                <ResizablePanel defaultSize={30} minSize={15}>
+                  <div className="h-full overflow-y-auto p-3">
+                    <div
+                      className="text-sm text-muted-foreground prose prose-invert prose-sm max-w-none [&_li]:my-1 [&_ul]:my-2 [&_ol]:my-2 [&_p]:my-2"
+                      dangerouslySetInnerHTML={{ __html: addTargetBlankToHtml(widgetData.instructions) }}
+                    />
+                  </div>
+                </ResizablePanel>
+              </ResizablePanelGroup>
+            ) : (
+              <iframe
+                srcDoc={widgetData.code}
+                sandbox="allow-scripts"
+                className="w-full h-full border rounded border-border/50"
+              />
+            )}
           </div>
         </DialogContent>
       </Dialog>
