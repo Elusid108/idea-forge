@@ -1,139 +1,141 @@
-# List View Fix, Collapsible Kanban, Section Icons, and Task Comments  
-  
-Interjection  
-Change Add Gotcha message to "What unexpected failure, hidden trap, or roadblock did you just hit?"
+# Icon Alignment, Status Badge Removal, Mobile Sidebar, and Widget Resources
 
-## 1. Fix List View Description Overflow (Ideas + Brainstorms)
+## 1. Fix Icon + Badge Alignment on Tiles (All 4 Dashboards)
 
-The description text in list rows runs off-screen because the `flex-1` span has no `overflow-hidden` constraint.
+Currently the CardHeader uses `justify-between`, which spaces icon and badges apart. The user wants the icon immediately left of the category badge, both left-aligned.
 
-**Files: `Ideas.tsx` (line 113), `Brainstorms.tsx` (line 176), `Projects.tsx` (line 179), `Campaigns.tsx` (line 145)**
+**Files: Ideas.tsx, Brainstorms.tsx, Projects.tsx, Campaigns.tsx**
 
-- Add `overflow-hidden` to the list row container (`flex items-center` div)
-- On the description span, ensure `truncate` is working by adding `overflow-hidden text-ellipsis whitespace-nowrap` explicitly, and cap with `max-w-none` removed. The key fix: the description span uses `flex-1` but is missing `overflow-hidden`.
-- Slice description text to 80 chars server-side as a safety net (already done in some, ensure consistent).
-
----
-
-## 2. Collapsible Kanban Groups (All 4 Dashboards)
-
-Currently kanban columns are always open. Add collapsible support to kanban view columns too. Certain groups start collapsed by default.
-
-**Default collapsed groups:**
-
-- Ideas: `scrapped`, `brainstorming`
-- Brainstorms: `scrapped`, `completed`
-- Projects: `scrapped` (if present), `launched`
-- Campaigns: none by default
-
-**Implementation:** Wrap each kanban column's card list in a `Collapsible` with the same `collapsedGroups` state and `toggleGroupCollapse` function already used for tile/list views. The column header becomes a `CollapsibleTrigger`. The collapsed state is shared across all view modes (same localStorage key).
-
-For each dashboard's kanban section, change from:
+Change the CardHeader's inner div from:
 
 ```
-<div className="space-y-3">
-  <h3>...</h3>
-  {items.map(renderCard)}
+<div className="flex items-start justify-between gap-2">
+  <Icon /> <Badge>Category</Badge> <Badge>Status</Badge>
 </div>
 ```
 
 To:
 
 ```
-<Collapsible open={!collapsedGroups.has(key)}>
-  <CollapsibleTrigger>
-    <ChevronDown/Right> {label} {count}
-  </CollapsibleTrigger>
-  <CollapsibleContent>
-    {items.map(renderCard)}
-  </CollapsibleContent>
-</Collapsible>
+<div className="flex items-center gap-2">
+  <Icon /> <Badge>Category</Badge>
+</div>
 ```
 
-**Default collapsed initialization:** Update the `useState` initializer for `collapsedGroups` to seed defaults on first load (when no localStorage key exists).
+This left-aligns both the icon and category badge together.
 
 ---
 
-## 3. Section Icons on Page Titles and Card/Row Items
+## 2. Remove Redundant Status Badges from Tiles/Kanban (Brainstorms + Projects)
 
-Add the section-specific icon in two places per dashboard:
+Since group headers already show the status (e.g., "ACTIVE", "PLANNING"), the status badge on each card is redundant.
 
-### 3a. Page Title (large icon left of title text)
-
-- Ideas: `Lightbulb` in yellow (`text-yellow-400`), `h-8 w-8`
-- Brainstorms: `Brain` in pink (`text-pink-400`), `h-8 w-8`
-- Projects: `Wrench` in blue (`text-blue-400`), `h-8 w-8`
-- Campaigns: `Megaphone` in orange (`text-orange-400`), `h-8 w-8`
-
-Place the icon to the left of the `<h1>` in the title `<div>`, using `flex items-center gap-2`.
-
-### 3b. Card/Tile Top-Left (small icon before category badge)
-
-In each card's `CardHeader`, add a small colored icon (`h-4 w-4`) to the left of the category badge row.
-
-### 3c. List Row Far-Left (small icon before category badge)
-
-In each list row, add the same small icon as the first element before the category badge.
+- **Brainstorms**: Remove the `statusBadge` Badge from `renderCard` (line 143).
+- **Projects**: Remove the `statusLabels[effectiveStatus]` Badge from `renderProjectCard` (line 145).
+- **Ideas**: Keep the "Brainstorming" badge since it provides additional context beyond the group.
+- **Campaigns**: Already removed in prior work for kanban view.
 
 ---
 
-## 4. Task Comments System (Projects + Campaigns)
+## 3. Mobile Sidebar Auto-Close on Navigation
 
-### 4a. Database Migration
+When in mobile view, clicking a sidebar link should close the sidebar so the user can see the page.
 
-Create a `task_comments` table:
+**File: `src/components/AppSidebar.tsx**`
 
-```sql
-CREATE TABLE public.task_comments (
-  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  task_id UUID NOT NULL,
-  task_type TEXT NOT NULL CHECK (task_type IN ('project', 'campaign')),
-  user_id UUID NOT NULL,
-  content TEXT NOT NULL DEFAULT '',
-  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
-);
+- Import `useSidebar` from `@/components/ui/sidebar`.
+- Get `setOpenMobile` and `isMobile` from the hook.
+- Wrap navigation actions (both section links and item buttons) to call `setOpenMobile(false)` when `isMobile` is true after navigating.
+- For the `NavLink` components, add an `onClick` handler that closes the sidebar on mobile.
+- For the nested item buttons, add the same close behavior in their `onClick`.
 
-ALTER TABLE public.task_comments ENABLE ROW LEVEL SECURITY;
-CREATE POLICY "Users can view own comments" ON public.task_comments FOR SELECT USING (auth.uid() = user_id);
-CREATE POLICY "Users can insert own comments" ON public.task_comments FOR INSERT WITH CHECK (auth.uid() = user_id);
-CREATE POLICY "Users can update own comments" ON public.task_comments FOR UPDATE USING (auth.uid() = user_id);
-CREATE POLICY "Users can delete own comments" ON public.task_comments FOR DELETE USING (auth.uid() = user_id);
+---
 
-CREATE TRIGGER update_task_comments_updated_at
-  BEFORE UPDATE ON public.task_comments
-  FOR EACH ROW EXECUTE FUNCTION public.update_updated_at_column();
+## 4. Widget Resource Type (Projects + Campaigns)
+
+Add a new reference type "widget" -- a mini JS/HTML web app that runs in an iframe popup.
+
+### 4a. Database Changes
+
+No schema migration needed. The `project_references` and `campaign_references` tables use a `type` text column. We just store `"widget"` as the type value. The `description` field will hold the HTML/JS code, and `title` holds the widget name.
+
+### 4b. Update Reference Type Constants
+
+**Files: ProjectWorkspace.tsx, CampaignWorkspace.tsx**
+
+- Add `"widget"` to `RefType`: `type RefType = "link" | "image" | "video" | "note" | "file" | "widget";`
+- Add to `REF_TYPE_ORDER`: `["note", "link", "image", "video", "file", "widget"]`
+- Add to `REF_ICONS`: `widget: Code` (import `Code` from lucide-react)
+- Add to `REF_ICON_COLORS`: `widget: "text-cyan-400"`
+- Add to `REF_TYPE_LABELS`: `widget: "Widgets"`
+
+### 4c. Widget Add/Edit Dialog
+
+When `addRefType === "widget"`:
+
+- Show a `Title` input
+- Show a large code editor area (using `<Textarea>` with monospace font) for the HTML/JS code
+- No URL or file upload needed
+
+When editing a widget (pencil icon), reopen the same code editor dialog pre-filled with existing code.
+
+### 4d. Widget Viewer (ReferenceViewer)
+
+**File: `src/components/ReferenceViewer.tsx**`
+
+Add a new case for `type === "widget"`:
+
+- Render a Dialog with an `<iframe>` that loads the widget code via `srcdoc`
+- The iframe uses `sandbox="allow-scripts"` for security
+- Full-width dialog with reasonable height (e.g., 70vh)
+
+### 4e. Widget Click Handler
+
+In `handleRefClick`:
+
+- When `ref.type === "widget"`, open the viewer (same as note/image/video)
+
+### 4f. AI Assistant Integration
+
+**Files: `supabase/functions/project-chat/index.ts`, `supabase/functions/campaign-chat/index.ts**`
+
+Add a new tool `create_widget` to the assistant:
+
+```json
+{
+  "name": "create_widget",
+  "description": "Create a widget (mini web app) as a resource. The code should be a complete HTML document with embedded JS/CSS.",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "title": { "type": "string" },
+      "code": { "type": "string", "description": "Complete HTML document with embedded JS/CSS" }
+    },
+    "required": ["title", "code"]
+  }
+}
 ```
 
-The `task_id` references either `project_tasks.id` or `campaign_tasks.id` depending on `task_type`. We use a polymorphic approach (no FK) to support both table types with one comments table.
+Handle the `create_widget` action in the frontend's `handleChatSubmit` function by inserting a reference with `type: "widget"`, `title`, and `description: code`.
 
-### 4b. Frontend: Comment Count Badge on Task Rows
-
-- Query all comments for the project/campaign tasks in a single batch query.
-- On each task row (and subtask row), show a small `StickyNote` or `MessageSquare` icon with a count badge (like a notification dot) when comments exist. Example: a small notepad icon with a number overlay.
-
-### 4c. Frontend: Comment Panel/Popover
-
-When clicking the notepad icon on a task:
-
-- Open a popover or small inline panel showing existing comments with timestamps.
-- Include a textarea at the bottom to add a new comment.
-- Comments are displayed in chronological order.
-- Each comment shows content and relative timestamp.
-
-This will be implemented in both `ProjectWorkspace.tsx` and `CampaignWorkspace.tsx`.
+Also add a `update_widget` tool for modifying existing widgets by title.  
+  
+Update assistants welcome message to mention the ability to create wedgets. Include a metric to imperial and vice versa converter and a 10 digit calculator as two example widgets the user can add from the add widget popup. Clicking either of these buttons will load the code into the window.
 
 ---
 
 ## Files Changed Summary
 
 
-| File                              | Changes                                                                                                                                 |
-| --------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
-| `src/pages/Ideas.tsx`             | Fix list description overflow, add collapsible kanban, add Lightbulb icons to title/cards/rows, default collapse scrapped+brainstorming |
-| `src/pages/Brainstorms.tsx`       | Fix list description overflow, add collapsible kanban, add Brain icons, default collapse scrapped+completed                             |
-| `src/pages/Projects.tsx`          | Fix list description overflow, add collapsible kanban, add Wrench icons, default collapse launched                                      |
-| `src/pages/Campaigns.tsx`         | Fix list description overflow, add collapsible kanban, add Megaphone icons                                                              |
-| `src/pages/ProjectWorkspace.tsx`  | Add task comment UI (query, display badge, popover)                                                                                     |
-| `src/pages/CampaignWorkspace.tsx` | Add task comment UI (query, display badge, popover)                                                                                     |
-| Database migration                | Create `task_comments` table with RLS                                                                                                   |
+| File                                        | Changes                                                                              |
+| ------------------------------------------- | ------------------------------------------------------------------------------------ |
+| `src/pages/Ideas.tsx`                       | Left-align icon + category badge in card header                                      |
+| `src/pages/Brainstorms.tsx`                 | Left-align icon + category badge, remove status badge from cards                     |
+| `src/pages/Projects.tsx`                    | Left-align icon + category badge, remove status badge from cards                     |
+| `src/pages/Campaigns.tsx`                   | Left-align icon + category badge                                                     |
+| `src/components/AppSidebar.tsx`             | Auto-close sidebar on mobile when navigating                                         |
+| `src/pages/ProjectWorkspace.tsx`            | Add widget type to refs, widget add/edit UI, widget click handler, AI action handler |
+| `src/pages/CampaignWorkspace.tsx`           | Add widget type to refs, widget add/edit UI, widget click handler, AI action handler |
+| `src/components/ReferenceViewer.tsx`        | Add widget viewer (iframe with srcdoc)                                               |
+| `supabase/functions/project-chat/index.ts`  | Add create_widget and update_widget tools                                            |
+| `supabase/functions/campaign-chat/index.ts` | Add create_widget and update_widget tools                                            |
