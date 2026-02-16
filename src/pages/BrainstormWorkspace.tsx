@@ -32,7 +32,7 @@ import { useUndoRedo } from "@/hooks/useUndoRedo";
 import { format } from "date-fns";
 
 type RefType = "link" | "image" | "video" | "note";
-type ChatMsg = { role: "user" | "assistant"; content: string };
+type ChatMsg = { role: "user" | "assistant"; content: string; noteId?: string; noteTitle?: string; linkId?: string; linkTitle?: string };
 type SortMode = "az" | "za" | "newest" | "oldest";
 
 const REF_ICONS: Record<string, any> = {
@@ -707,6 +707,8 @@ export default function BrainstormWorkspace() {
       // Process actions
       let createdNoteId: string | null = null;
       let createdNoteTitle: string | null = null;
+      let createdLinkId: string | null = null;
+      let createdLinkTitle: string | null = null;
       if (data.actions && data.actions.length > 0) {
         for (const action of data.actions) {
           if (action.action === "create_note" && action.title) {
@@ -736,6 +738,20 @@ export default function BrainstormWorkspace() {
             await supabase.from("brainstorms").update({ bullet_breakdown: action.bullets }).eq("id", id!);
             queryClient.invalidateQueries({ queryKey: ["brainstorm", id] });
             toast.success("Bullet breakdown updated");
+          } else if (action.action === "create_link" && action.title && action.url) {
+            const { data: linkData } = await supabase.from("brainstorm_references").insert({
+              brainstorm_id: id!,
+              user_id: user!.id,
+              type: "link",
+              title: action.title,
+              url: action.url.match(/^https?:\/\//) ? action.url : `https://${action.url}`,
+              description: action.description || "",
+              sort_order: references.length,
+            }).select("id").single();
+            createdLinkId = linkData?.id || null;
+            createdLinkTitle = action.title;
+            queryClient.invalidateQueries({ queryKey: ["brainstorm-refs", id] });
+            toast.success(`Link added: ${action.title}`);
           }
         }
       }
@@ -744,6 +760,7 @@ export default function BrainstormWorkspace() {
         role: "assistant",
         content: data.answer || "Done.",
         ...(createdNoteId ? { noteId: createdNoteId, noteTitle: createdNoteTitle! } : {}),
+        ...(createdLinkId ? { linkId: createdLinkId, linkTitle: createdLinkTitle! } : {}),
       };
       setQueryChatHistory([...newHistory, assistantMsg]);
     } catch (e: any) {
@@ -1363,6 +1380,21 @@ export default function BrainstormWorkspace() {
                     >
                       <StickyNote className="h-3 w-3" />
                       View: {msg.noteTitle}
+                    </button>
+                  )}
+                  {msg.linkId && (
+                    <button
+                      className="mt-2 ml-1 inline-flex items-center gap-1.5 text-xs px-2.5 py-1 rounded-full bg-blue-500/20 text-blue-400 border border-blue-500/30 hover:bg-blue-500/30 transition-colors"
+                      onClick={() => {
+                        const link = references.find((r: any) => r.id === msg.linkId);
+                        if (link) {
+                          const url = link.url?.match(/^https?:\/\//) ? link.url : `https://${link.url}`;
+                          window.open(url, "_blank", "noopener,noreferrer");
+                        }
+                      }}
+                    >
+                      <LinkIcon className="h-3 w-3" />
+                      View: {msg.linkTitle}
                     </button>
                   )}
                 </div>

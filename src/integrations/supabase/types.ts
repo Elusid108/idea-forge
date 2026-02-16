@@ -161,6 +161,48 @@ export type Database = {
           },
         ]
       }
+      campaign_expenses: {
+        Row: {
+          amount: number
+          campaign_id: string
+          category: string | null
+          created_at: string
+          date: string | null
+          description: string | null
+          id: string
+          receipt_url: string | null
+          title: string
+          user_id: string
+          vendor: string | null
+        }
+        Insert: {
+          amount?: number
+          campaign_id: string
+          category?: string | null
+          created_at?: string
+          date?: string | null
+          description?: string | null
+          id?: string
+          receipt_url?: string | null
+          title?: string
+          user_id: string
+          vendor?: string | null
+        }
+        Update: {
+          amount?: number
+          campaign_id?: string
+          category?: string | null
+          created_at?: string
+          date?: string | null
+          description?: string | null
+          id?: string
+          receipt_url?: string | null
+          title?: string
+          user_id?: string
+          vendor?: string | null
+        }
+        Relationships: []
+      }
       campaign_references: {
         Row: {
           campaign_id: string
