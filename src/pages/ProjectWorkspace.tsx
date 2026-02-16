@@ -600,7 +600,7 @@ export default function ProjectWorkspace() {
     items: sortRefs(references.filter((r: any) => r.type === type)),
   })).filter(g => g.items.length > 0);
 
-  const isLocked = !!(project as any).campaign_id;
+  const isLocked = !!(project as any)?.campaign_id;
   const projectCategory = (project as any)?.category;
   const projectTags: string[] = (project as any)?.tags || [];
   const categoryBadgeClass = projectCategory ? CATEGORY_COLORS[projectCategory] || "bg-secondary text-secondary-foreground" : "";
