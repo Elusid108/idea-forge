@@ -47,8 +47,11 @@ export default function BrainstormsPage() {
   const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(() => {
     try {
       const saved = localStorage.getItem("brainstorms-collapsed-groups");
-      return saved ? new Set(JSON.parse(saved)) : new Set();
-    } catch { return new Set(); }
+      if (saved) return new Set(JSON.parse(saved));
+      const defaults = new Set(["scrapped", "completed"]);
+      localStorage.setItem("brainstorms-collapsed-groups", JSON.stringify([...defaults]));
+      return defaults;
+    } catch { return new Set(["scrapped", "completed"]); }
   });
   const [sortMode, setSortMode] = useState<string>(
     () => localStorage.getItem("brainstorms-sort-mode") || "newest"
@@ -130,7 +133,8 @@ export default function BrainstormsPage() {
         className="cursor-pointer border-border/50 bg-card/50 transition-all hover:border-primary/30 hover:bg-card/80"
       >
         <CardHeader className="px-4 pt-3 pb-1">
-          <div className="flex items-start justify-between gap-2">
+        <div className="flex items-start justify-between gap-2">
+            <Brain className="h-4 w-4 text-pink-400 shrink-0 mt-0.5" />
             {b.category ? (
               <Badge className={`text-xs border ${categoryClass}`}>{b.category}</Badge>
             ) : (
@@ -171,9 +175,10 @@ export default function BrainstormsPage() {
         onClick={() => navigate(`/brainstorms/${b.id}`)}
         className="flex items-center gap-3 px-3 py-2 rounded-lg border border-border/50 bg-card/50 cursor-pointer hover:border-primary/30 hover:bg-card/80 transition-all"
       >
+        <Brain className="h-4 w-4 text-pink-400 shrink-0" />
         <Badge className={`text-[10px] border ${categoryClass} shrink-0`}>{b.category || "Uncategorized"}</Badge>
         <span className="text-sm font-medium truncate min-w-0 max-w-[200px]">{b.title}</span>
-        <span className="text-xs text-muted-foreground truncate min-w-0 flex-1 hidden sm:block">{descPreview}</span>
+        <span className="text-xs text-muted-foreground truncate overflow-hidden min-w-0 flex-1 hidden sm:block">{(descPreview || "").slice(0, 80)}</span>
         {tags.length > 0 && (
           <div className="hidden md:flex gap-1 shrink-0">
             {tags.slice(0, 2).map((t: string) => (
@@ -201,7 +206,10 @@ export default function BrainstormsPage() {
     <div className="space-y-6">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div>
-          <h1 className="text-3xl font-bold">Brainstorms</h1>
+          <div className="flex items-center gap-2">
+            <Brain className="h-8 w-8 text-pink-400" />
+            <h1 className="text-3xl font-bold">Brainstorms</h1>
+          </div>
           <p className="text-muted-foreground">Research workspaces for developing your ideas</p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
@@ -248,14 +256,18 @@ export default function BrainstormsPage() {
         <div className="grid grid-cols-1 gap-4 md:grid-cols-4">
           {BRAINSTORM_GROUPS.map(group => {
             const groupItems = sortItems(brainstorms.filter((b: any) => group.statuses.includes(b.status)));
+            const isCollapsed = collapsedGroups.has(group.key);
             return (
-              <div key={group.key} className="space-y-3">
-                <h3 className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">
-                  {group.label}
-                  <Badge variant="secondary" className="ml-2">{groupItems.length}</Badge>
-                </h3>
-                {groupItems.map(renderCard)}
-              </div>
+              <Collapsible key={group.key} open={!isCollapsed} onOpenChange={() => toggleGroupCollapse(group.key)}>
+                <CollapsibleTrigger className="flex items-center gap-2 w-full text-left py-1 hover:text-primary transition-colors">
+                  {isCollapsed ? <ChevronRight className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
+                  <span className="text-sm font-semibold uppercase tracking-wider">{group.label}</span>
+                  <Badge variant="secondary" className="text-[10px] ml-1">{groupItems.length}</Badge>
+                </CollapsibleTrigger>
+                <CollapsibleContent className="mt-2 space-y-3">
+                  {groupItems.map(renderCard)}
+                </CollapsibleContent>
+              </Collapsible>
             );
           })}
         </div>

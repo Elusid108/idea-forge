@@ -33,6 +33,7 @@ import ReactMarkdown from "react-markdown";
 import { markdownComponents } from "@/lib/markdownComponents";
 import { format, formatDistanceToNow } from "date-fns";
 import { useActionUndo } from "@/hooks/useActionUndo";
+import TaskCommentButton from "@/components/TaskCommentButton";
 
 type RefType = "link" | "image" | "video" | "note" | "file";
 type SortMode = "az" | "za" | "newest" | "oldest";
@@ -908,6 +909,7 @@ export default function ProjectWorkspace() {
         <p className={`text-sm font-medium ${task.completed ? "line-through text-muted-foreground" : ""}`}>{task.title}</p>
         {task.description && <p className="text-xs text-muted-foreground line-clamp-1">{task.description}</p>}
       </div>
+      <TaskCommentButton taskId={task.id} taskType="project" />
       <Badge className={`text-[10px] border ${PRIORITY_COLORS[task.priority] || PRIORITY_COLORS.medium}`}>
         {task.priority}
       </Badge>
@@ -1981,7 +1983,7 @@ export default function ProjectWorkspace() {
                   <AlertTriangle className="h-5 w-5 text-amber-400" />
                   New Gotcha
                 </DialogTitle>
-                <DialogDescription>What broke, what's your concern, or what is making this difficult?</DialogDescription>
+                <DialogDescription>What unexpected failure, hidden trap, or roadblock did you just hit?</DialogDescription>
               </DialogHeader>
               <Textarea
                 placeholder="Describe the gotcha…"

@@ -42,6 +42,7 @@ function IdeaCard({ idea, onClick }: { idea: any; onClick: () => void }) {
     >
       <CardHeader className="px-4 pt-3 pb-1">
         <div className="flex items-start justify-between gap-2">
+          <Lightbulb className="h-4 w-4 text-yellow-400 shrink-0 mt-0.5" />
           {isScrapped ? (
             <Badge className="text-xs border bg-zinc-500/20 text-zinc-400 border-zinc-500/30">
               <Ban className="h-3 w-3 mr-1" /> Scrapped
@@ -102,6 +103,7 @@ function IdeaListRow({ idea, onClick }: { idea: any; onClick: () => void }) {
       onClick={onClick}
       className="flex items-center gap-3 px-3 py-2 rounded-lg border border-border/50 bg-card/50 cursor-pointer hover:border-primary/30 hover:bg-card/80 transition-all"
     >
+      <Lightbulb className="h-4 w-4 text-yellow-400 shrink-0" />
       {isScrapped ? (
         <Badge className="text-[10px] border bg-zinc-500/20 text-zinc-400 border-zinc-500/30 shrink-0">Scrapped</Badge>
       ) : idea.category ? (
@@ -110,8 +112,8 @@ function IdeaListRow({ idea, onClick }: { idea: any; onClick: () => void }) {
         <Badge variant="secondary" className="text-[10px] shrink-0">New</Badge>
       )}
       <span className="text-sm font-medium truncate min-w-0 max-w-[200px]">{idea.title || "Untitled"}</span>
-      <span className="text-xs text-muted-foreground truncate min-w-0 flex-1 hidden sm:block">
-        {isProcessed && idea.processed_summary ? idea.processed_summary : idea.raw_dump?.slice(0, 80)}
+      <span className="text-xs text-muted-foreground truncate overflow-hidden min-w-0 flex-1 hidden sm:block">
+        {(isProcessed && idea.processed_summary ? idea.processed_summary : idea.raw_dump || "").slice(0, 80)}
       </span>
       {idea.tags?.length > 0 && (
         <div className="hidden md:flex gap-1 shrink-0">
@@ -360,8 +362,12 @@ export default function IdeasPage() {
   const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(() => {
     try {
       const saved = localStorage.getItem("ideas-collapsed-groups");
-      return saved ? new Set(JSON.parse(saved)) : new Set();
-    } catch { return new Set(); }
+      if (saved) return new Set(JSON.parse(saved));
+      // Default collapsed: scrapped, brainstorming
+      const defaults = new Set(["scrapped", "brainstorming"]);
+      localStorage.setItem("ideas-collapsed-groups", JSON.stringify([...defaults]));
+      return defaults;
+    } catch { return new Set(["scrapped", "brainstorming"]); }
   });
   const [sortMode, setSortMode] = useState<string>(
     () => localStorage.getItem("ideas-sort-mode") || "newest"
@@ -629,7 +635,10 @@ export default function IdeasPage() {
     <div className="space-y-6">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div>
-          <h1 className="text-3xl font-bold">Ideas</h1>
+          <div className="flex items-center gap-2">
+            <Lightbulb className="h-8 w-8 text-yellow-400" />
+            <h1 className="text-3xl font-bold">Ideas</h1>
+          </div>
           <p className="text-muted-foreground">Capture raw thoughts and let AI help organize them</p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
@@ -676,16 +685,20 @@ export default function IdeasPage() {
         <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
           {IDEA_GROUPS.map(group => {
             const groupItems = sortItems(ideas.filter((i: any) => group.statuses.includes(i.status)));
+            const isCollapsed = collapsedGroups.has(group.key);
             return (
-              <div key={group.key} className="space-y-3">
-                <h3 className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">
-                  {group.label}
-                  <Badge variant="secondary" className="ml-2">{groupItems.length}</Badge>
-                </h3>
-                {groupItems.map((idea: any) => (
-                  <IdeaCard key={idea.id} idea={idea} onClick={() => setSelectedIdea(idea)} />
-                ))}
-              </div>
+              <Collapsible key={group.key} open={!isCollapsed} onOpenChange={() => toggleGroupCollapse(group.key)}>
+                <CollapsibleTrigger className="flex items-center gap-2 w-full text-left py-1 hover:text-primary transition-colors">
+                  {isCollapsed ? <ChevronRight className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
+                  <span className="text-sm font-semibold uppercase tracking-wider">{group.label}</span>
+                  <Badge variant="secondary" className="text-[10px] ml-1">{groupItems.length}</Badge>
+                </CollapsibleTrigger>
+                <CollapsibleContent className="mt-2 space-y-3">
+                  {groupItems.map((idea: any) => (
+                    <IdeaCard key={idea.id} idea={idea} onClick={() => setSelectedIdea(idea)} />
+                  ))}
+                </CollapsibleContent>
+              </Collapsible>
             );
           })}
         </div>

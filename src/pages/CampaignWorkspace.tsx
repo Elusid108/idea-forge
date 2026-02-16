@@ -31,6 +31,7 @@ import ReactMarkdown from "react-markdown";
 import { markdownComponents } from "@/lib/markdownComponents";
 import { format } from "date-fns";
 import { useActionUndo } from "@/hooks/useActionUndo";
+import TaskCommentButton from "@/components/TaskCommentButton";
 
 const STATUS_OPTIONS = ["foundation_ip", "infrastructure_production", "asset_creation_prelaunch", "active_campaign", "operations_fulfillment"];
 const STATUS_LABELS: Record<string, string> = {
@@ -762,6 +763,7 @@ export default function CampaignWorkspace() {
                         <p className={`text-xs font-medium ${task.completed ? "line-through text-muted-foreground" : ""}`}>{task.title}</p>
                         {task.description && <p className="text-[10px] text-muted-foreground mt-0.5 line-clamp-2">{task.description}</p>}
                       </div>
+                      <TaskCommentButton taskId={task.id} taskType="campaign" />
                     </div>
                   ))}
                 </div>
