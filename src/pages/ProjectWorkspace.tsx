@@ -39,7 +39,7 @@ import { encodeWidgetData, parseWidgetData, WIDGET_TEMPLATES } from "@/lib/widge
 
 type RefType = "link" | "image" | "video" | "note" | "file" | "widget";
 type SortMode = "az" | "za" | "newest" | "oldest";
-type ChatMsg = { role: "user" | "assistant"; content: string; noteId?: string; noteTitle?: string; widgetId?: string; widgetTitle?: string };
+type ChatMsg = { role: "user" | "assistant"; content: string; noteId?: string; noteTitle?: string; widgetId?: string; widgetTitle?: string; linkId?: string; linkTitle?: string };
 
 const EDIT_TITLES: Record<string, string> = { note: "Edit Note", link: "Edit Link", image: "Edit Image", video: "Edit Video", file: "Edit File", widget: "Edit Widget" };
 
@@ -808,6 +808,8 @@ export default function ProjectWorkspace() {
       let createdNoteTitle: string | null = null;
       let createdWidgetId: string | null = null;
       let createdWidgetTitle: string | null = null;
+      let createdLinkId: string | null = null;
+      let createdLinkTitle: string | null = null;
       if (data.actions && data.actions.length > 0 && !skipActions) {
         // Separate parent tasks and subtasks for two-pass insertion
         const taskActions = data.actions.filter((a: any) => a.action === "add_task");
@@ -914,6 +916,20 @@ export default function ProjectWorkspace() {
               queryClient.invalidateQueries({ queryKey: ["project-refs", id] });
               toast.success(`Widget updated: ${action.new_title || action.title}`);
             }
+          } else if (action.action === "create_link" && action.title && action.url) {
+            const { data: linkData } = await supabase.from("project_references").insert({
+              project_id: id!,
+              user_id: user!.id,
+              type: "link",
+              title: action.title,
+              url: action.url.match(/^https?:\/\//) ? action.url : `https://${action.url}`,
+              description: action.description || "",
+              sort_order: references.length,
+            }).select("id").single();
+            createdLinkId = linkData?.id || null;
+            createdLinkTitle = action.title;
+            queryClient.invalidateQueries({ queryKey: ["project-refs", id] });
+            toast.success(`Link added: ${action.title}`);
           }
         }
       }
@@ -923,6 +939,7 @@ export default function ProjectWorkspace() {
         content: data.message || "Done.",
         ...(createdNoteId ? { noteId: createdNoteId, noteTitle: createdNoteTitle! } : {}),
         ...(createdWidgetId ? { widgetId: createdWidgetId, widgetTitle: createdWidgetTitle! } : {}),
+        ...(createdLinkId ? { linkId: createdLinkId, linkTitle: createdLinkTitle! } : {}),
       };
       setChatHistory([...newHistory, assistantMsg]);
     } catch (e: any) {
@@ -1301,65 +1318,6 @@ export default function ProjectWorkspace() {
           </div>
 
           {/* Resources moved to right column */}
-
-          {/* Expenses */}
-          <div className="space-y-3">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <DollarSign className="h-4 w-4 text-primary" />
-                <h2 className="text-lg font-semibold">Expenses</h2>
-                <Badge variant="secondary" className="text-[10px]">${totalExpenses.toFixed(2)}</Badge>
-              </div>
-              {!isLocked && (
-                <Button variant="outline" size="sm" className="gap-1 h-8" onClick={() => { setEditingExpense(null); setExpenseForm({ title: "", description: "", amount: "", category: "General", date: format(new Date(), "yyyy-MM-dd"), vendor: "" }); setShowExpenseDialog(true); }}>
-                  <Plus className="h-3 w-3" /> Add Expense
-                </Button>
-              )}
-            </div>
-
-            {expenses.length === 0 ? (
-              <div className="flex flex-col items-center justify-center rounded-xl border border-dashed border-border py-8">
-                <DollarSign className="mb-2 h-6 w-6 text-muted-foreground/50" />
-                <p className="text-sm text-muted-foreground">No expenses tracked</p>
-              </div>
-            ) : (
-              <div className="space-y-1.5">
-                {expenses.map((expense: any) => (
-                  <div key={expense.id} className="flex items-center gap-3 p-2.5 rounded-lg border border-border/50 bg-card/50 transition-colors hover:border-primary/20">
-                    {expense.receipt_url && (
-                      <a href={expense.receipt_url} target="_blank" rel="noopener noreferrer" onClick={(e) => e.stopPropagation()}>
-                        <Receipt className="h-4 w-4 text-muted-foreground hover:text-primary shrink-0" />
-                      </a>
-                    )}
-                    <div className="flex-1 min-w-0">
-                      <p className="text-sm font-medium">{expense.title}</p>
-                      {expense.vendor && <p className="text-xs text-muted-foreground">{(expense as any).vendor}</p>}
-                      {expense.description && <p className="text-xs text-muted-foreground line-clamp-1">{expense.description}</p>}
-                    </div>
-                    <Badge variant="secondary" className="text-[10px]">{expense.category}</Badge>
-                    <span className="text-sm font-semibold tabular-nums">${Number(expense.amount).toFixed(2)}</span>
-                    {expense.date && (
-                      <span className="text-[10px] text-muted-foreground">{format(new Date(expense.date), "MMM d")}</span>
-                    )}
-                    {!isLocked && (
-                      <div className="flex items-center gap-0.5 shrink-0">
-                        <Button variant="ghost" size="icon" className="h-6 w-6 text-muted-foreground hover:text-primary" onClick={() => {
-                          setEditingExpense(expense);
-                          setExpenseForm({ title: expense.title, description: expense.description || "", amount: String(expense.amount), category: expense.category || "General", date: expense.date || "", vendor: (expense as any).vendor || "" });
-                          setShowExpenseDialog(true);
-                        }}>
-                          <Pencil className="h-3 w-3" />
-                        </Button>
-                        <Button variant="ghost" size="icon" className="h-6 w-6 text-muted-foreground hover:text-destructive" onClick={() => deleteExpense.mutate(expense.id)}>
-                          <X className="h-3 w-3" />
-                        </Button>
-                      </div>
-                    )}
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
         </div>
 
         {/* Right column */}
@@ -1647,6 +1605,65 @@ export default function ProjectWorkspace() {
                     </Collapsible>
                   );
                 })}
+              </div>
+            )}
+          </div>
+
+          {/* Expenses */}
+          <div className="space-y-3">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <DollarSign className="h-4 w-4 text-primary" />
+                <h2 className="text-lg font-semibold">Expenses</h2>
+                <Badge variant="secondary" className="text-[10px]">${totalExpenses.toFixed(2)}</Badge>
+              </div>
+              {!isLocked && (
+                <Button variant="outline" size="sm" className="gap-1 h-8" onClick={() => { setEditingExpense(null); setExpenseForm({ title: "", description: "", amount: "", category: "General", date: format(new Date(), "yyyy-MM-dd"), vendor: "" }); setShowExpenseDialog(true); }}>
+                  <Plus className="h-3 w-3" /> Add Expense
+                </Button>
+              )}
+            </div>
+
+            {expenses.length === 0 ? (
+              <div className="flex flex-col items-center justify-center rounded-xl border border-dashed border-border py-8">
+                <DollarSign className="mb-2 h-6 w-6 text-muted-foreground/50" />
+                <p className="text-sm text-muted-foreground">No expenses tracked</p>
+              </div>
+            ) : (
+              <div className="space-y-1.5">
+                {expenses.map((expense: any) => (
+                  <div key={expense.id} className="flex items-center gap-3 p-2.5 rounded-lg border border-border/50 bg-card/50 transition-colors hover:border-primary/20">
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-medium">{expense.title}</p>
+                      {expense.vendor && <p className="text-xs text-muted-foreground">{(expense as any).vendor}</p>}
+                      {expense.description && <p className="text-xs text-muted-foreground line-clamp-1">{expense.description}</p>}
+                    </div>
+                    {expense.receipt_url && (
+                      <a href={expense.receipt_url} target="_blank" rel="noopener noreferrer" onClick={(e) => e.stopPropagation()}>
+                        <Receipt className="h-4 w-4 text-muted-foreground hover:text-primary shrink-0" />
+                      </a>
+                    )}
+                    <Badge variant="secondary" className="text-[10px]">{expense.category}</Badge>
+                    <span className="text-sm font-semibold tabular-nums">${Number(expense.amount).toFixed(2)}</span>
+                    {expense.date && (
+                      <span className="text-[10px] text-muted-foreground">{format(new Date(expense.date), "MMM d")}</span>
+                    )}
+                    {!isLocked && (
+                      <div className="flex items-center gap-0.5 shrink-0">
+                        <Button variant="ghost" size="icon" className="h-6 w-6 text-muted-foreground hover:text-primary" onClick={() => {
+                          setEditingExpense(expense);
+                          setExpenseForm({ title: expense.title, description: expense.description || "", amount: String(expense.amount), category: expense.category || "General", date: expense.date || "", vendor: (expense as any).vendor || "" });
+                          setShowExpenseDialog(true);
+                        }}>
+                          <Pencil className="h-3 w-3" />
+                        </Button>
+                        <Button variant="ghost" size="icon" className="h-6 w-6 text-muted-foreground hover:text-destructive" onClick={() => deleteExpense.mutate(expense.id)}>
+                          <X className="h-3 w-3" />
+                        </Button>
+                      </div>
+                    )}
+                  </div>
+                ))}
               </div>
             )}
           </div>
@@ -2300,6 +2317,18 @@ export default function ProjectWorkspace() {
                     >
                       <Code className="h-3 w-3" />
                       View: {msg.widgetTitle}
+                    </button>
+                  )}
+                  {msg.linkId && (
+                    <button
+                      className="mt-2 ml-1 inline-flex items-center gap-1.5 text-xs px-2.5 py-1 rounded-full bg-blue-500/20 text-blue-400 border border-blue-500/30 hover:bg-blue-500/30 transition-colors"
+                      onClick={() => {
+                        const link = references.find((r: any) => r.id === msg.linkId);
+                        if (link) setViewingRef(link);
+                      }}
+                    >
+                      <LinkIcon className="h-3 w-3" />
+                      View: {msg.linkTitle}
                     </button>
                   )}
                 </div>

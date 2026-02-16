@@ -33,7 +33,7 @@ serve(async (req) => {
 
 When the user asks for resources, research, book recommendations, or notes, FIRST ask them how extensive they want the list to be (e.g., "Would you like a quick list of 3-5 top resources, or a comprehensive list of 15-30?"). Only generate after they specify.
 
-You can use the update_description tool to refine or rewrite the compiled description when the user asks. You can use the update_bullets tool to refine or add to the bullet breakdown. You can use the create_note tool to compile research, book lists, resource lists, etc.`
+You can use the update_description tool to refine or rewrite the compiled description when the user asks. You can use the update_bullets tool to refine or add to the bullet breakdown. You can use the create_note tool to compile research, book lists, resource lists, etc. You can use the create_link tool when recommending websites, tools, or external resources — always provide the full URL.`
         : `You can answer questions about this brainstorm's content and help explore ideas. Format your responses using markdown for readability (use bold, lists, headers as appropriate).`;
 
       const systemPrompt = `You are a helpful brainstorm assistant. ${capabilitiesText}
@@ -48,7 +48,6 @@ Brainstorm content:
 - Raw idea dump: ${ctx.idea_raw || "N/A"}
 - AI-processed summary: ${ctx.idea_summary || "N/A"}`;
 
-      // Build tools conditionally based on lock state
       const tools: any[] = [];
       if (isActive) {
         tools.push(
@@ -92,6 +91,22 @@ Brainstorm content:
                   bullets: { type: "string", description: "The updated bullet breakdown in markdown list format." },
                 },
                 required: ["bullets"],
+              },
+            },
+          },
+          {
+            type: "function",
+            function: {
+              name: "create_link",
+              description: "Create a link resource/reference. Use this when recommending websites, tools, retailers, or any external URL. Always provide the full URL starting with https://.",
+              parameters: {
+                type: "object",
+                properties: {
+                  title: { type: "string", description: "Link title" },
+                  url: { type: "string", description: "Full URL starting with https://" },
+                  description: { type: "string", description: "Brief description of the link" },
+                },
+                required: ["title", "url"],
               },
             },
           }

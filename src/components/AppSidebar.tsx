@@ -107,7 +107,7 @@ export function AppSidebar() {
           <IdeaForgeLogo className="h-5 w-5 text-primary" />
         </div>
         <span className="font-semibold text-sidebar-foreground">IdeaForge.AI</span>
-        <span className="text-[10px] text-muted-foreground font-medium bg-muted px-1.5 py-0.5 rounded">v0.4</span>
+        <span className="text-[10px] text-muted-foreground font-medium bg-muted px-1.5 py-0.5 rounded">v0.5</span>
       </div>
 
       <SidebarContent className="px-2 py-3">

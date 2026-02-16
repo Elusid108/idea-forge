@@ -88,8 +88,23 @@ const tools = [
       },
     },
   },
+  {
+    type: "function",
+    function: {
+      name: "create_link",
+      description: "Create a link resource/reference. Use this when recommending websites, tools, retailers, or any external URL. Always provide the full URL starting with https://.",
+      parameters: {
+        type: "object",
+        properties: {
+          title: { type: "string", description: "Link title" },
+          url: { type: "string", description: "Full URL starting with https://" },
+          description: { type: "string", description: "Brief description of the link" },
+        },
+        required: ["title", "url"],
+      },
+    },
+  },
 ];
-
 serve(async (req) => {
   if (req.method === 'OPTIONS') {
     return new Response(null, { headers: corsHeaders });
@@ -147,6 +162,7 @@ GUIDELINES:
 - Use the update_strategy tool when the user wants to modify the execution plan.
 - Use the create_widget tool to build mini web apps (calculators, converters, trackers, dashboards, etc.) that run as interactive HTML widgets.
 - Use the update_widget tool to modify existing widgets by title.
+- Use the create_link tool when recommending websites, tools, or external resources. Always provide the full URL starting with https://.
 - Always respond with helpful context even when using tools.`;
     const apiKey = Deno.env.get("LOVABLE_API_KEY");
     const response = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {

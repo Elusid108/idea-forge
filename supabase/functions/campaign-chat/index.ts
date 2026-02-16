@@ -109,6 +109,22 @@ Project/Product Context:
             },
           },
         },
+        {
+          type: "function",
+          function: {
+            name: "create_link",
+            description: "Create a link resource/reference. Use this when recommending websites, tools, retailers, or any external URL. Always provide the full URL starting with https://.",
+            parameters: {
+              type: "object",
+              properties: {
+                title: { type: "string", description: "Link title" },
+                url: { type: "string", description: "Full URL starting with https://" },
+                description: { type: "string", description: "Brief description of the link" },
+              },
+              required: ["title", "url"],
+            },
+          },
+        },
       ];
 
       const systemPrompt = `You are a Campaign Assistant for a Go-To-Market strategy. You help the user understand their campaign, suggest improvements, and answer questions about launching their product.
@@ -131,6 +147,7 @@ YOUR CAPABILITIES:
 - Add tasks to any of the 5 pipeline phases (Foundation & IP, Infrastructure & Production, Asset Creation & Pre-Launch, Active Campaign, Operations & Fulfillment)
 - Create widgets — mini web apps (calculators, converters, trackers, dashboards, etc.)
 - Update existing widgets by title
+- Create link resources when recommending websites, tools, or external resources. Always provide the full URL.
 
 GUIDELINES:
 - Be conversational, helpful, and specific. Reference the user's actual campaign data when answering.

@@ -4,7 +4,7 @@ import {
   ArrowLeft, Trash2, Plus, X, Pencil, Rocket,
   Wrench, Brain, Lightbulb, Bot, Send, Loader2, CheckCircle2, Sparkles,
   Check, Link as LinkIcon, Image, Film, StickyNote, FileText, Code,
-  Grid3X3, List, ChevronDown, ChevronRight, ArrowUpDown,
+  Grid3X3, List, ChevronDown, ChevronRight, ArrowUpDown, DollarSign, Calendar, Receipt, Upload,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -34,6 +34,7 @@ import { useActionUndo } from "@/hooks/useActionUndo";
 import TaskCommentButton from "@/components/TaskCommentButton";
 import TaskCommentsSection from "@/components/TaskCommentsSection";
 import { encodeWidgetData, parseWidgetData, WIDGET_TEMPLATES } from "@/lib/widgetUtils";
+const EXPENSE_CATEGORIES = ["General", "Materials", "Software", "Hardware", "Services", "Shipping", "Other"];
 const STATUS_OPTIONS = ["foundation_ip", "infrastructure_production", "asset_creation_prelaunch", "active_campaign", "operations_fulfillment"];
 const STATUS_LABELS: Record<string, string> = {
   foundation_ip: "Foundation & IP",
@@ -62,7 +63,7 @@ const KANBAN_COLUMNS = [
   { key: "operations_fulfillment", label: "Operations & Fulfillment" },
 ];
 
-type ChatMsg = { role: "user" | "assistant"; content: string; noteId?: string; noteTitle?: string; widgetId?: string; widgetTitle?: string };
+type ChatMsg = { role: "user" | "assistant"; content: string; noteId?: string; noteTitle?: string; widgetId?: string; widgetTitle?: string; linkId?: string; linkTitle?: string };
 
 const EDIT_TITLES: Record<string, string> = { note: "Edit Note", link: "Edit Link", image: "Edit Image", video: "Edit Video", file: "Edit File", widget: "Edit Widget" };
 type RefType = "link" | "image" | "video" | "note" | "file" | "widget";
@@ -122,6 +123,12 @@ export default function CampaignWorkspace() {
       return saved ? new Set(JSON.parse(saved)) : new Set();
     } catch { return new Set(); }
   });
+
+  // Expense states
+  const [showExpenseDialog, setShowExpenseDialog] = useState(false);
+  const [editingExpense, setEditingExpense] = useState<any>(null);
+  const [expenseForm, setExpenseForm] = useState({ title: "", description: "", amount: "", category: "General", date: format(new Date(), "yyyy-MM-dd"), vendor: "" });
+  const [receiptFile, setReceiptFile] = useState<File | null>(null);
 
   // Campaign Assistant state
   const [chatHistory, setChatHistory] = useState<ChatMsg[]>([
@@ -195,6 +202,68 @@ export default function CampaignWorkspace() {
     },
     enabled: !!id,
   });
+
+  // Expenses query
+  const { data: campaignExpenses = [] } = useQuery({
+    queryKey: ["campaign-expenses", id],
+    queryFn: async () => {
+      const { data, error } = await supabase.from("campaign_expenses" as any).select("*").eq("campaign_id", id!).order("date", { ascending: false });
+      if (error) throw error;
+      return data as any[];
+    },
+    enabled: !!id,
+  });
+
+  const totalExpenses = useMemo(() => campaignExpenses.reduce((sum: number, e: any) => sum + Number(e.amount || 0), 0), [campaignExpenses]);
+
+  const addExpense = useMutation({
+    mutationFn: async (fields: any) => {
+      const { error } = await supabase.from("campaign_expenses" as any).insert({ campaign_id: id!, user_id: user!.id, ...fields });
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["campaign-expenses", id] });
+      setShowExpenseDialog(false);
+      setExpenseForm({ title: "", description: "", amount: "", category: "General", date: format(new Date(), "yyyy-MM-dd"), vendor: "" });
+      setReceiptFile(null);
+    },
+  });
+
+  const updateExpense = useMutation({
+    mutationFn: async ({ expenseId, fields }: { expenseId: string; fields: Record<string, any> }) => {
+      const { error } = await supabase.from("campaign_expenses" as any).update(fields).eq("id", expenseId);
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["campaign-expenses", id] });
+      setEditingExpense(null);
+      setExpenseForm({ title: "", description: "", amount: "", category: "General", date: format(new Date(), "yyyy-MM-dd"), vendor: "" });
+    },
+  });
+
+  const deleteExpense = useMutation({
+    mutationFn: async (expenseId: string) => {
+      const { error } = await supabase.from("campaign_expenses" as any).delete().eq("id", expenseId);
+      if (error) throw error;
+    },
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["campaign-expenses", id] }),
+  });
+
+  const handleAddExpense = async () => {
+    let receiptUrl = "";
+    if (receiptFile) {
+      const path = `${user!.id}/${id}/receipts/${Date.now()}-${receiptFile.name}`;
+      const { error: uploadError } = await supabase.storage.from("project-assets").upload(path, receiptFile);
+      if (uploadError) { toast.error("Upload failed: " + uploadError.message); return; }
+      const { data: urlData } = supabase.storage.from("project-assets").getPublicUrl(path);
+      receiptUrl = urlData.publicUrl;
+    }
+    addExpense.mutate({
+      title: expenseForm.title, description: expenseForm.description,
+      amount: parseFloat(expenseForm.amount) || 0, category: expenseForm.category,
+      date: expenseForm.date || undefined, receipt_url: receiptUrl, vendor: expenseForm.vendor,
+    });
+  };
 
   // =================== EFFECTS ===================
   useEffect(() => {
@@ -554,6 +623,8 @@ export default function CampaignWorkspace() {
       let createdNoteTitle: string | null = null;
       let createdWidgetId: string | null = null;
       let createdWidgetTitle: string | null = null;
+      let createdLinkId: string | null = null;
+      let createdLinkTitle: string | null = null;
       if (data.actions && data.actions.length > 0) {
         for (const action of data.actions) {
           if (action.action === "create_note" && action.title) {
@@ -596,6 +667,16 @@ export default function CampaignWorkspace() {
               queryClient.invalidateQueries({ queryKey: ["campaign-refs", id] });
               toast.success(`Widget updated: ${action.new_title || action.title}`);
             }
+          } else if (action.action === "create_link" && action.title && action.url) {
+            const { data: linkData } = await supabase.from("campaign_references" as any).insert({
+              campaign_id: id!, user_id: user!.id, type: "link",
+              title: action.title, url: action.url.match(/^https?:\/\//) ? action.url : `https://${action.url}`,
+              description: action.description || "", sort_order: campaignRefs.length,
+            }).select("id").single();
+            createdLinkId = (linkData as any)?.id || null;
+            createdLinkTitle = action.title;
+            queryClient.invalidateQueries({ queryKey: ["campaign-refs", id] });
+            toast.success(`Link added: ${action.title}`);
           }
         }
       }
@@ -605,6 +686,7 @@ export default function CampaignWorkspace() {
         content: data.message || "Done.",
         ...(createdNoteId ? { noteId: createdNoteId, noteTitle: createdNoteTitle! } : {}),
         ...(createdWidgetId ? { widgetId: createdWidgetId, widgetTitle: createdWidgetTitle! } : {}),
+        ...(createdLinkId ? { linkId: createdLinkId, linkTitle: createdLinkTitle! } : {}),
       };
       setChatHistory([...newHistory, assistantMsg]);
     } catch (e: any) {
@@ -964,6 +1046,61 @@ export default function CampaignWorkspace() {
               </div>
             )}
           </div>
+
+          {/* Expenses */}
+          <div className="space-y-4">
+            <div className="flex items-center justify-between flex-wrap gap-2">
+              <div className="flex items-center gap-2">
+                <DollarSign className="h-4 w-4 text-primary" />
+                <h2 className="text-lg font-semibold">Expenses</h2>
+                <Badge variant="secondary" className="text-[10px]">${totalExpenses.toFixed(2)}</Badge>
+              </div>
+              <Button variant="outline" size="sm" className="gap-1 h-8" onClick={() => { setEditingExpense(null); setExpenseForm({ title: "", description: "", amount: "", category: "General", date: format(new Date(), "yyyy-MM-dd"), vendor: "" }); setShowExpenseDialog(true); }}>
+                <Plus className="h-3 w-3" /> Add
+              </Button>
+            </div>
+
+            {campaignExpenses.length === 0 ? (
+              <div className="flex flex-col items-center justify-center rounded-xl border border-dashed border-border py-12">
+                <DollarSign className="mb-3 h-8 w-8 text-muted-foreground/50" />
+                <p className="text-sm text-muted-foreground">No expenses tracked</p>
+              </div>
+            ) : (
+              <div className="space-y-2">
+                {campaignExpenses.map((expense: any) => (
+                  <div key={expense.id} className="flex items-center gap-3 p-2.5 rounded-lg border border-border/50 bg-card/50 transition-colors hover:border-primary/20">
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-medium">{expense.title}</p>
+                      {expense.vendor && <p className="text-xs text-muted-foreground">{(expense as any).vendor}</p>}
+                      {expense.description && <p className="text-xs text-muted-foreground line-clamp-1">{expense.description}</p>}
+                    </div>
+                    {expense.receipt_url && (
+                      <a href={expense.receipt_url} target="_blank" rel="noopener noreferrer" onClick={(e) => e.stopPropagation()}>
+                        <Receipt className="h-4 w-4 text-muted-foreground hover:text-primary shrink-0" />
+                      </a>
+                    )}
+                    <Badge variant="secondary" className="text-[10px]">{expense.category}</Badge>
+                    <span className="text-sm font-semibold tabular-nums">${Number(expense.amount).toFixed(2)}</span>
+                    {expense.date && (
+                      <span className="text-[10px] text-muted-foreground">{format(new Date(expense.date), "MMM d")}</span>
+                    )}
+                    <div className="flex items-center gap-0.5 shrink-0">
+                      <Button variant="ghost" size="icon" className="h-6 w-6 text-muted-foreground hover:text-primary" onClick={() => {
+                        setEditingExpense(expense);
+                        setExpenseForm({ title: expense.title, description: expense.description || "", amount: String(expense.amount), category: expense.category || "General", date: expense.date || "", vendor: (expense as any).vendor || "" });
+                        setShowExpenseDialog(true);
+                      }}>
+                        <Pencil className="h-3 w-3" />
+                      </Button>
+                      <Button variant="ghost" size="icon" className="h-6 w-6 text-muted-foreground hover:text-destructive" onClick={() => deleteExpense.mutate(expense.id)}>
+                        <X className="h-3 w-3" />
+                      </Button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
         </div>
       </div>
 
@@ -1121,6 +1258,63 @@ export default function CampaignWorkspace() {
         </DialogContent>
       </Dialog>
 
+      {/* Expense Dialog */}
+      <Dialog open={showExpenseDialog} onOpenChange={(open) => { if (!open) { setShowExpenseDialog(false); setEditingExpense(null); setReceiptFile(null); } }}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>{editingExpense ? "Edit Expense" : "Add Expense"}</DialogTitle>
+            <DialogDescription className="sr-only">{editingExpense ? "Edit expense details" : "Track a new expense"}</DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3">
+            <Input placeholder="Expense title" value={expenseForm.title} onChange={(e) => setExpenseForm(p => ({ ...p, title: e.target.value }))} />
+            <Input placeholder="Vendor (optional)" value={expenseForm.vendor} onChange={(e) => setExpenseForm(p => ({ ...p, vendor: e.target.value }))} />
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="text-xs text-muted-foreground mb-1 block">Amount ($)</label>
+                <Input type="number" step="0.01" placeholder="0.00" value={expenseForm.amount} onChange={(e) => setExpenseForm(p => ({ ...p, amount: e.target.value }))} className="h-8 text-xs" />
+              </div>
+              <div>
+                <label className="text-xs text-muted-foreground mb-1 block">Category</label>
+                <Select value={expenseForm.category} onValueChange={(val) => setExpenseForm(p => ({ ...p, category: val }))}>
+                  <SelectTrigger className="h-8 text-xs"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    {EXPENSE_CATEGORIES.map(c => (
+                      <SelectItem key={c} value={c}>{c}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+            <div>
+              <label className="text-xs text-muted-foreground mb-1 block">Date</label>
+              <Input type="date" value={expenseForm.date} onChange={(e) => setExpenseForm(p => ({ ...p, date: e.target.value }))} className="h-8 text-xs" />
+            </div>
+            <Textarea placeholder="Description (optional)" value={expenseForm.description} onChange={(e) => setExpenseForm(p => ({ ...p, description: e.target.value }))} className="resize-none min-h-[60px]" />
+            {!editingExpense && (
+              <div>
+                <label className="text-xs text-muted-foreground mb-1 block">Receipt (image/PDF)</label>
+                <Input type="file" accept="image/*,.pdf" onChange={(e) => setReceiptFile(e.target.files?.[0] || null)} />
+              </div>
+            )}
+          </div>
+          <DialogFooter>
+            <Button variant="ghost" onClick={() => setShowExpenseDialog(false)}>Cancel</Button>
+            <Button
+              onClick={() => {
+                if (editingExpense) {
+                  updateExpense.mutate({ expenseId: editingExpense.id, fields: { title: expenseForm.title, description: expenseForm.description, amount: parseFloat(expenseForm.amount) || 0, category: expenseForm.category, date: expenseForm.date || null, vendor: expenseForm.vendor } });
+                } else {
+                  handleAddExpense();
+                }
+              }}
+              disabled={!expenseForm.title.trim() || !expenseForm.amount}
+            >
+              {editingExpense ? "Save Changes" : "Add Expense"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
       {/* Reference Viewer */}
       <ReferenceViewer reference={viewingRef} open={!!viewingRef} onOpenChange={(open) => { if (!open) setViewingRef(null); }} />
 
@@ -1190,6 +1384,21 @@ export default function CampaignWorkspace() {
                     >
                       <Code className="h-3 w-3" />
                       View: {msg.widgetTitle}
+                    </button>
+                  )}
+                  {msg.linkId && (
+                    <button
+                      className="mt-2 ml-1 inline-flex items-center gap-1.5 text-xs px-2.5 py-1 rounded-full bg-blue-500/20 text-blue-400 border border-blue-500/30 hover:bg-blue-500/30 transition-colors"
+                      onClick={() => {
+                        const link = campaignRefs.find((r: any) => r.id === msg.linkId);
+                        if (link) {
+                          const url = link.url?.match(/^https?:\/\//) ? link.url : `https://${link.url}`;
+                          window.open(url, "_blank", "noopener,noreferrer");
+                        }
+                      }}
+                    >
+                      <LinkIcon className="h-3 w-3" />
+                      View: {msg.linkTitle}
                     </button>
                   )}
                 </div>

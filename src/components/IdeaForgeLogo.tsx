@@ -25,13 +25,15 @@ export default function IdeaForgeLogo({ className = "h-6 w-6" }: { className?: s
         strokeWidth="1.2"
         strokeLinecap="round"
       />
-      {/* Anvil */}
-      <rect x="16" y="38" width="32" height="6" rx="1.5" fill="currentColor" opacity="0.7" />
-      <rect x="20" y="44" width="24" height="4" rx="1" fill="currentColor" opacity="0.5" />
-      <rect x="24" y="48" width="16" height="8" rx="1" fill="currentColor" opacity="0.6" />
-      {/* Mallet */}
-      <rect x="44" y="4" width="6" height="14" rx="2" fill="currentColor" opacity="0.65" transform="rotate(25, 47, 11)" />
-      <rect x="45" y="16" width="2" height="12" rx="1" fill="currentColor" opacity="0.45" transform="rotate(25, 46, 22)" />
+      {/* Lightning bolt cutting diagonally across */}
+      <path
+        d="M36 6 L28 28 L34 28 L26 52 L44 24 L36 24 Z"
+        fill="currentColor"
+        opacity="0.95"
+        stroke="var(--background, #1a1a2e)"
+        strokeWidth="1.5"
+        strokeLinejoin="round"
+      />
     </svg>
   );
 }
