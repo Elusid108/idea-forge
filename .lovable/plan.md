@@ -1,93 +1,163 @@
 
-# Widget Discovery, Task Dialog Spacing, Calculator Keyboard, and Version Bump
 
-## 1. Pass Widget Context to AI Assistants
+# Logo Update, Expenses Reorganization, Campaign Expenses, and AI Link Creation
 
-The AI cannot find existing widgets because widget data is not included in the context sent to the edge functions. Both workspaces only send notes to the AI context.
+## 1. Update IdeaForge Logo: Brain with Lightning Bolt
 
-**Files: `ProjectWorkspace.tsx`, `CampaignWorkspace.tsx`**
+**File: `src/components/IdeaForgeLogo.tsx`**
 
-- In `handleChatSubmit`, gather widgets alongside notes and pass them as a new `widgets` context field:
-  ```
-  const widgetsList = references
-    .filter(r => r.type === "widget")
-    .map(r => {
-      const wd = parseWidgetData(r.description);
-      return `${r.title}: ${wd.summary} [code length: ${wd.code.length} chars]`;
-    }).join("\n");
-  ```
-- Pass `widgets: widgetsList` in the context object sent to the edge function
+Replace the current brain+anvil+mallet SVG with a new design: a brain shape with a lightning bolt cutting across it diagonally. Remove the anvil and mallet elements entirely.
 
-**Files: `supabase/functions/project-chat/index.ts`, `supabase/functions/campaign-chat/index.ts`**
+- Keep the brain outline (top portion of the current SVG)
+- Remove the anvil rectangles (y=38-56) and mallet rectangles
+- Add a lightning bolt path cutting diagonally across the brain (a classic zigzag bolt shape)
+- Maintain `currentColor` fill and the `className` prop behavior
 
-- Add `Existing Widgets: ${context.widgets || "None"}` to the system prompt
-- Update `update_widget` tool description: change "Update an existing widget's code by its title" to "Update an existing widget by its title. You can update the code, summary, title, and/or instructions. Match the widget by its current title."
-- Add optional `new_title` parameter to `update_widget` so the AI can rename widgets
+## 2. Move Expenses from Left Column to Right Column (after Resources)
 
-## 2. Improve Task/Subtask Dialog Spacing
+**File: `src/pages/ProjectWorkspace.tsx`**
 
-The popup is visually cramped (as shown in the screenshot). Increase spacing between sections.
+- Remove the entire Expenses section (lines ~1305-1362) from the left column (after Gotchas)
+- Paste it into the right column, after the Resources `</div>` closing tag (after line ~1652)
+- The receipt icon positioning fix: move the receipt icon to appear **left of the category badge** instead of before the title. Reorder the expense row layout:
+  - Left: title/vendor/description block (flex-1)
+  - Then: receipt icon (if present) + category badge + amount + date + action buttons
 
-**Files: `ProjectWorkspace.tsx`, `CampaignWorkspace.tsx`**
+## 3. Add Independent Expenses Section to Campaign Workspace
 
-- Change the task detail dialog's inner container from `space-y-4` to `space-y-5`
-- Add `Separator` components between the badges, description, subtasks, comments, and timestamp sections
-- Add `pt-1` or small top padding to the created timestamp line for visual breathing room
+This requires a new database table for campaign expenses.
 
-## 3. Comments Scroll to Most Recent
+**Database Migration**: Create `campaign_expenses` table mirroring `project_expenses`:
+- `id` (uuid, PK, default gen_random_uuid())
+- `campaign_id` (uuid, NOT NULL)
+- `user_id` (uuid, NOT NULL)
+- `title` (text, NOT NULL, default '')
+- `description` (text, nullable, default '')
+- `amount` (numeric, NOT NULL, default 0)
+- `category` (text, nullable, default 'General')
+- `date` (date, nullable, default CURRENT_DATE)
+- `vendor` (text, nullable, default '')
+- `receipt_url` (text, nullable, default '')
+- `created_at` (timestamptz, NOT NULL, default now())
+- RLS policies: users can CRUD own rows (auth.uid() = user_id)
 
-Currently comments are ordered ascending (oldest first), so the most recent comment may be off-screen.
+**File: `src/pages/CampaignWorkspace.tsx`**
 
-**File: `TaskCommentsSection.tsx`**
+- Add expense state, queries, mutations mirroring ProjectWorkspace's expense logic but using `campaign_expenses` table and `campaign_id`
+- Add the Expenses section in the right column after Resources
+- Add the expense add/edit dialog (reuse the same form pattern)
+- Include receipt upload support using the existing `project-assets` storage bucket
 
-- Add a `useEffect` with a ref on the scrollable comment container that scrolls to the bottom whenever comments load or change:
-  ```tsx
-  const scrollRef = useRef<HTMLDivElement>(null);
-  useEffect(() => {
-    if (scrollRef.current) {
-      scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
-    }
-  }, [comments]);
-  ```
+## 4. AI Assistants Can Create Link Resources
 
-## 4. Calculator Keyboard Support
+**Files: `supabase/functions/project-chat/index.ts`, `supabase/functions/campaign-chat/index.ts`, `supabase/functions/brainstorm-chat/index.ts`**
 
-Add keyboard event listeners to the built-in calculator widget template so users can type numbers and operators.
-
-**File: `src/lib/widgetUtils.ts`**
-
-Update the calculator template code to add a `keydown` event listener:
-```javascript
-document.addEventListener('keydown', function(e) {
-  const key = e.key;
-  if ('0123456789.'.includes(key)) d(key);
-  else if (key === '+') d('+');
-  else if (key === '-') d('-');
-  else if (key === '*') d('*');
-  else if (key === '/') d('/');
-  else if (key === '(' || key === ')') d(key);
-  else if (key === 'Enter' || key === '=') eq();
-  else if (key === 'Backspace') del();
-  else if (key === 'Escape' || key === 'c' || key === 'C') c();
-});
+Add a new `create_link` tool to all three edge functions:
 ```
+{
+  name: "create_link",
+  description: "Create a link resource/reference. Use this when recommending websites, tools, retailers, or any external URL.",
+  parameters: {
+    title: { type: "string", description: "Link title" },
+    url: { type: "string", description: "Full URL starting with https://" },
+    description: { type: "string", description: "Brief description of the link" }
+  },
+  required: ["title", "url"]
+}
+```
+
+Update system prompts to mention:
+- "Use the create_link tool when recommending websites, tools, or external resources. Always provide the full URL."
+
+**Files: `src/pages/ProjectWorkspace.tsx`, `src/pages/CampaignWorkspace.tsx`, `src/pages/BrainstormWorkspace.tsx`**
+
+Add handler for `create_link` action in each workspace's chat submit function:
+```typescript
+if (action.action === "create_link" && action.title && action.url) {
+  await supabase.from("[table]_references").insert({
+    [entity]_id: id!, user_id: user!.id,
+    type: "link", title: action.title,
+    url: action.url, description: action.description || "",
+    sort_order: references.length,
+  });
+  queryClient.invalidateQueries({ queryKey: ["[entity]-refs", id] });
+  toast.success(`Link added: ${action.title}`);
+}
+```
+
+Also extend `ChatMsg` in BrainstormWorkspace to support `noteId`/`noteTitle` for note badges (currently it doesn't have those), and add `linkId`/`linkTitle` across all three workspaces for link badges in chat.
 
 ## 5. Version Bump
 
 **File: `src/components/AppSidebar.tsx`**
 
-- Change `v0.3` to `v0.4`
+- Change `v0.4` to `v0.5`
 
 ---
 
-## Files Changed Summary
+## Technical Details
+
+### Receipt Icon Repositioning
+
+Current order: `[receipt] [title block] [category badge] [amount] [date] [buttons]`
+
+New order: `[title block] [receipt] [category badge] [amount] [date] [buttons]`
+
+Move the receipt icon `<a>` element from before the title block to just before the category badge.
+
+### Campaign Expenses Table SQL
+
+```sql
+CREATE TABLE public.campaign_expenses (
+  id uuid NOT NULL DEFAULT gen_random_uuid() PRIMARY KEY,
+  campaign_id uuid NOT NULL,
+  user_id uuid NOT NULL,
+  title text NOT NULL DEFAULT '',
+  description text DEFAULT '',
+  amount numeric NOT NULL DEFAULT 0,
+  category text DEFAULT 'General',
+  date date DEFAULT CURRENT_DATE,
+  vendor text DEFAULT '',
+  receipt_url text DEFAULT '',
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+
+ALTER TABLE public.campaign_expenses ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "Users can view own campaign expenses" ON public.campaign_expenses FOR SELECT USING (auth.uid() = user_id);
+CREATE POLICY "Users can insert own campaign expenses" ON public.campaign_expenses FOR INSERT WITH CHECK (auth.uid() = user_id);
+CREATE POLICY "Users can update own campaign expenses" ON public.campaign_expenses FOR UPDATE USING (auth.uid() = user_id);
+CREATE POLICY "Users can delete own campaign expenses" ON public.campaign_expenses FOR DELETE USING (auth.uid() = user_id);
+```
+
+### Link Badge in Chat
+
+```tsx
+{msg.linkId && (
+  <button
+    className="mt-2 inline-flex items-center gap-1.5 text-xs px-2.5 py-1 rounded-full bg-blue-500/20 text-blue-400 border border-blue-500/30 hover:bg-blue-500/30 transition-colors"
+    onClick={() => {
+      const link = references.find((r: any) => r.id === msg.linkId);
+      if (link) setViewingRef(link);
+    }}
+  >
+    <LinkIcon className="h-3 w-3" />
+    View: {msg.linkTitle}
+  </button>
+)}
+```
+
+### Files Changed Summary
 
 | File | Changes |
 |---|---|
-| `src/pages/ProjectWorkspace.tsx` | Pass widgets context to AI, task dialog spacing |
-| `src/pages/CampaignWorkspace.tsx` | Pass widgets context to AI, task dialog spacing |
-| `src/components/TaskCommentsSection.tsx` | Auto-scroll to most recent comment |
-| `src/lib/widgetUtils.ts` | Add keyboard support to calculator template |
-| `src/components/AppSidebar.tsx` | Version bump to v0.4 |
-| `supabase/functions/project-chat/index.ts` | Add widgets to context, update tool descriptions |
-| `supabase/functions/campaign-chat/index.ts` | Add widgets to context, update tool descriptions |
+| `src/components/IdeaForgeLogo.tsx` | New brain+lightning bolt SVG |
+| `src/pages/ProjectWorkspace.tsx` | Move expenses to right column, receipt icon reposition, create_link handler, link badge in chat |
+| `src/pages/CampaignWorkspace.tsx` | Add expenses section, create_link handler, link badge in chat |
+| `src/pages/BrainstormWorkspace.tsx` | Add create_link handler, link badge in chat |
+| `src/components/AppSidebar.tsx` | Version bump to v0.5 |
+| `supabase/functions/project-chat/index.ts` | Add create_link tool |
+| `supabase/functions/campaign-chat/index.ts` | Add create_link tool |
+| `supabase/functions/brainstorm-chat/index.ts` | Add create_link tool |
+| Database migration | Create campaign_expenses table with RLS |
+
