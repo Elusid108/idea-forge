@@ -59,7 +59,7 @@ const KANBAN_COLUMNS = [
   { key: "operations_fulfillment", label: "Operations & Fulfillment" },
 ];
 
-type ChatMsg = { role: "user" | "assistant"; content: string };
+type ChatMsg = { role: "user" | "assistant"; content: string; noteId?: string; noteTitle?: string };
 type RefType = "link" | "image" | "video" | "note" | "file";
 type SortMode = "az" | "za" | "newest" | "oldest";
 
@@ -486,6 +486,7 @@ export default function CampaignWorkspace() {
     setIsChatThinking(true);
     try {
       const tasksList = campaignTasks.map((t: any) => `[${t.completed ? "✓" : " "}] ${t.title} (${STATUS_LABELS[t.status_column] || t.status_column})`).join("\n");
+      const notesList = campaignRefs.filter((r: any) => r.type === "note").map((r: any) => `${r.title}: ${stripHtml(r.description || "")}`).join("\n");
       const { data, error } = await supabase.functions.invoke("campaign-chat", {
         body: {
           mode: "assistant",
@@ -498,12 +499,45 @@ export default function CampaignWorkspace() {
             operations_plan: campaign?.operations_plan || "",
             playbook: campaign?.playbook || "",
             tasks: tasksList,
+            notes: notesList,
             status: campaign?.status || "",
           },
         },
       });
       if (error) throw error;
-      const assistantMsg: ChatMsg = { role: "assistant", content: data.message || "Done." };
+
+      // Process actions from tool calls
+      let createdNoteId: string | null = null;
+      let createdNoteTitle: string | null = null;
+      if (data.actions && data.actions.length > 0) {
+        for (const action of data.actions) {
+          if (action.action === "create_note" && action.title) {
+            const { data: noteData } = await supabase.from("campaign_references" as any).insert({
+              campaign_id: id!, user_id: user!.id, type: "note",
+              title: action.title, description: action.content || "",
+              sort_order: campaignRefs.length,
+            }).select("id").single();
+            createdNoteId = (noteData as any)?.id || null;
+            createdNoteTitle = action.title;
+            queryClient.invalidateQueries({ queryKey: ["campaign-refs", id] });
+            toast.success(`Note created: ${action.title}`);
+          } else if (action.action === "add_task" && action.title) {
+            await supabase.from("campaign_tasks" as any).insert({
+              campaign_id: id!, user_id: user!.id, title: action.title,
+              description: action.description || "", status_column: action.status_column || "foundation_ip",
+              sort_order: campaignTasks.filter((t: any) => t.status_column === (action.status_column || "foundation_ip")).length,
+            });
+            queryClient.invalidateQueries({ queryKey: ["campaign-tasks", id] });
+            toast.success(`Task added: ${action.title}`);
+          }
+        }
+      }
+
+      const assistantMsg: ChatMsg = {
+        role: "assistant",
+        content: data.message || "Done.",
+        ...(createdNoteId ? { noteId: createdNoteId, noteTitle: createdNoteTitle! } : {}),
+      };
       setChatHistory([...newHistory, assistantMsg]);
     } catch (e: any) {
       toast.error("Chat failed: " + e.message);
@@ -1020,9 +1054,25 @@ export default function CampaignWorkspace() {
               </div>
             )}
             <div className={`rounded-lg px-3 py-2 text-sm max-w-[85%] ${msg.role === "user" ? "bg-primary text-primary-foreground" : "bg-muted/50"}`}>
-              <div className="prose prose-invert prose-sm max-w-none [&_ul]:list-disc [&_ol]:list-decimal [&_ul]:pl-5 [&_ol]:pl-5 [&_li]:my-0.5 [&_p]:my-1.5">
-                <ReactMarkdown components={markdownComponents}>{msg.content}</ReactMarkdown>
-              </div>
+              {msg.role === "assistant" ? (
+                <div>
+                  <div className="prose prose-invert prose-sm max-w-none [&_ul]:list-disc [&_ol]:list-decimal [&_ul]:pl-5 [&_ol]:pl-5 [&_li]:my-0.5 [&_p]:my-1.5">
+                    <ReactMarkdown components={markdownComponents}>{msg.content}</ReactMarkdown>
+                  </div>
+                  {msg.noteId && (
+                    <button
+                      className="mt-2 inline-flex items-center gap-1.5 text-xs px-2.5 py-1 rounded-full bg-yellow-500/20 text-yellow-400 border border-yellow-500/30 hover:bg-yellow-500/30 transition-colors"
+                      onClick={() => {
+                        const note = campaignRefs.find((r: any) => r.id === msg.noteId);
+                        if (note) setViewingRef(note);
+                      }}
+                    >
+                      <StickyNote className="h-3 w-3" />
+                      View: {msg.noteTitle}
+                    </button>
+                  )}
+                </div>
+              ) : msg.content}
             </div>
           </div>
         )}
