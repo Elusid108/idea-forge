@@ -426,13 +426,56 @@ export default function ProjectWorkspace() {
 
   const toggleTaskComplete = useMutation({
     mutationFn: async ({ taskId, completed }: { taskId: string; completed: boolean }) => {
+      // Update the target task
       const { error } = await supabase.from("project_tasks").update({ completed }).eq("id", taskId);
       if (error) throw error;
+      // Cascade to all subtasks
+      const subtaskIds = (tasks || [])
+        .filter((t: any) => t.parent_task_id === taskId)
+        .map((t: any) => t.id);
+      if (subtaskIds.length > 0) {
+        const { error: subError } = await supabase.from("project_tasks")
+          .update({ completed })
+          .in("id", subtaskIds);
+        if (subError) throw subError;
+      }
     },
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["project-tasks", id] }),
   });
 
-  // Expense mutations
+  // Helper to toggle task with undo/redo support and cascade
+  const handleToggleTask = (task: any, newCompleted: boolean) => {
+    const subtasks = (tasks || []).filter((t: any) => t.parent_task_id === task.id);
+    // Save previous states for undo
+    const prevStates = [
+      { id: task.id, completed: task.completed },
+      ...subtasks.map((s: any) => ({ id: s.id, completed: s.completed })),
+    ];
+    const label = newCompleted ? `Complete: ${task.title}` : `Reopen: ${task.title}`;
+
+    toggleTaskComplete.mutate({ taskId: task.id, completed: newCompleted });
+
+    pushAction(
+      label,
+      async () => {
+        // Undo: restore each task's previous state
+        for (const prev of prevStates) {
+          await supabase.from("project_tasks").update({ completed: prev.completed }).eq("id", prev.id);
+        }
+        queryClient.invalidateQueries({ queryKey: ["project-tasks", id] });
+      },
+      async () => {
+        // Redo: re-apply the toggle with cascade
+        await supabase.from("project_tasks").update({ completed: newCompleted }).eq("id", task.id);
+        const subIds = subtasks.map((s: any) => s.id);
+        if (subIds.length > 0) {
+          await supabase.from("project_tasks").update({ completed: newCompleted }).in("id", subIds);
+        }
+        queryClient.invalidateQueries({ queryKey: ["project-tasks", id] });
+      }
+    );
+  };
+
   const addExpense = useMutation({
     mutationFn: async (fields: any) => {
       const { error } = await supabase.from("project_expenses").insert({
@@ -855,7 +898,7 @@ export default function ProjectWorkspace() {
       {!isLocked && (
         <Checkbox
           checked={task.completed}
-          onCheckedChange={(checked) => toggleTaskComplete.mutate({ taskId: task.id, completed: !!checked })}
+          onCheckedChange={(checked) => handleToggleTask(task, !!checked)}
         />
       )}
       <div
@@ -980,7 +1023,7 @@ export default function ProjectWorkspace() {
           )}
           {isLocked ? (
             <Badge className="bg-emerald-500/20 text-emerald-400 border-emerald-500/30 border gap-1">
-              <CheckCircle2 className="h-3 w-3" /> Completed
+              <Rocket className="h-3 w-3" /> Launched
             </Badge>
           ) : (
             <AlertDialog>
@@ -1670,7 +1713,7 @@ export default function ProjectWorkspace() {
                     <div className="space-y-1">
                       {subs.map((s: any) => (
                         <div key={s.id} className="flex items-center gap-2 text-sm">
-                          <Checkbox checked={s.completed} onCheckedChange={(checked) => toggleTaskComplete.mutate({ taskId: s.id, completed: !!checked })} />
+                          <Checkbox checked={s.completed} onCheckedChange={(checked) => handleToggleTask(s, !!checked)} />
                           <span className={s.completed ? "line-through text-muted-foreground" : ""}>{s.title}</span>
                         </div>
                       ))}
@@ -1685,7 +1728,7 @@ export default function ProjectWorkspace() {
             <Button
               variant={viewingTask?.completed ? "secondary" : "default"}
               onClick={() => {
-                toggleTaskComplete.mutate({ taskId: viewingTask.id, completed: !viewingTask.completed });
+                handleToggleTask(viewingTask, !viewingTask.completed);
                 setViewingTask({ ...viewingTask, completed: !viewingTask.completed });
               }}
             >

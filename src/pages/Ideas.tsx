@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
-import { Plus, Lightbulb, Grid3X3, List, Mic, MicOff, Loader2, Brain, ChevronDown, ChevronRight, ChevronLeft, Ban, Wrench, X, Megaphone, ArrowUpDown } from "lucide-react";
+import { Plus, Lightbulb, Grid3X3, List, LayoutGrid, Mic, MicOff, Loader2, Brain, ChevronDown, ChevronRight, ChevronLeft, Ban, Wrench, X, Megaphone, ArrowUpDown } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
@@ -40,7 +40,7 @@ function IdeaCard({ idea, onClick }: { idea: any; onClick: () => void }) {
         isProcessing ? "animate-processing-glow border-primary/40" : ""
       }`}
     >
-      <CardHeader className="pb-2">
+      <CardHeader className="px-4 pt-3 pb-1">
         <div className="flex items-start justify-between gap-2">
           {isScrapped ? (
             <Badge className="text-xs border bg-zinc-500/20 text-zinc-400 border-zinc-500/30">
@@ -63,11 +63,11 @@ function IdeaCard({ idea, onClick }: { idea: any; onClick: () => void }) {
           )}
         </div>
       </CardHeader>
-      <CardContent className="space-y-2">
+      <CardContent className="px-4 pb-3 pt-0 space-y-1">
         {isProcessed && idea.title ? (
           <p className="text-sm font-bold leading-snug">{idea.title}</p>
         ) : null}
-        <p className="text-sm text-muted-foreground leading-relaxed line-clamp-3">
+        <p className="text-sm text-muted-foreground leading-relaxed line-clamp-2">
           {isProcessed && idea.processed_summary
             ? idea.processed_summary
             : idea.raw_dump.slice(0, 140) + (idea.raw_dump.length > 140 ? "…" : "")}
@@ -89,6 +89,39 @@ function IdeaCard({ idea, onClick }: { idea: any; onClick: () => void }) {
         </p>
       </CardContent>
     </Card>
+  );
+}
+
+function IdeaListRow({ idea, onClick }: { idea: any; onClick: () => void }) {
+  const isProcessed = idea.status === "processed" || idea.status === "brainstorming" || idea.status === "scrapped";
+  const isScrapped = idea.status === "scrapped";
+  const categoryClass = CATEGORY_COLORS[idea.category] || "bg-secondary text-secondary-foreground";
+
+  return (
+    <div
+      onClick={onClick}
+      className="flex items-center gap-3 px-3 py-2 rounded-lg border border-border/50 bg-card/50 cursor-pointer hover:border-primary/30 hover:bg-card/80 transition-all"
+    >
+      {isScrapped ? (
+        <Badge className="text-[10px] border bg-zinc-500/20 text-zinc-400 border-zinc-500/30 shrink-0">Scrapped</Badge>
+      ) : idea.category ? (
+        <Badge className={`text-[10px] border ${categoryClass} shrink-0`}>{idea.category}</Badge>
+      ) : (
+        <Badge variant="secondary" className="text-[10px] shrink-0">New</Badge>
+      )}
+      <span className="text-sm font-medium truncate min-w-0 max-w-[200px]">{idea.title || "Untitled"}</span>
+      <span className="text-xs text-muted-foreground truncate min-w-0 flex-1 hidden sm:block">
+        {isProcessed && idea.processed_summary ? idea.processed_summary : idea.raw_dump?.slice(0, 80)}
+      </span>
+      {idea.tags?.length > 0 && (
+        <div className="hidden md:flex gap-1 shrink-0">
+          {idea.tags.slice(0, 2).map((t: string) => (
+            <Badge key={t} variant="secondary" className="text-[10px]">{t}</Badge>
+          ))}
+        </div>
+      )}
+      <span className="text-[10px] text-muted-foreground/60 shrink-0">{format(new Date(idea.created_at), "MMM d")}</span>
+    </div>
   );
 }
 
@@ -127,7 +160,6 @@ function IdeaDetailModal({
   const isBrainstorming = idea?.status === "brainstorming";
   const isScrapped = idea?.status === "scrapped";
 
-  // Query linked brainstorm and project
   const { data: linkedBrainstorm } = useQuery({
     queryKey: ["idea-linked-brainstorm", idea?.id],
     queryFn: async () => {
@@ -178,7 +210,6 @@ function IdeaDetailModal({
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-2xl h-[85vh] flex flex-col p-0 gap-0 [&>button]:hidden">
-        {/* Frozen Header */}
         <div className="flex items-center gap-2 px-6 pt-6 pb-3 shrink-0">
           {onPrev && (
             <Button variant="ghost" size="icon" className="h-7 w-7 shrink-0" onClick={onPrev}>
@@ -197,7 +228,6 @@ function IdeaDetailModal({
         </div>
         <DialogDescription className="sr-only">View idea details, delete, or start a brainstorm</DialogDescription>
 
-        {/* Scrollable Body */}
         <div className="flex-1 overflow-y-auto px-6 space-y-4">
           <div className="flex items-center gap-2 flex-wrap">
             <p className="text-xs text-muted-foreground">
@@ -267,7 +297,6 @@ function IdeaDetailModal({
           )}
         </div>
 
-        {/* Frozen Footer */}
         <Separator />
         <div className="flex items-center justify-end gap-2 px-6 py-4 shrink-0">
           {!isBrainstorming && (
@@ -320,8 +349,8 @@ export default function IdeasPage() {
   const navigate = useNavigate();
   const [dumpOpen, setDumpOpen] = useState(false);
   const [rawDump, setRawDump] = useState("");
-  const [viewMode, setViewMode] = useState<"grid" | "list">(
-    () => (localStorage.getItem("ideas-view-mode") as "grid" | "list") || "grid"
+  const [viewMode, setViewMode] = useState<"kanban" | "tile" | "list">(
+    () => (localStorage.getItem("ideas-view-mode") as any) || "tile"
   );
   const [isListening, setIsListening] = useState(false);
   const recognitionRef = useRef<any>(null);
@@ -348,7 +377,9 @@ export default function IdeasPage() {
     switch (sortMode) {
       case "category": return sorted.sort((a, b) => (a.category || "").localeCompare(b.category || ""));
       case "newest": return sorted.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+      case "oldest": return sorted.sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime());
       case "alpha": return sorted.sort((a, b) => (a.title || "").localeCompare(b.title || ""));
+      case "alpha_desc": return sorted.sort((a, b) => (b.title || "").localeCompare(a.title || ""));
       case "recent": return sorted.sort((a, b) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime());
       default: return sorted;
     }
@@ -363,7 +394,7 @@ export default function IdeasPage() {
     });
   };
 
-  const toggleView = (mode: "grid" | "list") => {
+  const setView = (mode: "kanban" | "tile" | "list") => {
     setViewMode(mode);
     localStorage.setItem("ideas-view-mode", mode);
   };
@@ -386,7 +417,6 @@ export default function IdeasPage() {
     },
   });
 
-  // Auto-open idea detail after processing completes
   useEffect(() => {
     if (pendingIdeaIdRef.current && ideas.length > 0) {
       const pending = ideas.find((i: any) => i.id === pendingIdeaIdRef.current);
@@ -397,7 +427,6 @@ export default function IdeasPage() {
     }
   }, [ideas]);
 
-  // Cleanup orphaned ideas stuck in "brainstorming" without an active brainstorm
   useEffect(() => {
     if (!ideas.length || !user) return;
     const brainstormingIdeas = ideas.filter((i: any) => i.status === "brainstorming");
@@ -514,7 +543,6 @@ export default function IdeasPage() {
     onError: (e: Error) => toast.error(e.message),
   });
 
-  // Cleanup speech recognition on unmount
   useEffect(() => {
     return () => {
       isListeningRef.current = false;
@@ -570,8 +598,6 @@ export default function IdeasPage() {
   };
 
   const currentIdea = selectedIdea ? ideas.find((i: any) => i.id === selectedIdea.id) || selectedIdea : null;
-
-  // Fresh ideas for navigation
   const freshStatuses = ["new", "processing", "processed"];
   const freshIdeas = ideas.filter((i: any) => freshStatuses.includes(i.status));
   const currentFreshIndex = currentIdea ? freshIdeas.findIndex((i: any) => i.id === currentIdea.id) : -1;
@@ -579,6 +605,25 @@ export default function IdeasPage() {
   const hasPrev = canNav;
   const hasNext = canNav;
   const isFreshIdea = currentFreshIndex >= 0;
+
+  const renderGroupedContent = (groupItems: any[]) => {
+    if (viewMode === "list") {
+      return (
+        <div className="space-y-1">
+          {groupItems.map((idea: any) => (
+            <IdeaListRow key={idea.id} idea={idea} onClick={() => setSelectedIdea(idea)} />
+          ))}
+        </div>
+      );
+    }
+    return (
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+        {groupItems.map((idea: any) => (
+          <IdeaCard key={idea.id} idea={idea} onClick={() => setSelectedIdea(idea)} />
+        ))}
+      </div>
+    );
+  };
 
   return (
     <div className="space-y-6">
@@ -588,10 +633,13 @@ export default function IdeasPage() {
           <p className="text-muted-foreground">Capture raw thoughts and let AI help organize them</p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          <Button variant="ghost" size="icon" onClick={() => toggleView("grid")} className={viewMode === "grid" ? "text-primary" : ""}>
+          <Button variant="ghost" size="icon" onClick={() => setView("kanban")} className={viewMode === "kanban" ? "text-primary" : ""}>
+            <LayoutGrid className="h-4 w-4" />
+          </Button>
+          <Button variant="ghost" size="icon" onClick={() => setView("tile")} className={viewMode === "tile" ? "text-primary" : ""}>
             <Grid3X3 className="h-4 w-4" />
           </Button>
-          <Button variant="ghost" size="icon" onClick={() => toggleView("list")} className={viewMode === "list" ? "text-primary" : ""}>
+          <Button variant="ghost" size="icon" onClick={() => setView("list")} className={viewMode === "list" ? "text-primary" : ""}>
             <List className="h-4 w-4" />
           </Button>
           <Select value={sortMode} onValueChange={handleSortChange}>
@@ -600,9 +648,11 @@ export default function IdeasPage() {
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="newest">Created Date</SelectItem>
-              <SelectItem value="recent">Recently Edited</SelectItem>
-              <SelectItem value="alpha">Alphabetical</SelectItem>
+              <SelectItem value="recent">Last Edited</SelectItem>
+              <SelectItem value="newest">Newest</SelectItem>
+              <SelectItem value="oldest">Oldest</SelectItem>
+              <SelectItem value="alpha">A-Z</SelectItem>
+              <SelectItem value="alpha_desc">Z-A</SelectItem>
               <SelectItem value="category">Category</SelectItem>
             </SelectContent>
           </Select>
@@ -622,25 +672,38 @@ export default function IdeasPage() {
           <p className="text-lg font-medium text-muted-foreground">No ideas yet</p>
           <p className="text-sm text-muted-foreground/70">Hit "Dump Idea" to capture your first thought</p>
         </div>
+      ) : viewMode === "kanban" ? (
+        <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
+          {IDEA_GROUPS.map(group => {
+            const groupItems = sortItems(ideas.filter((i: any) => group.statuses.includes(i.status)));
+            return (
+              <div key={group.key} className="space-y-3">
+                <h3 className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">
+                  {group.label}
+                  <Badge variant="secondary" className="ml-2">{groupItems.length}</Badge>
+                </h3>
+                {groupItems.map((idea: any) => (
+                  <IdeaCard key={idea.id} idea={idea} onClick={() => setSelectedIdea(idea)} />
+                ))}
+              </div>
+            );
+          })}
+        </div>
       ) : (
         <div className="space-y-4">
           {IDEA_GROUPS.map(group => {
-            const groupIdeas = sortItems(ideas.filter((i: any) => group.statuses.includes(i.status)));
-            if (groupIdeas.length === 0) return null;
+            const groupItems = sortItems(ideas.filter((i: any) => group.statuses.includes(i.status)));
+            if (groupItems.length === 0) return null;
             const isCollapsed = collapsedGroups.has(group.key);
             return (
               <Collapsible key={group.key} open={!isCollapsed} onOpenChange={() => toggleGroupCollapse(group.key)}>
                 <CollapsibleTrigger className="flex items-center gap-2 w-full text-left py-1 hover:text-primary transition-colors">
                   {isCollapsed ? <ChevronRight className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
                   <span className="text-sm font-semibold uppercase tracking-wider">{group.label}</span>
-                  <Badge variant="secondary" className="text-[10px] ml-1">{groupIdeas.length}</Badge>
+                  <Badge variant="secondary" className="text-[10px] ml-1">{groupItems.length}</Badge>
                 </CollapsibleTrigger>
                 <CollapsibleContent className="mt-2">
-                  <div className={viewMode === "grid" ? "grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3" : "space-y-3"}>
-                    {groupIdeas.map((idea: any) => (
-                      <IdeaCard key={idea.id} idea={idea} onClick={() => setSelectedIdea(idea)} />
-                    ))}
-                  </div>
+                  {renderGroupedContent(groupItems)}
                 </CollapsibleContent>
               </Collapsible>
             );
@@ -683,7 +746,6 @@ export default function IdeasPage() {
         </DialogContent>
       </Dialog>
 
-      {/* Idea Detail Modal */}
       <IdeaDetailModal
         idea={currentIdea}
         open={!!selectedIdea}
@@ -695,9 +757,7 @@ export default function IdeasPage() {
           const isScrapping = currentIdea.status !== "scrapped";
           scrapIdea.mutate({ id: currentIdea.id, currentStatus: currentIdea.status }, {
             onSuccess: () => {
-              // Auto-advance to next fresh idea when scrapping
               if (isScrapping && isFreshIdea) {
-                // After scrap, freshIdeas will shrink. Navigate to next or wrap.
                 const remaining = freshIdeas.filter((_: any, i: number) => i !== currentFreshIndex);
                 if (remaining.length > 0) {
                   const nextIdx = currentFreshIndex >= remaining.length ? 0 : currentFreshIndex;

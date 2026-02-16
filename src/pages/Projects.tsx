@@ -1,4 +1,4 @@
-import { Wrench, LayoutGrid, List, Plus, ArrowUpDown } from "lucide-react";
+import { Wrench, LayoutGrid, Grid3X3, List, Plus, ArrowUpDown, ChevronDown, ChevronRight } from "lucide-react";
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
@@ -7,6 +7,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { toast } from "sonner";
 import { format } from "date-fns";
@@ -22,19 +23,30 @@ const CATEGORY_COLORS: Record<string, string> = {
   "Environment/Space": "bg-teal-500/20 text-teal-400 border-teal-500/30",
 };
 
-const statusColumns = ["planning", "in_progress", "testing", "done"];
+const statusColumns = ["planning", "in_progress", "testing", "done", "launched"];
 const statusLabels: Record<string, string> = {
   planning: "Planning",
   in_progress: "In Progress",
   testing: "Testing",
   done: "Done",
+  launched: "Launched",
 };
 
+const PROJECT_GROUPS = statusColumns.map(s => ({ key: s, label: statusLabels[s], statuses: [s] }));
+
 export default function ProjectsPage() {
-  const [viewMode, setViewMode] = useState<"kanban" | "list">("kanban");
+  const [viewMode, setViewMode] = useState<"kanban" | "tile" | "list">(
+    () => (localStorage.getItem("projects-view-mode") as any) || "kanban"
+  );
   const [sortMode, setSortMode] = useState<string>(
     () => localStorage.getItem("projects-sort-mode") || "newest"
   );
+  const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(() => {
+    try {
+      const saved = localStorage.getItem("projects-collapsed-groups");
+      return saved ? new Set(JSON.parse(saved)) : new Set();
+    } catch { return new Set(); }
+  });
 
   const handleSortChange = (val: string) => {
     setSortMode(val);
@@ -46,11 +58,28 @@ export default function ProjectsPage() {
     switch (sortMode) {
       case "category": return sorted.sort((a, b) => (a.category || "").localeCompare(b.category || ""));
       case "newest": return sorted.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+      case "oldest": return sorted.sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime());
       case "alpha": return sorted.sort((a, b) => (a.name || "").localeCompare(b.name || ""));
+      case "alpha_desc": return sorted.sort((a, b) => (b.name || "").localeCompare(a.name || ""));
       case "recent": return sorted.sort((a, b) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime());
       default: return sorted;
     }
   };
+
+  const toggleGroupCollapse = (key: string) => {
+    setCollapsedGroups(prev => {
+      const next = new Set(prev);
+      next.has(key) ? next.delete(key) : next.add(key);
+      localStorage.setItem("projects-collapsed-groups", JSON.stringify([...next]));
+      return next;
+    });
+  };
+
+  const setView = (mode: "kanban" | "tile" | "list") => {
+    setViewMode(mode);
+    localStorage.setItem("projects-view-mode", mode);
+  };
+
   const navigate = useNavigate();
   const { user } = useAuth();
   const queryClient = useQueryClient();
@@ -67,6 +96,9 @@ export default function ProjectsPage() {
       return data;
     },
   });
+
+  // Derive effective status: projects with campaign_id are "launched"
+  const getEffectiveStatus = (p: any) => p.campaign_id ? "launched" : p.status;
 
   const createProject = useMutation({
     mutationFn: async () => {
@@ -91,6 +123,7 @@ export default function ProjectsPage() {
     const categoryClass = category ? CATEGORY_COLORS[category] || "bg-secondary text-secondary-foreground" : "";
     const tags: string[] = p.tags || [];
     const descPreview = p.compiled_description || p.general_notes;
+    const effectiveStatus = getEffectiveStatus(p);
 
     return (
       <Card
@@ -98,20 +131,20 @@ export default function ProjectsPage() {
         onClick={() => navigate(`/projects/${p.id}`)}
         className="cursor-pointer border-border/50 bg-card/50 transition-all hover:border-primary/30 hover:bg-card/80"
       >
-        <CardHeader className="pb-2">
+        <CardHeader className="px-4 pt-3 pb-1">
           <div className="flex items-start justify-between gap-2">
             {category ? (
               <Badge className={`text-xs border ${categoryClass}`}>{category}</Badge>
             ) : (
               <Badge variant="secondary" className="text-xs">Uncategorized</Badge>
             )}
-            <Badge variant="outline" className="text-xs">{statusLabels[p.status] || p.status}</Badge>
+            <Badge variant="outline" className="text-xs">{statusLabels[effectiveStatus] || effectiveStatus}</Badge>
           </div>
         </CardHeader>
-        <CardContent className="space-y-2">
+        <CardContent className="px-4 pb-3 pt-0 space-y-1">
           <p className="text-sm font-bold leading-snug">{p.name}</p>
           {descPreview && (
-            <p className="text-sm text-muted-foreground leading-relaxed line-clamp-3">{descPreview}</p>
+            <p className="text-sm text-muted-foreground leading-relaxed line-clamp-2">{descPreview}</p>
           )}
           {tags.length > 0 && (
             <div className="flex flex-wrap gap-1">
@@ -123,11 +156,47 @@ export default function ProjectsPage() {
               )}
             </div>
           )}
-          <p className="text-[10px] text-muted-foreground/60">
-            {format(new Date(p.created_at), "MMM d, yyyy")}
-          </p>
+          <p className="text-[10px] text-muted-foreground/60">{format(new Date(p.created_at), "MMM d, yyyy")}</p>
         </CardContent>
       </Card>
+    );
+  };
+
+  const renderListRow = (p: any) => {
+    const category = p.category;
+    const categoryClass = category ? CATEGORY_COLORS[category] || "bg-secondary text-secondary-foreground" : "";
+    const tags: string[] = p.tags || [];
+    const descPreview = p.compiled_description || p.general_notes;
+
+    return (
+      <div
+        key={p.id}
+        onClick={() => navigate(`/projects/${p.id}`)}
+        className="flex items-center gap-3 px-3 py-2 rounded-lg border border-border/50 bg-card/50 cursor-pointer hover:border-primary/30 hover:bg-card/80 transition-all"
+      >
+        <Badge className={`text-[10px] border ${categoryClass} shrink-0`}>{category || "Uncategorized"}</Badge>
+        <span className="text-sm font-medium truncate min-w-0 max-w-[200px]">{p.name}</span>
+        <span className="text-xs text-muted-foreground truncate min-w-0 flex-1 hidden sm:block">{descPreview?.slice(0, 80)}</span>
+        {tags.length > 0 && (
+          <div className="hidden md:flex gap-1 shrink-0">
+            {tags.slice(0, 2).map((t: string) => (
+              <Badge key={t} variant="secondary" className="text-[10px]">{t}</Badge>
+            ))}
+          </div>
+        )}
+        <span className="text-[10px] text-muted-foreground/60 shrink-0">{format(new Date(p.created_at), "MMM d")}</span>
+      </div>
+    );
+  };
+
+  const renderGroupedContent = (groupItems: any[]) => {
+    if (viewMode === "list") {
+      return <div className="space-y-1">{groupItems.map(renderListRow)}</div>;
+    }
+    return (
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+        {groupItems.map(renderProjectCard)}
+      </div>
     );
   };
 
@@ -139,10 +208,13 @@ export default function ProjectsPage() {
           <p className="text-muted-foreground">Manage your active builds</p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          <Button variant="ghost" size="icon" onClick={() => setViewMode("kanban")} className={viewMode === "kanban" ? "text-primary" : ""}>
+          <Button variant="ghost" size="icon" onClick={() => setView("kanban")} className={viewMode === "kanban" ? "text-primary" : ""}>
             <LayoutGrid className="h-4 w-4" />
           </Button>
-          <Button variant="ghost" size="icon" onClick={() => setViewMode("list")} className={viewMode === "list" ? "text-primary" : ""}>
+          <Button variant="ghost" size="icon" onClick={() => setView("tile")} className={viewMode === "tile" ? "text-primary" : ""}>
+            <Grid3X3 className="h-4 w-4" />
+          </Button>
+          <Button variant="ghost" size="icon" onClick={() => setView("list")} className={viewMode === "list" ? "text-primary" : ""}>
             <List className="h-4 w-4" />
           </Button>
           <Select value={sortMode} onValueChange={handleSortChange}>
@@ -151,9 +223,11 @@ export default function ProjectsPage() {
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="newest">Created Date</SelectItem>
-              <SelectItem value="recent">Recently Edited</SelectItem>
-              <SelectItem value="alpha">Alphabetical</SelectItem>
+              <SelectItem value="recent">Last Edited</SelectItem>
+              <SelectItem value="newest">Newest</SelectItem>
+              <SelectItem value="oldest">Oldest</SelectItem>
+              <SelectItem value="alpha">A-Z</SelectItem>
+              <SelectItem value="alpha_desc">Z-A</SelectItem>
               <SelectItem value="category">Category</SelectItem>
             </SelectContent>
           </Select>
@@ -174,22 +248,39 @@ export default function ProjectsPage() {
           <p className="text-sm text-muted-foreground/70">Promote a brainstorm or create a project directly</p>
         </div>
       ) : viewMode === "kanban" ? (
-        <div className="grid grid-cols-1 gap-4 md:grid-cols-4">
-          {statusColumns.map((status) => (
-            <div key={status} className="space-y-3">
-              <h3 className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">
-                {statusLabels[status]}
-                <Badge variant="secondary" className="ml-2">
-                  {projects.filter((p) => p.status === status).length}
-                </Badge>
-              </h3>
-              {sortItems(projects.filter((p) => p.status === status)).map(renderProjectCard)}
-            </div>
-          ))}
+        <div className="grid grid-cols-1 gap-4 md:grid-cols-5">
+          {statusColumns.map((status) => {
+            const colItems = sortItems(projects.filter((p) => getEffectiveStatus(p) === status));
+            return (
+              <div key={status} className="space-y-3">
+                <h3 className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">
+                  {statusLabels[status]}
+                  <Badge variant="secondary" className="ml-2">{colItems.length}</Badge>
+                </h3>
+                {colItems.map(renderProjectCard)}
+              </div>
+            );
+          })}
         </div>
       ) : (
-        <div className="space-y-3">
-          {sortItems(projects).map(renderProjectCard)}
+        <div className="space-y-4">
+          {PROJECT_GROUPS.map(group => {
+            const groupItems = sortItems(projects.filter((p) => getEffectiveStatus(p) === group.key));
+            if (groupItems.length === 0) return null;
+            const isCollapsed = collapsedGroups.has(group.key);
+            return (
+              <Collapsible key={group.key} open={!isCollapsed} onOpenChange={() => toggleGroupCollapse(group.key)}>
+                <CollapsibleTrigger className="flex items-center gap-2 w-full text-left py-1 hover:text-primary transition-colors">
+                  {isCollapsed ? <ChevronRight className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
+                  <span className="text-sm font-semibold uppercase tracking-wider">{group.label}</span>
+                  <Badge variant="secondary" className="text-[10px] ml-1">{groupItems.length}</Badge>
+                </CollapsibleTrigger>
+                <CollapsibleContent className="mt-2">
+                  {renderGroupedContent(groupItems)}
+                </CollapsibleContent>
+              </Collapsible>
+            );
+          })}
         </div>
       )}
     </div>
