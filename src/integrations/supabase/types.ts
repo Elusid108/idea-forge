@@ -161,6 +161,53 @@ export type Database = {
           },
         ]
       }
+      campaign_references: {
+        Row: {
+          campaign_id: string
+          created_at: string | null
+          description: string | null
+          id: string
+          sort_order: number | null
+          thumbnail_url: string | null
+          title: string
+          type: string
+          url: string | null
+          user_id: string
+        }
+        Insert: {
+          campaign_id: string
+          created_at?: string | null
+          description?: string | null
+          id?: string
+          sort_order?: number | null
+          thumbnail_url?: string | null
+          title?: string
+          type?: string
+          url?: string | null
+          user_id: string
+        }
+        Update: {
+          campaign_id?: string
+          created_at?: string | null
+          description?: string | null
+          id?: string
+          sort_order?: number | null
+          thumbnail_url?: string | null
+          title?: string
+          type?: string
+          url?: string | null
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "campaign_references_campaign_id_fkey"
+            columns: ["campaign_id"]
+            isOneToOne: false
+            referencedRelation: "campaigns"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       campaign_tasks: {
         Row: {
           campaign_id: string

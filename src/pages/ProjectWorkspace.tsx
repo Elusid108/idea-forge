@@ -1025,137 +1025,7 @@ export default function ProjectWorkspace() {
             )}
           </div>
 
-          {/* Resources */}
-          <div className="space-y-4">
-            <div className="flex items-center justify-between flex-wrap gap-2">
-              <h2 className="text-lg font-semibold">Resources</h2>
-              <div className="flex items-center gap-1">
-                <Select value={refSortMode} onValueChange={handleRefSortChange}>
-                  <SelectTrigger className="h-8 w-[130px] text-xs">
-                    <ArrowUpDown className="h-3 w-3 mr-1" />
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="newest">Newest</SelectItem>
-                    <SelectItem value="oldest">Oldest</SelectItem>
-                    <SelectItem value="az">A → Z</SelectItem>
-                    <SelectItem value="za">Z → A</SelectItem>
-                  </SelectContent>
-                </Select>
-                <Button variant="ghost" size="icon" className={`h-8 w-8 ${refViewMode === "grid" ? "text-primary" : ""}`} onClick={() => toggleRefViewMode("grid")}>
-                  <Grid3X3 className="h-3.5 w-3.5" />
-                </Button>
-                <Button variant="ghost" size="icon" className={`h-8 w-8 ${refViewMode === "list" ? "text-primary" : ""}`} onClick={() => toggleRefViewMode("list")}>
-                  <List className="h-3.5 w-3.5" />
-                </Button>
-                <Popover>
-                  <PopoverTrigger asChild>
-                    <Button variant="outline" size="sm" className="gap-1 h-8">
-                      <Plus className="h-3 w-3" /> Add
-                    </Button>
-                  </PopoverTrigger>
-                  <PopoverContent className="w-44 p-1" align="end">
-                    {(["note", "link", "image", "video", "file"] as RefType[]).map((type) => {
-                      const Icon = REF_ICONS[type];
-                      const iconColor = REF_ICON_COLORS[type];
-                      return (
-                        <button key={type} onClick={() => setAddRefType(type)} className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-sm hover:bg-accent capitalize">
-                          <Icon className={`h-4 w-4 ${iconColor}`} /> {type}
-                        </button>
-                      );
-                    })}
-                  </PopoverContent>
-                </Popover>
-              </div>
-            </div>
-
-            {references.length === 0 ? (
-              <div className="flex flex-col items-center justify-center rounded-xl border border-dashed border-border py-12">
-                <StickyNote className="mb-3 h-8 w-8 text-muted-foreground/50" />
-                <p className="text-sm text-muted-foreground">No resources yet</p>
-              </div>
-            ) : (
-              <div className="space-y-3">
-                {groupedRefs.map((group) => {
-                  const GroupIcon = REF_ICONS[group.type] || StickyNote;
-                  const groupIconColor = REF_ICON_COLORS[group.type] || "text-muted-foreground";
-                  const isGroupCollapsed = collapsedGroups.has(group.type);
-                  return (
-                    <Collapsible key={group.type} open={!isGroupCollapsed} onOpenChange={() => toggleGroupCollapse(group.type)}>
-                      <CollapsibleTrigger className="flex items-center gap-2 w-full text-left py-1 hover:text-primary transition-colors">
-                        {isGroupCollapsed ? <ChevronRight className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
-                        <GroupIcon className={`h-3.5 w-3.5 ${groupIconColor}`} />
-                        <span className="text-sm font-medium">{group.label}</span>
-                        <Badge variant="secondary" className="text-[10px] ml-1">{group.items.length}</Badge>
-                      </CollapsibleTrigger>
-                      <CollapsibleContent className="mt-2">
-                        <div className={refViewMode === "grid" ? "grid grid-cols-1 gap-3 sm:grid-cols-2" : "space-y-2"}>
-                          {group.items.map((ref: any) => {
-                            const Icon = REF_ICONS[ref.type] || StickyNote;
-                            const iconColor = REF_ICON_COLORS[ref.type] || "text-muted-foreground";
-                            const thumbnail = getRefThumbnail(ref);
-                            const previewText = ref.type === "note" ? stripHtml(ref.description) : ref.description;
-
-                            if (refViewMode === "list") {
-                              return (
-                                <div key={ref.id} className="flex items-center gap-3 p-2 rounded-lg border border-border/50 bg-card/50 cursor-pointer hover:border-primary/30 transition-colors" onClick={() => handleRefClick(ref)}>
-                                  <Icon className={`h-4 w-4 ${iconColor} shrink-0`} />
-                                  <span className="text-sm font-medium truncate flex-1">{ref.title}</span>
-                                  {previewText && (
-                                    <span className="text-xs text-muted-foreground truncate max-w-[200px] hidden sm:inline">{previewText}</span>
-                                  )}
-                                  <div className="flex items-center gap-0.5 shrink-0">
-                                    <Button variant="ghost" size="icon" className="h-6 w-6 text-muted-foreground hover:text-primary" onClick={(e) => { e.stopPropagation(); handleEditRef(ref); }}>
-                                      <Pencil className="h-3 w-3" />
-                                    </Button>
-                                    <Button variant="ghost" size="icon" className="h-6 w-6 text-muted-foreground hover:text-destructive" onClick={(e) => { e.stopPropagation(); deleteReference.mutate(ref.id); }}>
-                                      <X className="h-3 w-3" />
-                                    </Button>
-                                  </div>
-                                </div>
-                              );
-                            }
-
-                            return (
-                              <Card key={ref.id} className="border-border/50 bg-card/50 cursor-pointer hover:border-primary/30 transition-colors" onClick={() => handleRefClick(ref)}>
-                                <CardContent className="p-3">
-                                  <div className="flex items-start gap-3">
-                                    {thumbnail ? (
-                                      <div className="h-12 w-16 rounded overflow-hidden shrink-0 bg-muted">
-                                        <img src={thumbnail} alt="" className="h-full w-full object-cover" />
-                                      </div>
-                                    ) : (
-                                      <div className="h-12 w-16 rounded bg-muted/50 flex items-center justify-center shrink-0">
-                                        <Icon className={`h-5 w-5 ${iconColor}/50`} />
-                                      </div>
-                                    )}
-                                    <div className="flex-1 min-w-0">
-                                      <p className="text-sm font-medium truncate">{ref.title}</p>
-                                      {previewText && (
-                                        <p className="text-xs text-muted-foreground line-clamp-2">{previewText}</p>
-                                      )}
-                                    </div>
-                                    <div className="flex flex-col gap-0.5 shrink-0">
-                                      <Button variant="ghost" size="icon" className="h-6 w-6 text-muted-foreground hover:text-primary" onClick={(e) => { e.stopPropagation(); handleEditRef(ref); }}>
-                                        <Pencil className="h-3 w-3" />
-                                      </Button>
-                                      <Button variant="ghost" size="icon" className="h-6 w-6 text-muted-foreground hover:text-destructive" onClick={(e) => { e.stopPropagation(); deleteReference.mutate(ref.id); }}>
-                                        <X className="h-3 w-3" />
-                                      </Button>
-                                    </div>
-                                  </div>
-                                </CardContent>
-                              </Card>
-                            );
-                          })}
-                        </div>
-                      </CollapsibleContent>
-                    </Collapsible>
-                  );
-                })}
-              </div>
-            )}
-          </div>
+          {/* Resources moved to right column */}
 
           {/* Expenses */}
           <div className="space-y-3">
@@ -1361,6 +1231,138 @@ export default function ProjectWorkspace() {
               placeholder="- Key point 1&#10;- Key point 2"
               minHeight="80px"
             />
+          </div>
+
+          {/* Resources */}
+          <div className="space-y-4">
+            <div className="flex items-center justify-between flex-wrap gap-2">
+              <h2 className="text-lg font-semibold">Resources</h2>
+              <div className="flex items-center gap-1">
+                <Select value={refSortMode} onValueChange={handleRefSortChange}>
+                  <SelectTrigger className="h-8 w-[130px] text-xs">
+                    <ArrowUpDown className="h-3 w-3 mr-1" />
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="newest">Newest</SelectItem>
+                    <SelectItem value="oldest">Oldest</SelectItem>
+                    <SelectItem value="az">A → Z</SelectItem>
+                    <SelectItem value="za">Z → A</SelectItem>
+                  </SelectContent>
+                </Select>
+                <Button variant="ghost" size="icon" className={`h-8 w-8 ${refViewMode === "grid" ? "text-primary" : ""}`} onClick={() => toggleRefViewMode("grid")}>
+                  <Grid3X3 className="h-3.5 w-3.5" />
+                </Button>
+                <Button variant="ghost" size="icon" className={`h-8 w-8 ${refViewMode === "list" ? "text-primary" : ""}`} onClick={() => toggleRefViewMode("list")}>
+                  <List className="h-3.5 w-3.5" />
+                </Button>
+                <Popover>
+                  <PopoverTrigger asChild>
+                    <Button variant="outline" size="sm" className="gap-1 h-8">
+                      <Plus className="h-3 w-3" /> Add
+                    </Button>
+                  </PopoverTrigger>
+                  <PopoverContent className="w-44 p-1" align="end">
+                    {(["note", "link", "image", "video", "file"] as RefType[]).map((type) => {
+                      const Icon = REF_ICONS[type];
+                      const iconColor = REF_ICON_COLORS[type];
+                      return (
+                        <button key={type} onClick={() => setAddRefType(type)} className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-sm hover:bg-accent capitalize">
+                          <Icon className={`h-4 w-4 ${iconColor}`} /> {type}
+                        </button>
+                      );
+                    })}
+                  </PopoverContent>
+                </Popover>
+              </div>
+            </div>
+
+            {references.length === 0 ? (
+              <div className="flex flex-col items-center justify-center rounded-xl border border-dashed border-border py-12">
+                <StickyNote className="mb-3 h-8 w-8 text-muted-foreground/50" />
+                <p className="text-sm text-muted-foreground">No resources yet</p>
+              </div>
+            ) : (
+              <div className="space-y-3">
+                {groupedRefs.map((group) => {
+                  const GroupIcon = REF_ICONS[group.type] || StickyNote;
+                  const groupIconColor = REF_ICON_COLORS[group.type] || "text-muted-foreground";
+                  const isGroupCollapsed = collapsedGroups.has(group.type);
+                  return (
+                    <Collapsible key={group.type} open={!isGroupCollapsed} onOpenChange={() => toggleGroupCollapse(group.type)}>
+                      <CollapsibleTrigger className="flex items-center gap-2 w-full text-left py-1 hover:text-primary transition-colors">
+                        {isGroupCollapsed ? <ChevronRight className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
+                        <GroupIcon className={`h-3.5 w-3.5 ${groupIconColor}`} />
+                        <span className="text-sm font-medium">{group.label}</span>
+                        <Badge variant="secondary" className="text-[10px] ml-1">{group.items.length}</Badge>
+                      </CollapsibleTrigger>
+                      <CollapsibleContent className="mt-2">
+                        <div className={refViewMode === "grid" ? "grid grid-cols-1 gap-3 sm:grid-cols-2" : "space-y-2"}>
+                          {group.items.map((ref: any) => {
+                            const Icon = REF_ICONS[ref.type] || StickyNote;
+                            const iconColor = REF_ICON_COLORS[ref.type] || "text-muted-foreground";
+                            const thumbnail = getRefThumbnail(ref);
+                            const previewText = ref.type === "note" ? stripHtml(ref.description) : ref.description;
+
+                            if (refViewMode === "list") {
+                              return (
+                                <div key={ref.id} className="flex items-center gap-3 p-2 rounded-lg border border-border/50 bg-card/50 cursor-pointer hover:border-primary/30 transition-colors" onClick={() => handleRefClick(ref)}>
+                                  <Icon className={`h-4 w-4 ${iconColor} shrink-0`} />
+                                  <span className="text-sm font-medium truncate flex-1">{ref.title}</span>
+                                  {previewText && (
+                                    <span className="text-xs text-muted-foreground truncate max-w-[200px] hidden sm:inline">{previewText}</span>
+                                  )}
+                                  <div className="flex items-center gap-0.5 shrink-0">
+                                    <Button variant="ghost" size="icon" className="h-6 w-6 text-muted-foreground hover:text-primary" onClick={(e) => { e.stopPropagation(); handleEditRef(ref); }}>
+                                      <Pencil className="h-3 w-3" />
+                                    </Button>
+                                    <Button variant="ghost" size="icon" className="h-6 w-6 text-muted-foreground hover:text-destructive" onClick={(e) => { e.stopPropagation(); deleteReference.mutate(ref.id); }}>
+                                      <X className="h-3 w-3" />
+                                    </Button>
+                                  </div>
+                                </div>
+                              );
+                            }
+
+                            return (
+                              <Card key={ref.id} className="border-border/50 bg-card/50 cursor-pointer hover:border-primary/30 transition-colors" onClick={() => handleRefClick(ref)}>
+                                <CardContent className="p-3">
+                                  <div className="flex items-start gap-3">
+                                    {thumbnail ? (
+                                      <div className="h-12 w-16 rounded overflow-hidden shrink-0 bg-muted">
+                                        <img src={thumbnail} alt="" className="h-full w-full object-cover" />
+                                      </div>
+                                    ) : (
+                                      <div className="h-12 w-16 rounded bg-muted/50 flex items-center justify-center shrink-0">
+                                        <Icon className={`h-5 w-5 ${iconColor}/50`} />
+                                      </div>
+                                    )}
+                                    <div className="flex-1 min-w-0">
+                                      <p className="text-sm font-medium truncate">{ref.title}</p>
+                                      {previewText && (
+                                        <p className="text-xs text-muted-foreground line-clamp-2">{previewText}</p>
+                                      )}
+                                    </div>
+                                    <div className="flex flex-col gap-0.5 shrink-0">
+                                      <Button variant="ghost" size="icon" className="h-6 w-6 text-muted-foreground hover:text-primary" onClick={(e) => { e.stopPropagation(); handleEditRef(ref); }}>
+                                        <Pencil className="h-3 w-3" />
+                                      </Button>
+                                      <Button variant="ghost" size="icon" className="h-6 w-6 text-muted-foreground hover:text-destructive" onClick={(e) => { e.stopPropagation(); deleteReference.mutate(ref.id); }}>
+                                        <X className="h-3 w-3" />
+                                      </Button>
+                                    </div>
+                                  </div>
+                                </CardContent>
+                              </Card>
+                            );
+                          })}
+                        </div>
+                      </CollapsibleContent>
+                    </Collapsible>
+                  );
+                })}
+              </div>
+            )}
           </div>
         </div>
       </div>
