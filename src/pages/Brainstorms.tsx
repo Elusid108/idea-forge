@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { Brain, Plus, Grid3X3, List, ChevronDown, ChevronRight, ArrowUpDown } from "lucide-react";
+import { Brain, Plus, Grid3X3, List, LayoutGrid, ChevronDown, ChevronRight, ArrowUpDown } from "lucide-react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
@@ -41,8 +41,8 @@ export default function BrainstormsPage() {
   const { user } = useAuth();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
-  const [viewMode, setViewMode] = useState<"grid" | "list">(
-    () => (localStorage.getItem("brainstorms-view-mode") as "grid" | "list") || "grid"
+  const [viewMode, setViewMode] = useState<"kanban" | "tile" | "list">(
+    () => (localStorage.getItem("brainstorms-view-mode") as any) || "tile"
   );
   const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(() => {
     try {
@@ -64,7 +64,9 @@ export default function BrainstormsPage() {
     switch (sortMode) {
       case "category": return sorted.sort((a, b) => (a.category || "").localeCompare(b.category || ""));
       case "newest": return sorted.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+      case "oldest": return sorted.sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime());
       case "alpha": return sorted.sort((a, b) => (a.title || "").localeCompare(b.title || ""));
+      case "alpha_desc": return sorted.sort((a, b) => (b.title || "").localeCompare(a.title || ""));
       case "recent": return sorted.sort((a, b) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime());
       default: return sorted;
     }
@@ -79,7 +81,7 @@ export default function BrainstormsPage() {
     });
   };
 
-  const toggleView = (mode: "grid" | "list") => {
+  const setView = (mode: "kanban" | "tile" | "list") => {
     setViewMode(mode);
     localStorage.setItem("brainstorms-view-mode", mode);
   };
@@ -127,7 +129,7 @@ export default function BrainstormsPage() {
         onClick={() => navigate(`/brainstorms/${b.id}`)}
         className="cursor-pointer border-border/50 bg-card/50 transition-all hover:border-primary/30 hover:bg-card/80"
       >
-        <CardHeader className="pb-2">
+        <CardHeader className="px-4 pt-3 pb-1">
           <div className="flex items-start justify-between gap-2">
             {b.category ? (
               <Badge className={`text-xs border ${categoryClass}`}>{b.category}</Badge>
@@ -137,12 +139,10 @@ export default function BrainstormsPage() {
             <Badge className={`text-xs border ${statusBadge.className}`}>{statusBadge.label}</Badge>
           </div>
         </CardHeader>
-        <CardContent className="space-y-2">
+        <CardContent className="px-4 pb-3 pt-0 space-y-1">
           <p className="text-sm font-bold leading-snug">{b.title}</p>
           {descPreview && (
-            <p className="text-sm text-muted-foreground leading-relaxed line-clamp-3">
-              {descPreview}
-            </p>
+            <p className="text-sm text-muted-foreground leading-relaxed line-clamp-2">{descPreview}</p>
           )}
           {tags.length > 0 && (
             <div className="flex flex-wrap gap-1">
@@ -154,11 +154,46 @@ export default function BrainstormsPage() {
               )}
             </div>
           )}
-          <p className="text-[10px] text-muted-foreground/60">
-            {format(new Date(b.created_at), "MMM d, yyyy")}
-          </p>
+          <p className="text-[10px] text-muted-foreground/60">{format(new Date(b.created_at), "MMM d, yyyy")}</p>
         </CardContent>
       </Card>
+    );
+  };
+
+  const renderListRow = (b: any) => {
+    const categoryClass = CATEGORY_COLORS[b.category] || "bg-secondary text-secondary-foreground";
+    const tags: string[] = b.tags || [];
+    const descPreview = b.compiled_description || (b.ideas?.processed_summary) || (b.ideas?.raw_dump?.slice(0, 80));
+
+    return (
+      <div
+        key={b.id}
+        onClick={() => navigate(`/brainstorms/${b.id}`)}
+        className="flex items-center gap-3 px-3 py-2 rounded-lg border border-border/50 bg-card/50 cursor-pointer hover:border-primary/30 hover:bg-card/80 transition-all"
+      >
+        <Badge className={`text-[10px] border ${categoryClass} shrink-0`}>{b.category || "Uncategorized"}</Badge>
+        <span className="text-sm font-medium truncate min-w-0 max-w-[200px]">{b.title}</span>
+        <span className="text-xs text-muted-foreground truncate min-w-0 flex-1 hidden sm:block">{descPreview}</span>
+        {tags.length > 0 && (
+          <div className="hidden md:flex gap-1 shrink-0">
+            {tags.slice(0, 2).map((t: string) => (
+              <Badge key={t} variant="secondary" className="text-[10px]">{t}</Badge>
+            ))}
+          </div>
+        )}
+        <span className="text-[10px] text-muted-foreground/60 shrink-0">{format(new Date(b.created_at), "MMM d")}</span>
+      </div>
+    );
+  };
+
+  const renderGroupedContent = (groupItems: any[]) => {
+    if (viewMode === "list") {
+      return <div className="space-y-1">{groupItems.map(renderListRow)}</div>;
+    }
+    return (
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+        {groupItems.map(renderCard)}
+      </div>
     );
   };
 
@@ -170,10 +205,13 @@ export default function BrainstormsPage() {
           <p className="text-muted-foreground">Research workspaces for developing your ideas</p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          <Button variant="ghost" size="icon" onClick={() => toggleView("grid")} className={viewMode === "grid" ? "text-primary" : ""}>
+          <Button variant="ghost" size="icon" onClick={() => setView("kanban")} className={viewMode === "kanban" ? "text-primary" : ""}>
+            <LayoutGrid className="h-4 w-4" />
+          </Button>
+          <Button variant="ghost" size="icon" onClick={() => setView("tile")} className={viewMode === "tile" ? "text-primary" : ""}>
             <Grid3X3 className="h-4 w-4" />
           </Button>
-          <Button variant="ghost" size="icon" onClick={() => toggleView("list")} className={viewMode === "list" ? "text-primary" : ""}>
+          <Button variant="ghost" size="icon" onClick={() => setView("list")} className={viewMode === "list" ? "text-primary" : ""}>
             <List className="h-4 w-4" />
           </Button>
           <Select value={sortMode} onValueChange={handleSortChange}>
@@ -182,9 +220,11 @@ export default function BrainstormsPage() {
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="newest">Created Date</SelectItem>
-              <SelectItem value="recent">Recently Edited</SelectItem>
-              <SelectItem value="alpha">Alphabetical</SelectItem>
+              <SelectItem value="recent">Last Edited</SelectItem>
+              <SelectItem value="newest">Newest</SelectItem>
+              <SelectItem value="oldest">Oldest</SelectItem>
+              <SelectItem value="alpha">A-Z</SelectItem>
+              <SelectItem value="alpha_desc">Z-A</SelectItem>
               <SelectItem value="category">Category</SelectItem>
             </SelectContent>
           </Select>
@@ -204,6 +244,21 @@ export default function BrainstormsPage() {
           <p className="text-lg font-medium text-muted-foreground">No brainstorms yet</p>
           <p className="text-sm text-muted-foreground/70">Start a brainstorm from an idea or create one directly</p>
         </div>
+      ) : viewMode === "kanban" ? (
+        <div className="grid grid-cols-1 gap-4 md:grid-cols-4">
+          {BRAINSTORM_GROUPS.map(group => {
+            const groupItems = sortItems(brainstorms.filter((b: any) => group.statuses.includes(b.status)));
+            return (
+              <div key={group.key} className="space-y-3">
+                <h3 className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">
+                  {group.label}
+                  <Badge variant="secondary" className="ml-2">{groupItems.length}</Badge>
+                </h3>
+                {groupItems.map(renderCard)}
+              </div>
+            );
+          })}
+        </div>
       ) : (
         <div className="space-y-4">
           {BRAINSTORM_GROUPS.map(group => {
@@ -218,9 +273,7 @@ export default function BrainstormsPage() {
                   <Badge variant="secondary" className="text-[10px] ml-1">{groupItems.length}</Badge>
                 </CollapsibleTrigger>
                 <CollapsibleContent className="mt-2">
-                  <div className={viewMode === "grid" ? "grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3" : "space-y-3"}>
-                    {groupItems.map(renderCard)}
-                  </div>
+                  {renderGroupedContent(groupItems)}
                 </CollapsibleContent>
               </Collapsible>
             );

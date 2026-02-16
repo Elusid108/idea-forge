@@ -1,4 +1,4 @@
-import { Megaphone, LayoutGrid, List, ArrowUpDown } from "lucide-react";
+import { Megaphone, LayoutGrid, Grid3X3, List, ArrowUpDown, ChevronDown, ChevronRight } from "lucide-react";
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
@@ -6,6 +6,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { format } from "date-fns";
 
@@ -17,6 +18,8 @@ const statusLabels: Record<string, string> = {
   active_campaign: "Active Campaign",
   operations_fulfillment: "Operations & Fulfillment",
 };
+
+const CAMPAIGN_GROUPS = statusColumns.map(s => ({ key: s, label: statusLabels[s], statuses: [s] }));
 
 const CATEGORY_COLORS: Record<string, string> = {
   "Product": "bg-blue-500/20 text-blue-400 border-blue-500/30",
@@ -30,10 +33,18 @@ const CATEGORY_COLORS: Record<string, string> = {
 };
 
 export default function CampaignsPage() {
-  const [viewMode, setViewMode] = useState<"kanban" | "list">("kanban");
+  const [viewMode, setViewMode] = useState<"kanban" | "tile" | "list">(
+    () => (localStorage.getItem("campaigns-view-mode") as any) || "kanban"
+  );
   const [sortMode, setSortMode] = useState<string>(
     () => localStorage.getItem("campaigns-sort-mode") || "newest"
   );
+  const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(() => {
+    try {
+      const saved = localStorage.getItem("campaigns-collapsed-groups");
+      return saved ? new Set(JSON.parse(saved)) : new Set();
+    } catch { return new Set(); }
+  });
   const navigate = useNavigate();
 
   const handleSortChange = (val: string) => {
@@ -46,10 +57,26 @@ export default function CampaignsPage() {
     switch (sortMode) {
       case "category": return sorted.sort((a, b) => (a.category || "").localeCompare(b.category || ""));
       case "newest": return sorted.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+      case "oldest": return sorted.sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime());
       case "alpha": return sorted.sort((a, b) => (a.title || "").localeCompare(b.title || ""));
+      case "alpha_desc": return sorted.sort((a, b) => (b.title || "").localeCompare(a.title || ""));
       case "recent": return sorted.sort((a, b) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime());
       default: return sorted;
     }
+  };
+
+  const toggleGroupCollapse = (key: string) => {
+    setCollapsedGroups(prev => {
+      const next = new Set(prev);
+      next.has(key) ? next.delete(key) : next.add(key);
+      localStorage.setItem("campaigns-collapsed-groups", JSON.stringify([...next]));
+      return next;
+    });
+  };
+
+  const setView = (mode: "kanban" | "tile" | "list") => {
+    setViewMode(mode);
+    localStorage.setItem("campaigns-view-mode", mode);
   };
 
   const { data: campaigns = [], isLoading } = useQuery({
@@ -77,7 +104,7 @@ export default function CampaignsPage() {
         onClick={() => navigate(`/campaigns/${c.id}`)}
         className="cursor-pointer border-border/50 bg-card/50 transition-all hover:border-primary/30 hover:bg-card/80"
       >
-        <CardHeader className="pb-2">
+        <CardHeader className="px-4 pt-3 pb-1">
           <div className="flex items-start justify-between gap-2">
             <Badge className={`text-xs border ${catClass}`}>{c.category || "Uncategorized"}</Badge>
             {viewMode === "list" && (
@@ -85,7 +112,7 @@ export default function CampaignsPage() {
             )}
           </div>
         </CardHeader>
-        <CardContent className="space-y-2">
+        <CardContent className="px-4 pb-3 pt-0 space-y-1">
           <p className="text-sm font-bold leading-snug">{c.title}</p>
           {visibleTags.length > 0 && (
             <div className="flex flex-wrap gap-1">
@@ -97,11 +124,45 @@ export default function CampaignsPage() {
               )}
             </div>
           )}
-          <p className="text-[10px] text-muted-foreground/60">
-            {format(new Date(c.created_at), "MMM d, yyyy")}
-          </p>
+          <p className="text-[10px] text-muted-foreground/60">{format(new Date(c.created_at), "MMM d, yyyy")}</p>
         </CardContent>
       </Card>
+    );
+  };
+
+  const renderListRow = (c: any) => {
+    const catClass = c.category ? CATEGORY_COLORS[c.category] || "bg-secondary text-secondary-foreground" : "";
+    const tags: string[] = c.tags || [];
+
+    return (
+      <div
+        key={c.id}
+        onClick={() => navigate(`/campaigns/${c.id}`)}
+        className="flex items-center gap-3 px-3 py-2 rounded-lg border border-border/50 bg-card/50 cursor-pointer hover:border-primary/30 hover:bg-card/80 transition-all"
+      >
+        <Badge className={`text-[10px] border ${catClass} shrink-0`}>{c.category || "Uncategorized"}</Badge>
+        <span className="text-sm font-medium truncate min-w-0 max-w-[200px]">{c.title}</span>
+        <span className="text-xs text-muted-foreground truncate min-w-0 flex-1 hidden sm:block">{statusLabels[c.status] || c.status}</span>
+        {tags.length > 0 && (
+          <div className="hidden md:flex gap-1 shrink-0">
+            {tags.slice(0, 2).map((t: string) => (
+              <Badge key={t} variant="secondary" className="text-[10px]">{t}</Badge>
+            ))}
+          </div>
+        )}
+        <span className="text-[10px] text-muted-foreground/60 shrink-0">{format(new Date(c.created_at), "MMM d")}</span>
+      </div>
+    );
+  };
+
+  const renderGroupedContent = (groupItems: any[]) => {
+    if (viewMode === "list") {
+      return <div className="space-y-1">{groupItems.map(renderListRow)}</div>;
+    }
+    return (
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+        {groupItems.map(renderCampaignCard)}
+      </div>
     );
   };
 
@@ -113,10 +174,13 @@ export default function CampaignsPage() {
           <p className="text-muted-foreground">Go-to-market pipeline</p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          <Button variant="ghost" size="icon" onClick={() => setViewMode("kanban")} className={viewMode === "kanban" ? "text-primary" : ""}>
+          <Button variant="ghost" size="icon" onClick={() => setView("kanban")} className={viewMode === "kanban" ? "text-primary" : ""}>
             <LayoutGrid className="h-4 w-4" />
           </Button>
-          <Button variant="ghost" size="icon" onClick={() => setViewMode("list")} className={viewMode === "list" ? "text-primary" : ""}>
+          <Button variant="ghost" size="icon" onClick={() => setView("tile")} className={viewMode === "tile" ? "text-primary" : ""}>
+            <Grid3X3 className="h-4 w-4" />
+          </Button>
+          <Button variant="ghost" size="icon" onClick={() => setView("list")} className={viewMode === "list" ? "text-primary" : ""}>
             <List className="h-4 w-4" />
           </Button>
           <Select value={sortMode} onValueChange={handleSortChange}>
@@ -125,9 +189,11 @@ export default function CampaignsPage() {
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="newest">Created Date</SelectItem>
-              <SelectItem value="recent">Recently Edited</SelectItem>
-              <SelectItem value="alpha">Alphabetical</SelectItem>
+              <SelectItem value="recent">Last Edited</SelectItem>
+              <SelectItem value="newest">Newest</SelectItem>
+              <SelectItem value="oldest">Oldest</SelectItem>
+              <SelectItem value="alpha">A-Z</SelectItem>
+              <SelectItem value="alpha_desc">Z-A</SelectItem>
               <SelectItem value="category">Category</SelectItem>
             </SelectContent>
           </Select>
@@ -146,21 +212,38 @@ export default function CampaignsPage() {
         </div>
       ) : viewMode === "kanban" ? (
         <div className="grid grid-cols-1 gap-4 md:grid-cols-5">
-          {statusColumns.map((status) => (
-            <div key={status} className="space-y-3">
-              <h3 className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">
-                {statusLabels[status]}
-                <Badge variant="secondary" className="ml-2">
-                  {campaigns.filter((c: any) => c.status === status).length}
-                </Badge>
-              </h3>
-              {sortItems(campaigns.filter((c: any) => c.status === status)).map(renderCampaignCard)}
-            </div>
-          ))}
+          {statusColumns.map((status) => {
+            const colItems = sortItems(campaigns.filter((c: any) => c.status === status));
+            return (
+              <div key={status} className="space-y-3">
+                <h3 className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">
+                  {statusLabels[status]}
+                  <Badge variant="secondary" className="ml-2">{colItems.length}</Badge>
+                </h3>
+                {colItems.map(renderCampaignCard)}
+              </div>
+            );
+          })}
         </div>
       ) : (
-        <div className="space-y-3">
-          {sortItems(campaigns).map(renderCampaignCard)}
+        <div className="space-y-4">
+          {CAMPAIGN_GROUPS.map(group => {
+            const groupItems = sortItems(campaigns.filter((c: any) => group.statuses.includes(c.status)));
+            if (groupItems.length === 0) return null;
+            const isCollapsed = collapsedGroups.has(group.key);
+            return (
+              <Collapsible key={group.key} open={!isCollapsed} onOpenChange={() => toggleGroupCollapse(group.key)}>
+                <CollapsibleTrigger className="flex items-center gap-2 w-full text-left py-1 hover:text-primary transition-colors">
+                  {isCollapsed ? <ChevronRight className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
+                  <span className="text-sm font-semibold uppercase tracking-wider">{group.label}</span>
+                  <Badge variant="secondary" className="text-[10px] ml-1">{groupItems.length}</Badge>
+                </CollapsibleTrigger>
+                <CollapsibleContent className="mt-2">
+                  {renderGroupedContent(groupItems)}
+                </CollapsibleContent>
+              </Collapsible>
+            );
+          })}
         </div>
       )}
     </div>
