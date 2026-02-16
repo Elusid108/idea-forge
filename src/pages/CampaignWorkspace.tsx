@@ -30,6 +30,7 @@ import FloatingChatWidget from "@/components/FloatingChatWidget";
 import ReactMarkdown from "react-markdown";
 import { markdownComponents } from "@/lib/markdownComponents";
 import { format } from "date-fns";
+import { useActionUndo } from "@/hooks/useActionUndo";
 
 const STATUS_OPTIONS = ["foundation_ip", "infrastructure_production", "asset_creation_prelaunch", "active_campaign", "operations_fulfillment"];
 const STATUS_LABELS: Record<string, string> = {
@@ -124,6 +125,7 @@ export default function CampaignWorkspace() {
   ]);
   const [chatInput, setChatInput] = useState("");
   const [isChatThinking, setIsChatThinking] = useState(false);
+  const { pushAction } = useActionUndo();
 
   // =================== QUERIES ===================
   const { data: campaign, isLoading } = useQuery({
@@ -346,11 +348,31 @@ export default function CampaignWorkspace() {
   const handleToggleTask = async (taskId: string, completed: boolean) => {
     await supabase.from("campaign_tasks" as any).update({ completed: !completed }).eq("id", taskId);
     refetchTasks();
+    pushAction(
+      completed ? "Mark task active" : "Mark task complete",
+      async () => { await supabase.from("campaign_tasks" as any).update({ completed }).eq("id", taskId); refetchTasks(); },
+      async () => { await supabase.from("campaign_tasks" as any).update({ completed: !completed }).eq("id", taskId); refetchTasks(); },
+    );
   };
 
   const handleDeleteTask = async (taskId: string) => {
+    const task = campaignTasks.find((t: any) => t.id === taskId);
     await supabase.from("campaign_tasks" as any).delete().eq("id", taskId);
     refetchTasks();
+    if (task) {
+      pushAction(
+        `Delete task "${task.title}"`,
+        async () => {
+          await supabase.from("campaign_tasks" as any).insert({
+            id: task.id, campaign_id: task.campaign_id, user_id: task.user_id,
+            title: task.title, description: task.description || "",
+            status_column: task.status_column, sort_order: task.sort_order, completed: task.completed,
+          });
+          refetchTasks();
+        },
+        async () => { await supabase.from("campaign_tasks" as any).delete().eq("id", taskId); refetchTasks(); },
+      );
+    }
   };
 
   const handleAddTask = async (column: string) => {

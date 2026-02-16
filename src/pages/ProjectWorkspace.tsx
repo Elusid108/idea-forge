@@ -7,7 +7,7 @@ import {
   Grid3X3, List, ChevronDown, ChevronRight, ArrowUpDown, Trash2,
   Plus, Lightbulb, Brain, FileText, FolderOpen, Github, Star, GitFork, AlertCircle, GitCommit,
   CheckSquare, DollarSign, Calendar, ExternalLink, Receipt, Upload, Loader2,
-  Bot, Send, Rocket, Megaphone, AlertTriangle,
+  Bot, Send, Rocket, Megaphone, AlertTriangle, CheckCircle2,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -32,6 +32,7 @@ import RichTextNoteEditor from "@/components/RichTextNoteEditor";
 import ReactMarkdown from "react-markdown";
 import { markdownComponents } from "@/lib/markdownComponents";
 import { format, formatDistanceToNow } from "date-fns";
+import { useActionUndo } from "@/hooks/useActionUndo";
 
 type RefType = "link" | "image" | "video" | "note" | "file";
 type SortMode = "az" | "za" | "newest" | "oldest";
@@ -160,6 +161,7 @@ export default function ProjectWorkspace() {
   const [isGotchaThinking, setIsGotchaThinking] = useState(false);
   const [gotchaChatHistory, setGotchaChatHistory] = useState<{ role: string; content: string }[]>([]);
   const [gotchaWhyRound, setGotchaWhyRound] = useState(0);
+  const { pushAction } = useActionUndo();
 
   const { data: project, isLoading } = useQuery({
     queryKey: ["project", id],
@@ -394,10 +396,32 @@ export default function ProjectWorkspace() {
 
   const deleteTask = useMutation({
     mutationFn: async (taskId: string) => {
+      const task = tasks.find((t: any) => t.id === taskId);
       const { error } = await supabase.from("project_tasks").delete().eq("id", taskId);
       if (error) throw error;
+      return task;
     },
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["project-tasks", id] }),
+    onSuccess: (task) => {
+      queryClient.invalidateQueries({ queryKey: ["project-tasks", id] });
+      if (task) {
+        pushAction(
+          `Delete task "${task.title}"`,
+          async () => {
+            await supabase.from("project_tasks").insert({
+              id: task.id, project_id: task.project_id, user_id: task.user_id,
+              title: task.title, description: task.description || "", priority: task.priority,
+              sort_order: task.sort_order, completed: task.completed, parent_task_id: task.parent_task_id,
+              due_date: task.due_date,
+            });
+            queryClient.invalidateQueries({ queryKey: ["project-tasks", id] });
+          },
+          async () => {
+            await supabase.from("project_tasks").delete().eq("id", task.id);
+            queryClient.invalidateQueries({ queryKey: ["project-tasks", id] });
+          },
+        );
+      }
+    },
   });
 
   const toggleTaskComplete = useMutation({
@@ -440,10 +464,32 @@ export default function ProjectWorkspace() {
 
   const deleteExpense = useMutation({
     mutationFn: async (expenseId: string) => {
+      const expense = expenses.find((e: any) => e.id === expenseId);
       const { error } = await supabase.from("project_expenses").delete().eq("id", expenseId);
       if (error) throw error;
+      return expense;
     },
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["project-expenses", id] }),
+    onSuccess: (expense) => {
+      queryClient.invalidateQueries({ queryKey: ["project-expenses", id] });
+      if (expense) {
+        pushAction(
+          `Delete expense "${expense.title}"`,
+          async () => {
+            await supabase.from("project_expenses").insert({
+              id: expense.id, project_id: expense.project_id, user_id: expense.user_id,
+              title: expense.title, description: expense.description || "", amount: expense.amount,
+              category: expense.category, date: expense.date, vendor: expense.vendor,
+              receipt_url: expense.receipt_url,
+            });
+            queryClient.invalidateQueries({ queryKey: ["project-expenses", id] });
+          },
+          async () => {
+            await supabase.from("project_expenses").delete().eq("id", expense.id);
+            queryClient.invalidateQueries({ queryKey: ["project-expenses", id] });
+          },
+        );
+      }
+    },
   });
 
   const addReference = useMutation({
@@ -480,10 +526,31 @@ export default function ProjectWorkspace() {
 
   const deleteReference = useMutation({
     mutationFn: async (refId: string) => {
+      const ref = references.find((r: any) => r.id === refId);
       const { error } = await supabase.from("project_references").delete().eq("id", refId);
       if (error) throw error;
+      return ref;
     },
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["project-refs", id] }),
+    onSuccess: (ref) => {
+      queryClient.invalidateQueries({ queryKey: ["project-refs", id] });
+      if (ref) {
+        pushAction(
+          `Delete reference "${ref.title}"`,
+          async () => {
+            await supabase.from("project_references").insert({
+              id: ref.id, project_id: ref.project_id, user_id: ref.user_id,
+              title: ref.title, type: ref.type, url: ref.url, description: ref.description,
+              sort_order: ref.sort_order, thumbnail_url: ref.thumbnail_url,
+            });
+            queryClient.invalidateQueries({ queryKey: ["project-refs", id] });
+          },
+          async () => {
+            await supabase.from("project_references").delete().eq("id", ref.id);
+            queryClient.invalidateQueries({ queryKey: ["project-refs", id] });
+          },
+        );
+      }
+    },
   });
 
   const handleSaveTitle = () => {
@@ -911,23 +978,29 @@ export default function ProjectWorkspace() {
               <Rocket className="h-4 w-4" /> Launch Campaign
             </Button>
           )}
-          <AlertDialog>
-            <AlertDialogTrigger asChild>
-              <Button variant="destructive" className="gap-2">
-                <Trash2 className="h-4 w-4" /> Delete
-              </Button>
-            </AlertDialogTrigger>
-            <AlertDialogContent>
-              <AlertDialogHeader>
-                <AlertDialogTitle>Move to trash?</AlertDialogTitle>
-                <AlertDialogDescription>This will move the project to trash. The linked brainstorm will be unlocked.</AlertDialogDescription>
-              </AlertDialogHeader>
-              <AlertDialogFooter>
-                <AlertDialogCancel>Cancel</AlertDialogCancel>
-                <AlertDialogAction onClick={() => deleteProject.mutate()}>Delete</AlertDialogAction>
-              </AlertDialogFooter>
-            </AlertDialogContent>
-          </AlertDialog>
+          {isLocked ? (
+            <Badge className="bg-emerald-500/20 text-emerald-400 border-emerald-500/30 border gap-1">
+              <CheckCircle2 className="h-3 w-3" /> Completed
+            </Badge>
+          ) : (
+            <AlertDialog>
+              <AlertDialogTrigger asChild>
+                <Button variant="destructive" className="gap-2">
+                  <Trash2 className="h-4 w-4" /> Delete
+                </Button>
+              </AlertDialogTrigger>
+              <AlertDialogContent>
+                <AlertDialogHeader>
+                  <AlertDialogTitle>Move to trash?</AlertDialogTitle>
+                  <AlertDialogDescription>This will move the project to trash. The linked brainstorm will be unlocked.</AlertDialogDescription>
+                </AlertDialogHeader>
+                <AlertDialogFooter>
+                  <AlertDialogCancel>Cancel</AlertDialogCancel>
+                  <AlertDialogAction onClick={() => deleteProject.mutate()}>Delete</AlertDialogAction>
+                </AlertDialogFooter>
+              </AlertDialogContent>
+            </AlertDialog>
+          )}
         </div>
       </div>
 
