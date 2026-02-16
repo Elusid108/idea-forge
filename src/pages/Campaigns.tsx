@@ -18,13 +18,15 @@ const statusLabels: Record<string, string> = {
   operations_fulfillment: "Operations & Fulfillment",
 };
 
-const CHANNEL_COLORS: Record<string, string> = {
-  Shopify: "bg-emerald-500/20 text-emerald-400 border-emerald-500/30",
-  Etsy: "bg-orange-500/20 text-orange-400 border-orange-500/30",
-  GitHub: "bg-violet-500/20 text-violet-400 border-violet-500/30",
-  Gumroad: "bg-pink-500/20 text-pink-400 border-pink-500/30",
-  Amazon: "bg-amber-500/20 text-amber-400 border-amber-500/30",
-  Website: "bg-blue-500/20 text-blue-400 border-blue-500/30",
+const CATEGORY_COLORS: Record<string, string> = {
+  "Product": "bg-blue-500/20 text-blue-400 border-blue-500/30",
+  "Process": "bg-emerald-500/20 text-emerald-400 border-emerald-500/30",
+  "Fixture/Jig": "bg-amber-500/20 text-amber-400 border-amber-500/30",
+  "Tool": "bg-orange-500/20 text-orange-400 border-orange-500/30",
+  "Art": "bg-pink-500/20 text-pink-400 border-pink-500/30",
+  "Hardware/Electronics": "bg-red-500/20 text-red-400 border-red-500/30",
+  "Software/App": "bg-violet-500/20 text-violet-400 border-violet-500/30",
+  "Environment/Space": "bg-teal-500/20 text-teal-400 border-teal-500/30",
 };
 
 export default function CampaignsPage() {
@@ -64,7 +66,10 @@ export default function CampaignsPage() {
   });
 
   const renderCampaignCard = (c: any) => {
-    const channelClass = c.primary_channel ? CHANNEL_COLORS[c.primary_channel] || "bg-secondary text-secondary-foreground" : "";
+    const catClass = c.category ? CATEGORY_COLORS[c.category] || "bg-secondary text-secondary-foreground" : "";
+    const tags: string[] = c.tags || [];
+    const visibleTags = tags.slice(0, 4);
+    const overflowCount = tags.length - 4;
 
     return (
       <Card
@@ -74,20 +79,24 @@ export default function CampaignsPage() {
       >
         <CardHeader className="pb-2">
           <div className="flex items-start justify-between gap-2">
-            {c.primary_channel ? (
-              <Badge className={`text-xs border ${channelClass}`}>{c.primary_channel}</Badge>
-            ) : (
-              <Badge variant="secondary" className="text-xs">No Channel</Badge>
+            <Badge className={`text-xs border ${catClass}`}>{c.category || "Uncategorized"}</Badge>
+            {viewMode === "list" && (
+              <Badge variant="outline" className="text-xs">{statusLabels[c.status] || c.status}</Badge>
             )}
-            <Badge variant="outline" className="text-xs">{statusLabels[c.status] || c.status}</Badge>
           </div>
         </CardHeader>
         <CardContent className="space-y-2">
           <p className="text-sm font-bold leading-snug">{c.title}</p>
-          <div className="flex items-center gap-3 text-xs text-muted-foreground">
-            <span>{c.units_sold || 0} sold</span>
-            <span>${c.revenue || 0}</span>
-          </div>
+          {visibleTags.length > 0 && (
+            <div className="flex flex-wrap gap-1">
+              {visibleTags.map((tag: string) => (
+                <Badge key={tag} variant="secondary" className="text-[10px] px-1.5 py-0">{tag}</Badge>
+              ))}
+              {overflowCount > 0 && (
+                <Badge variant="secondary" className="text-[10px] px-1.5 py-0">+{overflowCount}</Badge>
+              )}
+            </div>
+          )}
           <p className="text-[10px] text-muted-foreground/60">
             {format(new Date(c.created_at), "MMM d, yyyy")}
           </p>

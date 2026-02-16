@@ -3,7 +3,7 @@ import FloatingChatWidget from "@/components/FloatingChatWidget";
 import { useParams, useNavigate } from "react-router-dom";
 import {
   ArrowLeft, Plus, Link as LinkIcon, Image, Film, StickyNote, X, Pencil,
-  Loader2, Rocket, Lightbulb, Bot, Send, CheckCircle2,
+  Loader2, Rocket, Lightbulb, Bot, Send, CheckCircle2, AlertTriangle,
   Grid3X3, List, ChevronDown, ChevronRight, ArrowUpDown, Wrench, Megaphone,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -906,6 +906,13 @@ export default function BrainstormWorkspace() {
           </Badge>
         )}
       </div>
+
+      {isCompleted && (
+        <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-300 flex items-center gap-2">
+          <AlertTriangle className="h-4 w-4 shrink-0" />
+          This brainstorm is locked because it has an active project. Delete the linked project to unlock editing.
+        </div>
+      )}
 
       <Separator />
 
