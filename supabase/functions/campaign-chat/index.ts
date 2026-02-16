@@ -84,6 +84,8 @@ Project/Product Context:
               properties: {
                 title: { type: "string", description: "Widget title" },
                 code: { type: "string", description: "Complete HTML document with embedded JS/CSS" },
+                summary: { type: "string", description: "Brief summary shown on tile/list (optional)" },
+                instructions: { type: "string", description: "Usage instructions in HTML format shown below the widget (optional)" },
               },
               required: ["title", "code"],
             },
@@ -99,6 +101,8 @@ Project/Product Context:
               properties: {
                 title: { type: "string", description: "Exact title of the existing widget to update" },
                 code: { type: "string", description: "Updated complete HTML document with embedded JS/CSS" },
+                summary: { type: "string", description: "Updated brief summary (optional)" },
+                instructions: { type: "string", description: "Updated usage instructions in HTML format (optional)" },
               },
               required: ["title", "code"],
             },
