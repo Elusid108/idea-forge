@@ -13,8 +13,8 @@ serve(async (req) => {
     const body = await req.json();
     const { mode, chat_history, context, answer, question } = body;
 
-    if (!mode || !["generate_question", "submit_answer", "forge_playbook"].includes(mode)) {
-      return new Response(JSON.stringify({ error: "mode must be 'generate_question', 'submit_answer', or 'forge_playbook'" }), {
+    if (!mode || !["generate_question", "submit_answer", "forge_playbook", "assistant"].includes(mode)) {
+      return new Response(JSON.stringify({ error: "mode must be 'generate_question', 'submit_answer', 'forge_playbook', or 'assistant'" }), {
         status: 400,
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
@@ -35,6 +35,56 @@ Project/Product Context:
 - Execution Strategy: ${ctx.execution_strategy || "N/A"}
 - Has GitHub Repo: ${ctx.has_github ? "Yes" : "No"}
 - General Notes: ${ctx.general_notes || "N/A"}`;
+
+    // --- assistant mode ---
+    if (mode === "assistant") {
+      const systemPrompt = `You are a Campaign Assistant for a Go-To-Market strategy. You help the user understand their campaign, suggest improvements, and answer questions about launching their product.
+
+${projectContext}
+
+Campaign Playbook Sections:
+- IP Strategy: ${ctx.ip_strategy || "N/A"}
+- Monetization Plan: ${ctx.monetization_plan || "N/A"}
+- Marketing Plan: ${ctx.marketing_plan || "N/A"}
+- Operations Plan: ${ctx.operations_plan || "N/A"}
+- Current Status: ${ctx.status || "N/A"}
+- Tasks: ${ctx.tasks || "None"}
+
+Be conversational, helpful, and specific. Reference the user's actual campaign data when answering. Use markdown formatting for readability.`;
+
+      const messages: any[] = [
+        { role: "system", content: systemPrompt },
+        ...(chat_history || []).map((m: any) => ({ role: m.role, content: m.content })),
+      ];
+
+      const response = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${LOVABLE_API_KEY}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          model: "google/gemini-3-flash-preview",
+          messages,
+          max_tokens: 4000,
+        }),
+      });
+
+      if (!response.ok) {
+        const status = response.status;
+        const text = await response.text();
+        console.error("AI gateway error:", status, text);
+        if (status === 429) throw new Error("Rate limit exceeded. Try again shortly.");
+        if (status === 402) throw new Error("AI credits exhausted.");
+        throw new Error(`AI gateway returned ${status}`);
+      }
+
+      const data = await response.json();
+      const message = data.choices?.[0]?.message?.content || "I'm not sure how to help with that.";
+      return new Response(JSON.stringify({ message }), {
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
 
     // --- forge_playbook mode ---
     if (mode === "forge_playbook") {
