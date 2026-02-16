@@ -1,141 +1,107 @@
-# Icon Alignment, Status Badge Removal, Mobile Sidebar, and Widget Resources
 
-## 1. Fix Icon + Badge Alignment on Tiles (All 4 Dashboards)
+# Widget Enhancement, Campaign Assistant Welcome, and Version Update
 
-Currently the CardHeader uses `justify-between`, which spaces icon and badges apart. The user wants the icon immediately left of the category badge, both left-aligned.
+## Data Storage Strategy for Widgets
 
-**Files: Ideas.tsx, Brainstorms.tsx, Projects.tsx, Campaigns.tsx**
+Widgets need to store 3 pieces of data: **summary**, **description/instructions** (rich text), and **code**. The DB columns available are `title`, `url`, `description`, and `thumbnail_url`.
 
-Change the CardHeader's inner div from:
-
-```
-<div className="flex items-start justify-between gap-2">
-  <Icon /> <Badge>Category</Badge> <Badge>Status</Badge>
-</div>
-```
-
-To:
-
-```
-<div className="flex items-center gap-2">
-  <Icon /> <Badge>Category</Badge>
-</div>
-```
-
-This left-aligns both the icon and category badge together.
-
----
-
-## 2. Remove Redundant Status Badges from Tiles/Kanban (Brainstorms + Projects)
-
-Since group headers already show the status (e.g., "ACTIVE", "PLANNING"), the status badge on each card is redundant.
-
-- **Brainstorms**: Remove the `statusBadge` Badge from `renderCard` (line 143).
-- **Projects**: Remove the `statusLabels[effectiveStatus]` Badge from `renderProjectCard` (line 145).
-- **Ideas**: Keep the "Brainstorming" badge since it provides additional context beyond the group.
-- **Campaigns**: Already removed in prior work for kanban view.
-
----
-
-## 3. Mobile Sidebar Auto-Close on Navigation
-
-When in mobile view, clicking a sidebar link should close the sidebar so the user can see the page.
-
-**File: `src/components/AppSidebar.tsx**`
-
-- Import `useSidebar` from `@/components/ui/sidebar`.
-- Get `setOpenMobile` and `isMobile` from the hook.
-- Wrap navigation actions (both section links and item buttons) to call `setOpenMobile(false)` when `isMobile` is true after navigating.
-- For the `NavLink` components, add an `onClick` handler that closes the sidebar on mobile.
-- For the nested item buttons, add the same close behavior in their `onClick`.
-
----
-
-## 4. Widget Resource Type (Projects + Campaigns)
-
-Add a new reference type "widget" -- a mini JS/HTML web app that runs in an iframe popup.
-
-### 4a. Database Changes
-
-No schema migration needed. The `project_references` and `campaign_references` tables use a `type` text column. We just store `"widget"` as the type value. The `description` field will hold the HTML/JS code, and `title` holds the widget name.
-
-### 4b. Update Reference Type Constants
-
-**Files: ProjectWorkspace.tsx, CampaignWorkspace.tsx**
-
-- Add `"widget"` to `RefType`: `type RefType = "link" | "image" | "video" | "note" | "file" | "widget";`
-- Add to `REF_TYPE_ORDER`: `["note", "link", "image", "video", "file", "widget"]`
-- Add to `REF_ICONS`: `widget: Code` (import `Code` from lucide-react)
-- Add to `REF_ICON_COLORS`: `widget: "text-cyan-400"`
-- Add to `REF_TYPE_LABELS`: `widget: "Widgets"`
-
-### 4c. Widget Add/Edit Dialog
-
-When `addRefType === "widget"`:
-
-- Show a `Title` input
-- Show a large code editor area (using `<Textarea>` with monospace font) for the HTML/JS code
-- No URL or file upload needed
-
-When editing a widget (pencil icon), reopen the same code editor dialog pre-filled with existing code.
-
-### 4d. Widget Viewer (ReferenceViewer)
-
-**File: `src/components/ReferenceViewer.tsx**`
-
-Add a new case for `type === "widget"`:
-
-- Render a Dialog with an `<iframe>` that loads the widget code via `srcdoc`
-- The iframe uses `sandbox="allow-scripts"` for security
-- Full-width dialog with reasonable height (e.g., 70vh)
-
-### 4e. Widget Click Handler
-
-In `handleRefClick`:
-
-- When `ref.type === "widget"`, open the viewer (same as note/image/video)
-
-### 4f. AI Assistant Integration
-
-**Files: `supabase/functions/project-chat/index.ts`, `supabase/functions/campaign-chat/index.ts**`
-
-Add a new tool `create_widget` to the assistant:
-
+**Approach**: Store widget data as JSON in the `description` field:
 ```json
-{
-  "name": "create_widget",
-  "description": "Create a widget (mini web app) as a resource. The code should be a complete HTML document with embedded JS/CSS.",
-  "parameters": {
-    "type": "object",
-    "properties": {
-      "title": { "type": "string" },
-      "code": { "type": "string", "description": "Complete HTML document with embedded JS/CSS" }
-    },
-    "required": ["title", "code"]
-  }
-}
+{ "code": "<html>...</html>", "summary": "Short summary text", "instructions": "<p>Rich text instructions...</p>" }
 ```
 
-Handle the `create_widget` action in the frontend's `handleChatSubmit` function by inserting a reference with `type: "widget"`, `title`, and `description: code`.
+Helper functions `encodeWidgetData(code, summary, instructions)` and `parseWidgetData(description)` will handle serialization. Backward compatibility: if `description` is not valid JSON or lacks a `code` key, treat the entire string as raw code (legacy widgets).
 
-Also add a `update_widget` tool for modifying existing widgets by title.  
-  
-Update assistants welcome message to mention the ability to create wedgets. Include a metric to imperial and vice versa converter and a 10 digit calculator as two example widgets the user can add from the add widget popup. Clicking either of these buttons will load the code into the window.
+---
+
+## 1. Widget Add/Edit Dialog Changes
+
+**Files: `ProjectWorkspace.tsx`, `CampaignWorkspace.tsx`**
+
+Update `refForm` state from `{ title, url, description }` to `{ title, url, description, widgetCode, widgetSummary, widgetInstructions }` (add 3 new fields).
+
+**Add Widget dialog**: After the Title input, add:
+- **Summary** input (single-line `Input`, placeholder "Brief summary shown on tile/list")
+- **Description** input (rich text via `RichTextNoteEditor`, placeholder "Instructions or description shown below the widget")
+- **Code** textarea (existing monospace `Textarea`)
+
+**Edit Widget dialog**: Same 3 fields pre-populated from parsed JSON.
+
+**On save**: Encode summary + instructions + code into JSON, store in `description` field.
+
+---
+
+## 2. Widget Tile/List Display
+
+**Files: `ProjectWorkspace.tsx`, `CampaignWorkspace.tsx`**
+
+When rendering widget references in tile or list view, parse the JSON `description` and show the `summary` field instead of the raw code. For tiles: `previewText = parsedWidget.summary`. For list: same truncated summary.
+
+---
+
+## 3. Widget Viewer (ReferenceViewer.tsx)
+
+**File: `ReferenceViewer.tsx`**
+
+Update the widget viewer:
+- Parse JSON from `reference.description` to extract `code` and `instructions`
+- Make the dialog **resizable** using `react-resizable-panels` (already installed): a vertical `ResizablePanelGroup` with the iframe in the top panel and the instructions in the bottom panel
+- The iframe uses `srcDoc={code}` and fills its panel completely (`w-full h-full`)
+- The instructions panel renders rich text HTML with vertical scrolling
+- The dialog uses `sm:max-w-4xl` and a taller default height
+
+---
+
+## 4. Default Widget Templates (Calculator + Unit Converter)
+
+**Files: `ProjectWorkspace.tsx`, `CampaignWorkspace.tsx`**
+
+Update the template button `onClick` handlers to also populate summary and instructions:
+
+**Unit Converter**:
+- Summary: "Convert between metric and imperial units for length, weight, and temperature."
+- Instructions: Rich text HTML explaining how to select a conversion type, enter a value, and toggle direction.
+
+**Calculator**:
+- Summary: "A standard 10-digit calculator with basic arithmetic operations."
+- Instructions: Rich text HTML explaining button layout, operations, parentheses, and backspace.
+
+---
+
+## 5. Campaign Assistant Welcome Message
+
+**File: `CampaignWorkspace.tsx`**
+
+Update the welcome message to match the Project Assistant format and include all capabilities:
+
+```
+"I'm your Campaign Assistant. I can help you:
+
+- **Analyze and refine** your GTM strategy and playbook sections
+- **Create and manage tasks** across all 5 pipeline phases
+- **Generate research notes** with action plans, summaries, and recommendations
+- **Create widgets** -- mini web apps (calculators, converters, trackers, etc.)
+- **Read and update widgets** by title
+
+What would you like to work on?"
+```
+
+---
+
+## 6. AI Tool Updates (Edge Functions)
+
+**Files: `supabase/functions/project-chat/index.ts`, `supabase/functions/campaign-chat/index.ts`**
+
+Update `create_widget` and `update_widget` tools to accept optional `summary` and `instructions` parameters alongside `code`. The edge functions will encode these into JSON format before returning the action to the frontend.
 
 ---
 
 ## Files Changed Summary
 
-
-| File                                        | Changes                                                                              |
-| ------------------------------------------- | ------------------------------------------------------------------------------------ |
-| `src/pages/Ideas.tsx`                       | Left-align icon + category badge in card header                                      |
-| `src/pages/Brainstorms.tsx`                 | Left-align icon + category badge, remove status badge from cards                     |
-| `src/pages/Projects.tsx`                    | Left-align icon + category badge, remove status badge from cards                     |
-| `src/pages/Campaigns.tsx`                   | Left-align icon + category badge                                                     |
-| `src/components/AppSidebar.tsx`             | Auto-close sidebar on mobile when navigating                                         |
-| `src/pages/ProjectWorkspace.tsx`            | Add widget type to refs, widget add/edit UI, widget click handler, AI action handler |
-| `src/pages/CampaignWorkspace.tsx`           | Add widget type to refs, widget add/edit UI, widget click handler, AI action handler |
-| `src/components/ReferenceViewer.tsx`        | Add widget viewer (iframe with srcdoc)                                               |
-| `supabase/functions/project-chat/index.ts`  | Add create_widget and update_widget tools                                            |
-| `supabase/functions/campaign-chat/index.ts` | Add create_widget and update_widget tools                                            |
+| File | Changes |
+|---|---|
+| `src/pages/ProjectWorkspace.tsx` | Widget form fields (summary, description, code), JSON encode/decode, template updates, tile/list display |
+| `src/pages/CampaignWorkspace.tsx` | Same widget changes, updated welcome message |
+| `src/components/ReferenceViewer.tsx` | Resizable widget viewer with iframe + rich text instructions panel |
+| `supabase/functions/project-chat/index.ts` | Widget tool parameter updates |
+| `supabase/functions/campaign-chat/index.ts` | Widget tool parameter updates |
