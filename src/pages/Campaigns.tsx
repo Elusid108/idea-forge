@@ -106,6 +106,7 @@ export default function CampaignsPage() {
       >
         <CardHeader className="px-4 pt-3 pb-1">
           <div className="flex items-start justify-between gap-2">
+            <Megaphone className="h-4 w-4 text-orange-400 shrink-0 mt-0.5" />
             <Badge className={`text-xs border ${catClass}`}>{c.category || "Uncategorized"}</Badge>
             {viewMode === "list" && (
               <Badge variant="outline" className="text-xs">{statusLabels[c.status] || c.status}</Badge>
@@ -140,9 +141,10 @@ export default function CampaignsPage() {
         onClick={() => navigate(`/campaigns/${c.id}`)}
         className="flex items-center gap-3 px-3 py-2 rounded-lg border border-border/50 bg-card/50 cursor-pointer hover:border-primary/30 hover:bg-card/80 transition-all"
       >
+        <Megaphone className="h-4 w-4 text-orange-400 shrink-0" />
         <Badge className={`text-[10px] border ${catClass} shrink-0`}>{c.category || "Uncategorized"}</Badge>
         <span className="text-sm font-medium truncate min-w-0 max-w-[200px]">{c.title}</span>
-        <span className="text-xs text-muted-foreground truncate min-w-0 flex-1 hidden sm:block">{statusLabels[c.status] || c.status}</span>
+        <span className="text-xs text-muted-foreground truncate overflow-hidden min-w-0 flex-1 hidden sm:block">{statusLabels[c.status] || c.status}</span>
         {tags.length > 0 && (
           <div className="hidden md:flex gap-1 shrink-0">
             {tags.slice(0, 2).map((t: string) => (
@@ -170,7 +172,10 @@ export default function CampaignsPage() {
     <div className="space-y-6">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div>
-          <h1 className="text-3xl font-bold">Campaigns</h1>
+          <div className="flex items-center gap-2">
+            <Megaphone className="h-8 w-8 text-orange-400" />
+            <h1 className="text-3xl font-bold">Campaigns</h1>
+          </div>
           <p className="text-muted-foreground">Go-to-market pipeline</p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
@@ -214,14 +219,18 @@ export default function CampaignsPage() {
         <div className="grid grid-cols-1 gap-4 md:grid-cols-5">
           {statusColumns.map((status) => {
             const colItems = sortItems(campaigns.filter((c: any) => c.status === status));
+            const isCollapsed = collapsedGroups.has(status);
             return (
-              <div key={status} className="space-y-3">
-                <h3 className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">
-                  {statusLabels[status]}
-                  <Badge variant="secondary" className="ml-2">{colItems.length}</Badge>
-                </h3>
-                {colItems.map(renderCampaignCard)}
-              </div>
+              <Collapsible key={status} open={!isCollapsed} onOpenChange={() => toggleGroupCollapse(status)}>
+                <CollapsibleTrigger className="flex items-center gap-2 w-full text-left py-1 hover:text-primary transition-colors">
+                  {isCollapsed ? <ChevronRight className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
+                  <span className="text-sm font-semibold uppercase tracking-wider">{statusLabels[status]}</span>
+                  <Badge variant="secondary" className="text-[10px] ml-1">{colItems.length}</Badge>
+                </CollapsibleTrigger>
+                <CollapsibleContent className="mt-2 space-y-3">
+                  {colItems.map(renderCampaignCard)}
+                </CollapsibleContent>
+              </Collapsible>
             );
           })}
         </div>

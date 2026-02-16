@@ -44,8 +44,11 @@ export default function ProjectsPage() {
   const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(() => {
     try {
       const saved = localStorage.getItem("projects-collapsed-groups");
-      return saved ? new Set(JSON.parse(saved)) : new Set();
-    } catch { return new Set(); }
+      if (saved) return new Set(JSON.parse(saved));
+      const defaults = new Set(["launched"]);
+      localStorage.setItem("projects-collapsed-groups", JSON.stringify([...defaults]));
+      return defaults;
+    } catch { return new Set(["launched"]); }
   });
 
   const handleSortChange = (val: string) => {
@@ -133,6 +136,7 @@ export default function ProjectsPage() {
       >
         <CardHeader className="px-4 pt-3 pb-1">
           <div className="flex items-start justify-between gap-2">
+            <Wrench className="h-4 w-4 text-blue-400 shrink-0 mt-0.5" />
             {category ? (
               <Badge className={`text-xs border ${categoryClass}`}>{category}</Badge>
             ) : (
@@ -174,9 +178,10 @@ export default function ProjectsPage() {
         onClick={() => navigate(`/projects/${p.id}`)}
         className="flex items-center gap-3 px-3 py-2 rounded-lg border border-border/50 bg-card/50 cursor-pointer hover:border-primary/30 hover:bg-card/80 transition-all"
       >
+        <Wrench className="h-4 w-4 text-blue-400 shrink-0" />
         <Badge className={`text-[10px] border ${categoryClass} shrink-0`}>{category || "Uncategorized"}</Badge>
         <span className="text-sm font-medium truncate min-w-0 max-w-[200px]">{p.name}</span>
-        <span className="text-xs text-muted-foreground truncate min-w-0 flex-1 hidden sm:block">{descPreview?.slice(0, 80)}</span>
+        <span className="text-xs text-muted-foreground truncate overflow-hidden min-w-0 flex-1 hidden sm:block">{(descPreview || "").slice(0, 80)}</span>
         {tags.length > 0 && (
           <div className="hidden md:flex gap-1 shrink-0">
             {tags.slice(0, 2).map((t: string) => (
@@ -204,7 +209,10 @@ export default function ProjectsPage() {
     <div className="space-y-6">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div>
-          <h1 className="text-3xl font-bold">Projects</h1>
+          <div className="flex items-center gap-2">
+            <Wrench className="h-8 w-8 text-blue-400" />
+            <h1 className="text-3xl font-bold">Projects</h1>
+          </div>
           <p className="text-muted-foreground">Manage your active builds</p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
@@ -251,14 +259,18 @@ export default function ProjectsPage() {
         <div className="grid grid-cols-1 gap-4 md:grid-cols-5">
           {statusColumns.map((status) => {
             const colItems = sortItems(projects.filter((p) => getEffectiveStatus(p) === status));
+            const isCollapsed = collapsedGroups.has(status);
             return (
-              <div key={status} className="space-y-3">
-                <h3 className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">
-                  {statusLabels[status]}
-                  <Badge variant="secondary" className="ml-2">{colItems.length}</Badge>
-                </h3>
-                {colItems.map(renderProjectCard)}
-              </div>
+              <Collapsible key={status} open={!isCollapsed} onOpenChange={() => toggleGroupCollapse(status)}>
+                <CollapsibleTrigger className="flex items-center gap-2 w-full text-left py-1 hover:text-primary transition-colors">
+                  {isCollapsed ? <ChevronRight className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
+                  <span className="text-sm font-semibold uppercase tracking-wider">{statusLabels[status]}</span>
+                  <Badge variant="secondary" className="text-[10px] ml-1">{colItems.length}</Badge>
+                </CollapsibleTrigger>
+                <CollapsibleContent className="mt-2 space-y-3">
+                  {colItems.map(renderProjectCard)}
+                </CollapsibleContent>
+              </Collapsible>
             );
           })}
         </div>
